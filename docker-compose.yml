@@ -46,6 +46,7 @@ services:
       IMAGES_PER_NIGHT: ${IMAGES_PER_NIGHT:?set IMAGES_PER_NIGHT in .env}
       FEED_KEEP_TOP: ${FEED_KEEP_TOP:?set FEED_KEEP_TOP in .env}       # best N per night reach the feed
       FEED_KEEP_DAYS: ${FEED_KEEP_DAYS:-14}
+      VIDEOS_PER_NIGHT: ${VIDEOS_PER_NIGHT:-0}           # Wan 2.2 clips after each night's images
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data

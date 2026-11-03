@@ -81,6 +81,10 @@ def connect(path: Path) -> sqlite3.Connection:
     if "embedding" not in cols:   # added with the feed
         conn.execute("ALTER TABLE generations ADD COLUMN embedding BLOB")
         conn.execute("ALTER TABLE generations ADD COLUMN thumb TEXT")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(generations)")}
+    if "kind" not in cols:        # added with video
+        conn.execute("ALTER TABLE generations ADD COLUMN kind TEXT NOT NULL DEFAULT 'image'")   # image | video
+        conn.execute("ALTER TABLE generations ADD COLUMN source_generation INTEGER")           # image a video animates
     cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
     if "progress" not in cols:    # added with the dashboard
         conn.execute("ALTER TABLE runs ADD COLUMN progress TEXT")

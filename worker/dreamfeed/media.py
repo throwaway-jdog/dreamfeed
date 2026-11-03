@@ -20,9 +20,9 @@ def frame_count(duration: float) -> int:
     return max(3, min(24, round(duration / 10)))
 
 
-def frame_times(duration: float) -> list[float]:
+def frame_times(duration: float, minimum: int = 3) -> list[float]:
     """Evenly spaced, centred in equal slices, so the very start and end are skipped."""
-    n = frame_count(duration)
+    n = max(minimum, frame_count(duration))
     return [duration * (i + 0.5) / n for i in range(n)]
 
 
@@ -61,19 +61,19 @@ def _rgb(img: Image.Image) -> Image.Image:
     return img.convert("RGB")
 
 
-def load_frames(path: Path) -> list[Image.Image]:
+def load_frames(path: Path, min_frames: int = 3) -> list[Image.Image]:
     try:
         if kind(path) == "image":
             with Image.open(path) as img:
                 return [_rgb(img)]
-        return _video_frames(path)
+        return _video_frames(path, min_frames)
     except Unreadable:
         raise
     except Exception as e:
         raise Unreadable(str(e)) from e
 
 
-def _video_frames(path: Path) -> list[Image.Image]:
+def _video_frames(path: Path, min_frames: int = 3) -> list[Image.Image]:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=nw=1:nk=1", str(path)],
@@ -85,7 +85,7 @@ def _video_frames(path: Path) -> list[Image.Image]:
         raise Unreadable(f"no duration: {probe.stderr.strip()[:200]}")
     frames = []
     scale = (f"scale='if(gt(iw,ih),min({FRAME_MAX_SIDE},iw),-2)':'if(gt(iw,ih),-2,min({FRAME_MAX_SIDE},ih))'")
-    for at in frame_times(duration):
+    for at in frame_times(duration, min_frames):
         out = subprocess.run(
             ["ffmpeg", "-v", "error", "-ss", f"{at:.2f}", "-i", str(path), "-vf", scale,
              "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],

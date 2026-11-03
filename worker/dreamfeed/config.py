@@ -68,5 +68,7 @@ class GenConfig:
             "dreamfeed: FEED_KEEP_TOP must be set")
         # Every enabled medium gets at least this share of the night, so it can come back.
         self.min_share = opt_float("MIN_MEDIUM_SHARE", 0.1)
+        # Wan 2.2 clips made after each night's images (0 = off). About 2.5 minutes each.
+        self.videos_per_night = int(opt_float("VIDEOS_PER_NIGHT", 0))
         # Feed images you haven't liked are deleted after this many days.
         self.feed_keep_days = opt_float("FEED_KEEP_DAYS", 14)

@@ -10,6 +10,7 @@ POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/scan          ask the sync container to fetch bookmarks now
 POST /api/generate      {"images": N, "keep": K, "mediums": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
+POST /api/animate       {"id": N} or {"count": N} make Wan 2.2 clips from feed images
 POST /api/reset         {"confirm": "start over"} forget all bookmarks/tags, re-download and re-tag
 (POSTs are JSON only.)
 """
@@ -46,7 +47,7 @@ MAX_IMAGES = 400
 PORT = 8000
 PAGE_SIZE = 30
 MEDIUMS = ("photo", "anime", "furry")
-CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+CSP = ("default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; "
        "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -67,8 +68,9 @@ def db() -> sqlite3.Connection:
 
 
 def item(row) -> dict:
-    return {"id": row["id"], "night": row["night"], "medium": row["medium"],
-            "score": round(row["score"] or 0, 3), "liked": row["action"] == "like"}
+    return {"id": row["id"], "night": row["night"], "medium": row["medium"], "kind": row["kind"],
+            "score": round(row["score"] or 0, 3), "liked": row["action"] == "like",
+            "animated": bool(row["animated"])}
 
 
 def feed(view: str, medium: str, offset: int) -> dict:
@@ -82,7 +84,9 @@ def feed(view: str, medium: str, offset: int) -> dict:
     else:
         where.append("g.status = 'feed' AND (f.action IS NULL OR f.action = 'like')")
         order = "g.night DESC, g.score DESC"
-    sql = (f"SELECT g.id, g.night, g.medium, g.score, f.action FROM generations g"
+    sql = (f"SELECT g.id, g.night, g.medium, g.score, g.kind, f.action,"
+           f" EXISTS(SELECT 1 FROM generations v WHERE v.source_generation = g.id AND v.kind = 'video'"
+           f"        AND v.status IN ('queued', 'generated', 'feed')) AS animated FROM generations g"
            f" LEFT JOIN feedback f ON f.generation_id = g.id WHERE {' AND '.join(where)}"
            f" ORDER BY {order} LIMIT ? OFFSET ?")
     try:
@@ -231,6 +235,30 @@ def request_reset(req: dict) -> dict:
     return {"job": jid}
 
 
+def request_animation(req: dict) -> dict:
+    with db() as conn:
+        busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
+        if busy >= 3:
+            raise ValueError("three requests are already waiting; let one finish first")
+        if "id" in req:
+            gid = int(req["id"])
+            row = conn.execute("SELECT kind, status FROM generations WHERE id = ?", (gid,)).fetchone()
+            if not row or row["kind"] != "image" or row["status"] != "feed":
+                raise LookupError("only images in the feed can be animated")
+            dup = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
+                               " AND params LIKE ?", (f'%"ids": [{gid}]%',)).fetchone()[0]
+            if dup:
+                raise ValueError("this image is already being animated")
+            params = {"kind": "animate", "ids": [gid]}
+        else:
+            count = int(req.get("count", 0))
+            if not 1 <= count <= 50:
+                raise ValueError("count must be between 1 and 50")
+            params = {"kind": "animate", "count": count}
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(params),)).lastrowid
+    return {"job": jid}
+
+
 def cancel(req: dict) -> dict:
     with db() as conn:
         if "job" in req:
@@ -254,6 +282,48 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def send_file(self, file: Path) -> None:
+        """Images whole; videos also in byte ranges, which phones need to play them."""
+        ctype = {".png": "image/png", ".mp4": "video/mp4"}.get(file.suffix, "image/jpeg")
+        size = file.stat().st_size
+        start, end = 0, size - 1
+        rng = self.headers.get("Range", "")
+        partial = rng.startswith("bytes=") and "," not in rng
+        if partial:
+            a, _, b = rng[6:].partition("-")
+            try:
+                if a:
+                    start, end = int(a), min(int(b) if b else size - 1, size - 1)
+                else:
+                    start = max(0, size - int(b))
+            except ValueError:
+                partial = False
+            if partial and start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "private, max-age=604800, immutable")
+        self.send_header("Content-Security-Policy", CSP)
+        for k, v in formlogin.SECURITY_HEADERS:
+            self.send_header(k, v)
+        self.end_headers()
+        with file.open("rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining:
+                chunk = f.read(min(1 << 20, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def query(self) -> dict:
         from urllib.parse import parse_qs, urlsplit
@@ -281,8 +351,7 @@ class Handler(BaseHTTPRequestHandler):
                 file = image_path(int(path[len(prefix):]), thumb)
                 if not file:
                     return self.send(404, {"error": "image not found"})
-                ctype = "image/png" if file.suffix == ".png" else "image/jpeg"
-                return self.send(200, file.read_bytes(), ctype, "private, max-age=604800, immutable")
+                return self.send_file(file)
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -290,7 +359,8 @@ class Handler(BaseHTTPRequestHandler):
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
         actions = {"/api/feedback": self.feedback, "/api/scan": lambda r: request_scan(),
-                   "/api/generate": queue_generation, "/api/cancel": cancel, "/api/reset": request_reset}
+                   "/api/generate": queue_generation, "/api/cancel": cancel, "/api/reset": request_reset,
+                   "/api/animate": request_animation}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

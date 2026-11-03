@@ -215,6 +215,10 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
         comfy.stop()
 
     stats = check_and_rank(cfg, conn, night, keep)
+    if not cancelled and not ignore_window and gen.videos_per_night:
+        sources = pick_sources(conn, gen.videos_per_night, night)
+        if sources:
+            stats["videos"] = animate(cfg, conn, night, sources, until_window_closes=gen.window)
     status = "cancelled" if cancelled else "done"
     _finish(conn, night, status, stats)
     print(f"generate: night {night} {status} {stats}", flush=True)
@@ -227,8 +231,8 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
     from .vision import Vision
 
     out_dir = cfg.data_dir / "generated"
-    rows = conn.execute("SELECT id, medium, file FROM generations WHERE night = ? AND status = 'generated'",
-                        (night,)).fetchall()
+    rows = conn.execute("SELECT id, medium, file FROM generations WHERE night = ? AND status = 'generated'"
+                        " AND kind = 'image'", (night,)).fetchall()
     if rows:
         _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
@@ -354,6 +358,8 @@ def run_job(cfg: Config, job_id: int) -> None:
     params = json.loads(row[0])
     if params.get("kind") == "reset":
         return reset_profile(cfg, conn, job_id)
+    if params.get("kind") == "animate":
+        return animate_job(cfg, conn, job_id, params)
     night = f"manual-{dt.datetime.now():%Y%m%d-%H%M%S}"
     with conn:
         conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
@@ -365,6 +371,139 @@ def run_job(cfg: Config, job_id: int) -> None:
         status, message = "failed", str(e)[:300]
         with conn:
             conn.execute("UPDATE runs SET status = 'failed', finished_at = datetime('now') WHERE night = ?", (night,))
+        raise
+    finally:
+        with conn:
+            conn.execute("UPDATE jobs SET status = ?, message = ?, finished_at = datetime('now') WHERE id = ?",
+                         (status, message, job_id))
+
+
+MOTION = {
+    "photo": "natural realistic motion, subtle body movement, breathing, hair and fabric moving, steady camera",
+    "anime": "smooth anime animation, natural motion, subtle body movement, hair and clothes moving, steady camera",
+    "furry": "smooth animation, natural motion, subtle body movement, fur, hair and clothes moving, steady camera",
+}
+VIDEO_CHECK_FRAMES = 8   # every generated clip is checked on at least this many frames
+
+
+def pick_sources(conn, count: int, night: str | None = None) -> list[int]:
+    """Images to animate: recent likes first, then the best of the given night (or of
+    everything still in the feed), skipping images that already have a clip."""
+    have = "SELECT source_generation FROM generations WHERE kind = 'video' AND source_generation IS NOT NULL"
+    liked = [r[0] for r in conn.execute(
+        f"SELECT g.id FROM feedback f JOIN generations g ON g.id = f.generation_id WHERE f.action = 'like'"
+        f" AND g.kind = 'image' AND g.status = 'feed' AND g.id NOT IN ({have}) ORDER BY f.at DESC")]
+    where, args = ("AND g.night = ?", (night,)) if night else ("", ())
+    best = [r[0] for r in conn.execute(
+        f"SELECT g.id FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id WHERE g.kind = 'image'"
+        f" AND g.status = 'feed' AND (f.action IS NULL OR f.action = 'like') AND g.id NOT IN ({have}) {where}"
+        f" ORDER BY g.score DESC", args)]
+    out = []
+    for gid in liked + best:
+        if gid not in out:
+            out.append(gid)
+    return out[:count]
+
+
+def animate(cfg: Config, conn, night: str, sources: list[int],
+            until_window_closes: tuple[int, int] | None = None) -> dict:
+    """Turn feed images into ~5 s Wan 2.2 clips, check every clip, put the passing ones in the feed."""
+    from .comfy import Comfy
+    gen = cfg.generation()
+    out_dir = cfg.data_dir / "generated"
+    comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
+    rng = random.Random()
+    _progress(conn, night, "animating", 0, len(sources))
+    made = 0
+    try:
+        for n, src in enumerate(sources, 1):
+            if until_window_closes and night_key(dt.datetime.now(), until_window_closes) != night:
+                print("animate: window closed, stopping", flush=True)
+                break
+            if _cancel_requested(conn, night):
+                break
+            row = conn.execute("SELECT medium, prompt, file FROM generations WHERE id = ? AND kind = 'image'"
+                               " AND status = 'feed'", (src,)).fetchone()
+            if not row or not (out_dir / row[2]).is_file():
+                continue
+            medium, prompt, file = row
+            motion = f"{prompt}, {MOTION[medium]}"
+            seed = rng.randrange(2 ** 32)
+            with conn:
+                gid = conn.execute(
+                    "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, kind, status)"
+                    " VALUES (?,?,?,?,?,?, 'video', 'queued')",
+                    (night, medium, "wan2.2-i2v", motion, seed, src)).lastrowid
+            try:
+                path = comfy.img2vid("wan", out_dir / file, medium, motion, seed, night, f"video-{gid}")
+            except ValueError as e:   # safety.prompts refused it
+                _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
+                continue
+            finally:
+                comfy.stop()   # fresh ComfyUI per clip, so Wan's models don't pile up in RAM
+            _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)))
+            made += 1
+            _progress(conn, night, "animating", n, len(sources))
+    finally:
+        comfy.stop()
+    return check_videos(cfg, conn, night)
+
+
+def check_videos(cfg: Config, conn, night: str) -> dict:
+    from . import media
+    from .tagging import drop_reason
+    from .vision import Vision
+    out_dir = cfg.data_dir / "generated"
+    rows = conn.execute("SELECT g.id, g.medium, g.file, s.score FROM generations g"
+                        " LEFT JOIN generations s ON s.id = g.source_generation"
+                        " WHERE g.night = ? AND g.kind = 'video' AND g.status = 'generated'", (night,)).fetchall()
+    if rows:
+        _progress(conn, night, "checking", 0, len(rows))
+        vision = Vision(cfg.models_dir)
+        for n, (gid, medium, file, score) in enumerate(rows, 1):
+            path = out_dir / file
+            try:
+                frames = media.load_frames(path, VIDEO_CHECK_FRAMES)
+            except media.Unreadable as e:
+                path.unlink(missing_ok=True)
+                _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
+                continue
+            a = vision.analyze(frames)
+            reason = drop_reason(a, medium, frames, cfg)
+            if reason:
+                path.unlink(missing_ok=True)
+                _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
+                continue
+            poster = path.with_name(path.stem + ".thumb.jpg")
+            first = frames[0].copy()
+            first.thumbnail((THUMB_WIDTH, THUMB_WIDTH * 2))
+            first.save(poster, quality=78, optimize=True)
+            _set(conn, gid, status="feed", score=score or 0, thumb=str(poster.relative_to(out_dir)),
+                 embedding=a.embedding.tobytes())
+            _progress(conn, night, "checking", n, len(rows))
+    return dict(conn.execute("SELECT status, count(*) FROM generations WHERE night = ? AND kind = 'video'"
+                             " GROUP BY status", (night,)).fetchall())
+
+
+def animate_job(cfg: Config, conn, job_id: int, params: dict) -> None:
+    """Dashboard / viewer request: animate given images, or the best N not yet animated."""
+    night = f"video-{dt.datetime.now():%Y%m%d-%H%M%S}"
+    with conn:
+        conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
+        conn.execute("INSERT INTO runs(night, status, attempts, started_at) VALUES (?, 'running', 1, datetime('now'))",
+                     (night,))
+    status, message = "done", None
+    try:
+        sources = [int(i) for i in params.get("ids") or []] or pick_sources(conn, int(params.get("count", 0)))
+        stats = animate(cfg, conn, night, sources)
+        if _cancel_requested(conn, night):
+            status = "cancelled"
+        _finish(conn, night, status, stats)
+    except Exception as e:
+        status, message = "failed", str(e)[:300]
+        with conn:
+            conn.execute("UPDATE runs SET status = 'failed', progress = NULL, finished_at = datetime('now')"
+                         " WHERE night = ?", (night,))
         raise
     finally:
         with conn:
