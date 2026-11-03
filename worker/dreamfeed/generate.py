@@ -360,6 +360,9 @@ def run_job(cfg: Config, job_id: int) -> None:
     params = json.loads(row[0])
     if params.get("kind") == "animate":
         return animate_job(cfg, conn, job_id, params)
+    if params.get("kind") == "persona_draft":
+        from . import builder
+        return builder.run(cfg, conn, job_id, params)
     if params.get("kind") == "style":
         from . import styles
         return styles.run(cfg, conn, job_id, params)

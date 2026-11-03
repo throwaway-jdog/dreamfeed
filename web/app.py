@@ -12,6 +12,8 @@ GET  /api/personas/edit every persona as stored in data/personas.json, plus the 
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
 POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
 POST /api/personas/avatar  {"handle": H} new profile picture the next time they post
+POST /api/personas/draft   {"description": "..."} have the worker draft a whole persona from it
+GET  /api/personas/draft   ?job=N its progress, and the draft when ready (opened in the editor)
 GET  /api/styles        trained and in-progress style LoRAs
 POST /api/styles/train  {"name", "medium", "source", "limit", "steps"} download, check and train one
 POST /api/styles/cancel {"name": N} stop a style job
@@ -577,6 +579,40 @@ def style_list() -> dict:
     return {"styles": out, "limits": STYLE_LIMITS, "steps": STYLE_STEPS}
 
 
+MAX_DESCRIPTION = 2000
+
+
+def queue_draft(req: dict) -> dict:
+    """Have the worker draft a persona from a description (worker/dreamfeed/builder.py)."""
+    text = " ".join(str(req.get("description") or "").split())
+    if len(text) < 10:
+        raise ValueError("describe them in a few words: who they are and what they post")
+    if len(text) > MAX_DESCRIPTION:
+        raise ValueError(f"keep the description under {MAX_DESCRIPTION} characters")
+    with db() as conn:
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
+                        " AND params LIKE '%\"kind\": \"persona_draft\"%'").fetchone()[0]:
+            raise ValueError("a persona is already being drafted; one at a time")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
+                           (json.dumps({"kind": "persona_draft", "description": text}),)).lastrowid
+    return {"job": jid}
+
+
+def draft_status(job: int) -> dict:
+    with db() as conn:
+        row = conn.execute("SELECT params, status, message FROM jobs WHERE id = ?", (job,)).fetchone()
+        if not row or json.loads(row["params"]).get("kind") != "persona_draft":
+            raise LookupError("no such draft")
+        ahead = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND id < ?",
+                             (job,)).fetchone()[0]
+        night = conn.execute("SELECT count(*) FROM runs WHERE status = 'running' AND night GLOB '[0-9]*'"
+                             ).fetchone()[0]
+    out = {"status": row["status"], "message": row["message"], "ahead": ahead, "night_running": bool(night)}
+    if row["status"] == "done":
+        out["draft"] = read_json(DATA / "drafts" / f"{job}.json") or None
+    return out
+
+
 def queue_style(req: dict) -> dict:
     name = str(req.get("name", "")).strip().lower()
     medium, source = req.get("medium"), str(req.get("source", "")).strip()
@@ -705,6 +741,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, persona_config())
         if path == "/api/styles":
             return self.send(200, style_list())
+        if path == "/api/personas/draft":
+            job = self.query().get("job", "")
+            if not job.isdigit():
+                return self.send(400, {"error": "bad job"})
+            try:
+                return self.send(200, draft_status(int(job)))
+            except LookupError as e:
+                return self.send(404, {"error": str(e)})
         if path.startswith("/avatar/"):
             file = avatar_path(path[len("/avatar/"):])
             if not file:
@@ -729,7 +773,8 @@ class Handler(BaseHTTPRequestHandler):
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
                    "/api/animate": request_animation, "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
-                   "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style}
+                   "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
+                   "/api/personas/draft": queue_draft}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

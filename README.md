@@ -21,6 +21,18 @@ the worker's own rules first (blocked tags, placeholders, style medium), so a ba
 refused with a message instead of breaking the nightly run. Removing a persona takes their
 posts out of the timeline; liked posts stay in Liked.
 
+**Build one from a description**: type who they are and what they post, the way you'd
+describe a creator you follow ("Chinese femboy. Cosplays, sex with men, wears a face mask",
+or "draws and animates furry porn"). The caption model (`CAPTION_MODEL`) drafts the whole
+persona in about a minute: name, handle, bio, look or characters, kinds of post with prompts
+and captions, emoji and hashtags. It opens in the editor to check and change before you save.
+The draft is always fictional and drawn: the real account's handle and name are never reused
+(your description is kept only as the private `based_on` note), real-life creators become anime
+personas, and it goes through the same checks as any edit. Descriptions with feral or animal
+content, or anything young, are refused; blocked tags are swapped for allowed ones; voyeur and
+non-consent themes are rejected. It runs as a worker job, so during a night's run it waits for
+the run to finish.
+
 They are stored in `data/personas.json`, which is private (it describes whose posting
 styles inspired them) and is not in git; you can also edit it by hand. Each dashboard save
 keeps the previous version as `data/personas.json.bak`. The format, from
@@ -170,6 +182,7 @@ dreamfeed/
   models/    checkpoints/, loras/, tagger/, clip/  (downloads and trained styles, ~20 GB)
   data/      feed.db                               (posts, embeddings, likes; small)
              personas.json                         (private persona definitions)
+             drafts/                               (personas drafted from a description)
              lora/NAME/                            (style training images, captions, the artist's
                                                     post texts (voice.json), progress)
              generated/                            (tonight's output and the feed)

@@ -350,7 +350,14 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <h2>Personas</h2>
       <p class="note" id="p-note">Who posts in your timeline. Edits apply from their next post.</p>
       <ul class="plist" id="p-list"></ul>
-      <button class="secondary" type="button" id="p-new">Add a persona</button>
+      <div class="field" style="gap:10px;margin-top:14px">
+        <label class="field"><span>Build one from a description <small>who they are and what they post, like
+          <em>"Chinese femboy. Cosplays, sex with men, wears a face mask"</em>. You check the draft before it's added.</small></span>
+          <textarea class="in" id="p-desc" rows="3" maxlength="2000"></textarea></label>
+        <button class="primary" type="button" id="p-build">Build persona</button>
+        <p class="note" id="p-build-status" hidden></p>
+      </div>
+      <button class="secondary" type="button" id="p-new" style="margin-top:10px">Add one by hand</button>
     </div>
 
     <div class="panel" id="s-panel">
@@ -1170,6 +1177,43 @@ function renderPersonaList() {
 }
 $("p-new").onclick = () => openEditor(null);
 
+// Build from a description: the worker's text model drafts the persona; it opens in the editor.
+const DRAFT_KEY = "dreamfeed.draftJob";
+function draftNote(text) { const n = $("p-build-status"); n.hidden = !text; n.textContent = text || ""; }
+async function watchDraft(job) {
+  $("p-build").disabled = true;
+  try {
+    for (;;) {
+      const d = await api(`api/personas/draft?job=${job}`);
+      if (d.status === "done" && d.draft) {
+        draftNote(""); try { localStorage.removeItem(DRAFT_KEY); } catch {}
+        openEditor(d.draft, true); toast("Draft ready. Check it, change anything, then Save.");
+        break;
+      }
+      if (d.status === "failed" || d.status === "cancelled") {
+        draftNote(`Couldn't build it: ${d.message || d.status}`); try { localStorage.removeItem(DRAFT_KEY); } catch {}
+        break;
+      }
+      draftNote(d.status === "running" ? "Writing the persona… (about a minute)"
+        : d.night_running ? "Waiting for tonight's run to finish, then writing it."
+        : d.ahead ? `Waiting for ${d.ahead} earlier request${d.ahead > 1 ? "s" : ""} (clips, styles) to finish.`
+        : "Starting…");
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  } catch (e) { draftNote(e.message); }
+  $("p-build").disabled = false;
+}
+$("p-build").onclick = async () => {
+  const description = $("p-desc").value.trim();
+  if (description.length < 10) { draftNote("Describe them in a few words: who they are and what they post."); return; }
+  try {
+    const { job } = await api("api/personas/draft", { description });
+    try { localStorage.setItem(DRAFT_KEY, String(job)); } catch {}
+    $("p-desc").value = ""; watchDraft(job);
+  } catch (e) { draftNote(e.message); }
+};
+try { const j = localStorage.getItem(DRAFT_KEY); if (j && /^\d+$/.test(j)) watchDraft(j); } catch {}
+
 function setPressed(id, on, yes, no) { const b = $(id); b.setAttribute("aria-pressed", String(on)); b.textContent = on ? yes : no; }
 function renderMedium() {
   document.querySelectorAll("#e-medium button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.m === ed.medium)));
@@ -1211,8 +1255,8 @@ $("e-add-kind").onclick = () => { addKind({ kind: "", rating: "explicit", weight
 const NEW_PERSONA = { medium: "anime", weight: 1, video_share: 0.2, avatar: "portrait, upper body, looking at viewer, smile",
   posts: [{ kind: "pinup", rating: "questionable", weight: 1, prompt: "solo, {outfit}, looking at viewer, {setting}", captions: ["new post"] }] };
 
-function openEditor(p) {
-  ed.isNew = !p; ed.cur = p || NEW_PERSONA;
+function openEditor(p, asNew = false) {
+  ed.isNew = !p || asNew; ed.cur = p || NEW_PERSONA;
   const c = ed.cur;
   $("e-title").textContent = ed.isNew ? "New persona" : (c.name || c.handle);
   $("e-err").textContent = "";
