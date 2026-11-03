@@ -40,10 +40,30 @@ keeps the previous version as `data/personas.json.bak`. The format, from
 - `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
-  who draw different people).
+  who draw different people). The captions are examples of how the persona writes (below).
+- `voice`: the name of a trained style; the persona's captions then sound like that
+  artist's own posts instead of its example captions.
 
 The file is re-read every run. A persona with no profile picture gets one on its next run.
 Invalid entries or blocked tags stop the run with a clear error instead of being skipped.
+
+## Captions
+
+Every post that reaches the timeline gets a newly written caption. After each night's checks,
+a small text model (`CAPTION_MODEL`, Qwen3-4B-Instruct by default: about 8 GB, downloaded once
+to `models/hf/`, a second or so per post on the GPU) is given what the tagger sees in the
+picture and examples of how the persona writes:
+
+- with a `voice` (chosen under **Captions** in the editor): the post texts of the artist
+  behind that style, saved when the style was downloaded (`data/lora/NAME/voice.json`)
+- otherwise the persona's example captions
+
+Artist posts are cleaned before the model sees them: business posts (commissions, Patreon,
+followers, polls), anything not in English, @handles, links and hashtags are left out, and
+names of characters, series and people become `[name]`. Each written caption is checked and
+thrown away if it names anyone, mentions ages, school or anything young-sounding, has links
+or @mentions, or copies an example; after four failed tries the post keeps one of its
+example captions. Empty `CAPTION_MODEL` turns writing off (example captions only).
 
 ## Running
 
@@ -70,7 +90,8 @@ The worker downloads up to the chosen number of images into `data/lora/NAME/raw/
 them, and the `trainer` service trains `models/loras/style-NAME.safetensors` (about half an
 hour for 300 images at the normal length). Nightly posts wait while it trains. **Retrain**
 fetches the artist's newer images and trains again; **Stop** cancels at any step. The style
-then appears in the persona editor for personas of the same medium.
+then appears in the persona editor for personas of the same medium. The artist's post texts
+are saved too, for personas whose captions should sound like them (see Captions).
 
 The checks before training drop photographs (styles learn drawings, never real people), then
 anything the strict adult checks, the feral filter or the blocked tags flag; dropped files are
@@ -107,21 +128,23 @@ By hand: put images in `data/lora/NAME/raw/`, then
   strictest threshold, since youthful-looking output is most common there.
 - **No named characters or people.** Name and character tags are discarded, and prompts
   never contain names. For anime and furry this also keeps out canonically underage
-  characters.
+  characters. Written captions are checked for names the same way, and for ages, school
+  and young-sounding words.
 
 ## Folder layout
 
 ```
 dreamfeed/
   docker-compose.yml  .env  .env.example  README.md
-  worker/    Dockerfile + personas, checks, ComfyUI client, ranker, lora-prep
+  worker/    Dockerfile + personas, checks, ComfyUI client, ranker, caption writer, lora-prep
   trainer/   Dockerfile + kohya sd-scripts style-LoRA training, and a watcher for dashboard requests
   comfyui/   Dockerfile pinning a ComfyUI release; workflow JSON the worker fills in
   web/       Dockerfile + small Python app using formlogin
   models/    checkpoints/, loras/, tagger/, clip/  (downloads and trained styles, ~20 GB)
   data/      feed.db                               (posts, embeddings, likes; small)
              personas.json                         (private persona definitions)
-             lora/NAME/                            (style training images, captions, progress)
+             lora/NAME/                            (style training images, captions, the artist's
+                                                    post texts (voice.json), progress)
              generated/                            (tonight's output and the feed)
              liked/                                (images you liked, copied out)
   state/     login.json, session.key

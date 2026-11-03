@@ -36,6 +36,9 @@ class Config:
         # CLIP share for "child" over "adult" descriptions at which an image is dropped.
         # Used for drawings, and for photos where no face is clear enough to estimate.
         self.age_threshold = opt_float("AGE_THRESHOLD", 0.35)
+        # Hugging Face id of the text model that writes a fresh caption for every post (see
+        # captions.py). Empty: captions come from the personas' example captions.
+        self.caption_model = os.environ.get("CAPTION_MODEL", "").strip()
         # How often the worker checks the nightly window and dashboard requests.
         self.scan_seconds = opt_float("SCAN_SECONDS", 10)
 

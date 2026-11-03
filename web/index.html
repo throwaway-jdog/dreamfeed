@@ -497,6 +497,12 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </section>
 
     <section class="panel">
+      <h2>Captions</h2>
+      <label class="field"><span>Sound like <small id="e-voice-note"></small></span>
+        <select class="in" id="e-voice"></select></label>
+    </section>
+
+    <section class="panel">
       <h2>Posting</h2>
       <div class="field"><span>How often they post <small>share of each night, before your likes and skips adjust it</small></span>
         <div class="range"><input type="range" id="e-weight" min="0.25" max="3" step="0.25"><output id="e-weight-v"></output></div></div>
@@ -551,7 +557,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <label class="field"><span>Weight</span><input class="in k-weight" type="number" min="0.1" max="10" step="0.5" inputmode="decimal"></label>
     </div>
     <label class="field"><span>Prompt</span><textarea class="in k-prompt" rows="3" placeholder="solo, {outfit}, looking at viewer, {setting}"></textarea></label>
-    <label class="field"><span>Captions <small>one per line, picked at random</small></span><textarea class="in k-caps" rows="3"></textarea></label>
+    <label class="field"><span>Example captions <small>one per line; each post gets a new one written like these</small></span><textarea class="in k-caps" rows="3"></textarea></label>
     <button class="rm" type="button">Remove this kind</button>
   </div>
 </template>
@@ -974,7 +980,8 @@ function clock(iso) {
   const today = new Date().toDateString() === d.toDateString();
   return d.toLocaleString(undefined, today ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
-const PHASE = { generating: "Generating", animating: "Animating", checking: "Checking ages", ranking: "Picking the best" };
+const PHASE = { generating: "Generating", animating: "Animating", checking: "Checking ages", ranking: "Picking the best",
+  captioning: "Writing captions" };
 let animN = 3;
 document.querySelectorAll("#a-count button").forEach(b => b.onclick = () => {
   animN = +b.dataset.n;
@@ -1073,6 +1080,7 @@ function renderStyles() {
     if (s.trained) sub.append(el("span", null, `trained ${clock(new Date(s.trained * 1000).toISOString())}`));
     else if (!s.job) sub.append(el("span", null, "not trained"));
     if (s.kept != null) sub.append(el("span", null, `${s.kept} images`));
+    if (s.voice) sub.append(el("span", null, `${s.voice} posts for captions`));
     if (s.used_by.length) sub.append(el("span", "badge on", "used by " + s.used_by.join(", ")));
     mid.append(sub); row.append(mid);
     if (s.job) {
@@ -1133,14 +1141,14 @@ $("s-form").onsubmit = async e => {
 };
 
 /* ---------- persona editor ---------- */
-const ed = { list: [], styles: [], cur: null, isNew: false, medium: "anime", loraOn: false, paused: false };
+const ed = { list: [], styles: [], voices: {}, cur: null, isNew: false, medium: "anime", loraOn: false, paused: false };
 const lines = v => v.split("\n").map(x => x.trim()).filter(Boolean);
 const words = v => v.split(/\s+/).map(x => x.replace(/^#/, "")).filter(Boolean);
 
 async function loadEditable() {
   try {
     const d = await api("api/personas/edit");
-    ed.list = d.personas; ed.styles = d.styles;
+    ed.list = d.personas; ed.styles = d.styles; ed.voices = d.voices || {};
     $("p-note").textContent = d.error ? `The personas file has a problem: ${d.error}` : "Who posts in your timeline. Edits apply from their next post.";
     renderPersonaList();
   } catch (e) { if (e.message !== "signed out") toast(e.message); }
@@ -1169,8 +1177,8 @@ function renderMedium() {
   sel.replaceChildren(...opts.map(s => { const o = el("option", null, s.name); o.value = s.name; return o; }));
   if (opts.some(s => s.name === keep)) sel.value = keep;
   $("e-lora-on").disabled = !opts.length && !ed.loraOn;
-  $("e-lora-note").textContent = opts.length ? "Draws their posts in an artist style trained with the trainer."
-    : `No ${LABEL[ed.medium].toLowerCase()} styles trained yet (docker compose run --rm trainer).`;
+  $("e-lora-note").textContent = opts.length ? "Draws their posts in an artist style you trained."
+    : `No ${LABEL[ed.medium].toLowerCase()} styles trained yet (Trained styles, on the dashboard).`;
   renderLora();
 }
 function renderLora() {
@@ -1226,6 +1234,12 @@ function openEditor(p) {
     }
     $("e-style").value = c.lora.style;
   }
+  const vs = $("e-voice"), own = el("option", null, "their example captions"); own.value = "";
+  vs.replaceChildren(own, ...Object.entries(ed.voices).map(([n, count]) => {
+    const o = el("option", null, `${n} (${count} posts)`); o.value = n; return o; }));
+  if (c.voice && !(c.voice in ed.voices)) { const o = el("option", null, `${c.voice} (no saved posts)`); o.value = c.voice; vs.append(o); }
+  vs.value = c.voice || "";
+  $("e-voice-note").textContent = "every post gets a new caption, written like these. Artist posts come from training a style.";
   $("e-kinds").replaceChildren(); for (const k of c.posts || []) addKind(k);
   $("e-strict").textContent = ed.isNew ? "" : c.strict ? "🛡 Stricter adult checks are on for this persona (set automatically from their look)." : "";
   $("e-pic-row").hidden = ed.isNew;
@@ -1252,7 +1266,7 @@ function collect() {
     characters: lines($("e-chars").value), avatar: $("e-avatar").value.trim(),
     outfits: lines($("e-outfits").value), settings: lines($("e-settings").value),
     emoji: words($("e-emoji").value), hashtags: words($("e-tags").value), negative: $("e-neg").value.trim(),
-    weight: +$("e-weight").value, video_share: +$("e-video").value, paused: ed.paused, posts,
+    weight: +$("e-weight").value, video_share: +$("e-video").value, paused: ed.paused, posts, voice: $("e-voice").value,
     lora: (ed.loraOn || ed.cur.lora) && $("e-style").value ? { style: $("e-style").value, strength: +$("e-strength").value,
                                  female_only: $("e-female").checked, enabled: ed.loraOn } : null,
   };

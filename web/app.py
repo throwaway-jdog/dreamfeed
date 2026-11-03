@@ -350,8 +350,18 @@ def styles() -> list[dict]:
     return out
 
 
+def voices() -> dict[str, int]:
+    """Styles whose artist's post texts were saved (voice.json): name -> how many posts."""
+    out = {}
+    for f in sorted((DATA / "lora").glob("*/voice.json")):
+        n = len(read_json(f).get("posts") or [])
+        if n:
+            out[f.parent.name] = n
+    return out
+
+
 def persona_config() -> dict:
-    out = {"personas": [], "styles": styles(), "error": None,
+    out = {"personas": [], "styles": styles(), "voices": voices(), "error": None,
            "ratings": list(people.RATINGS), "mediums": list(MEDIUMS)}
     try:
         raw = read_personas()
@@ -433,6 +443,13 @@ def _apply(entry: dict, src: dict) -> dict:
                            "prompt": _text(k.get("prompt"), 1000, "prompt"),
                            "captions": _list(k.get("captions"), 30, 280, "captions")}
                           for k in src["posts"] if isinstance(k, dict)]
+    if "voice" in src:
+        v = str(src["voice"] or "")
+        if v and v != entry.get("voice") and v not in voices():
+            raise ValueError("pick a style that has saved posts for captions")
+        entry["voice"] = v
+        if not v:
+            entry.pop("voice")
     if "lora" in src:
         entry["lora"] = _lora(entry.get("lora"), src["lora"], entry.get("medium"))
         if not entry["lora"]:
@@ -550,6 +567,7 @@ def style_list() -> dict:
         file = LORA_DIR / f"style-{d.name}.safetensors"
         job = jobs.get(d.name)
         out.append({"name": d.name, "medium": src.get("medium") or prep.get("medium"), "kept": prep.get("kept"),
+                    "voice": len(read_json(d / "voice.json").get("posts") or []),
                     "source": src.get("source"), "limit": src.get("limit"), "steps": src.get("steps"),
                     "trained": int(file.stat().st_mtime) if file.is_file() else None,
                     "used_by": users.get(file.name, []),

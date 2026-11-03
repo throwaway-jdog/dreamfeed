@@ -40,6 +40,19 @@ STRICT_MARKERS = ("crossdressing", "androgynous", "feminine", "futanari", "trans
 STRICT_AGE_THRESHOLD = 0.25
 
 
+# Never in a written caption (on top of the blocked tags above): ages, school, and words
+# that make a character sound young. A caption with any of these is thrown away.
+CAPTION_NEVER = re.compile(
+    r"\b(\d+\s*(yo|y/?o|yrs?|years?)(\s*old)?|years? old|school\w*|student\w*|class(room|mates?)|"
+    r"kids?|kiddo|minors?|underage|little (girl|boy|one|sister|brother)|barely legal|virgin\w*|"
+    r"innocent|tiny|smol|loli\w*|shota\w*|teen\w*|grade|homework|puberty|"
+    r"turn(ed|s|ing)? \d+|ages?|aged|birthdays?|bday|\d+(st|nd|rd|th) b)\b", re.I)
+
+
+def caption_blocked(text: str) -> list[str]:
+    return blocked(text) + [m.group(0).lower() for m in CAPTION_NEVER.finditer(text)]
+
+
 def blocked(text: str) -> list[str]:
     text = text.lower().replace("_", " ")
     return sorted(t for t in NEVER_PROMPT_TAGS if re.search(rf"\b{re.escape(t)}\b", text))

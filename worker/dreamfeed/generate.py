@@ -5,6 +5,7 @@
              anything flagged is deleted
 3. rank:     score the rest against what you liked and skipped from that persona, keep the
              best FEED_KEEP_TOP, spread over the night as posts in the timeline
+4. caption:  with CAPTION_MODEL set, a fresh caption for each kept post (captions.py)
 """
 import datetime as dt
 import json
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import db, personas as people
+from . import captions, db, personas as people
 from .config import Config, GenConfig
 
 MAX_ATTEMPTS = 3
@@ -182,6 +183,7 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
         " LEFT JOIN personas p ON p.handle = g.persona"
         " WHERE g.night = ? AND g.status = 'generated' AND g.kind IN ('image', 'avatar')", (night,)).fetchall()
     rng = random.Random()
+    tags = {}   # what the tagger saw in each post, for its caption
     if rows:
         _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
@@ -212,6 +214,8 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                 score -= SKIP_PENALTY * max(0.0, _closest(skips, emb) - score)
             score += rng.random() * 1e-3   # breaks ties while nothing is liked yet
             _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes())
+            tags[gid] = captions.picture(a.general)
+        vision.close()
 
     _progress(conn, night, "ranking", 0, 0)
     # Keep the best per persona, in proportion to how many posts each one made.
@@ -223,17 +227,23 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
     started = conn.execute("SELECT started_at FROM runs WHERE night = ?", (night,)).fetchone()
     start = dt.datetime.fromisoformat(started[0]) if started and started[0] else _utcnow()
     span = max(60.0, (_utcnow() - start).total_seconds())
+    winners = []
     for handle, items in by_persona.items():
         quota = max(1, round(keep * len(items) / len(scored)))
         items.sort(key=lambda r: r[3], reverse=True)
-        for gid, _, file, _ in items[:quota]:
-            full, thumb = _to_jpeg(out_dir, file)
-            # Posts are spread over the run so the timeline interleaves personas.
-            posted = start + dt.timedelta(seconds=rng.uniform(0, span))
-            _set(conn, gid, status="feed", file=full, thumb=thumb, posted_at=posted.strftime("%Y-%m-%d %H:%M:%S"))
+        winners += items[:quota]
         for gid, _, file, _ in items[quota:]:
             (out_dir / file).unlink(missing_ok=True)
             _set(conn, gid, status="ranked-out")
+    written = captions.write_all(cfg, conn, night, [(gid, h, tags[gid]) for gid, h, _, _ in winners if gid in tags],
+                                 lambda done, total: _progress(conn, night, "captioning", done, total))
+    for gid, _, file, _ in winners:
+        full, thumb = _to_jpeg(out_dir, file)
+        # Posts are spread over the run so the timeline interleaves personas.
+        posted = start + dt.timedelta(seconds=rng.uniform(0, span))
+        extra = {"caption": written[gid]} if gid in written else {}
+        _set(conn, gid, status="feed", file=full, thumb=thumb, posted_at=posted.strftime("%Y-%m-%d %H:%M:%S"),
+             **extra)
 
     return dict(conn.execute("SELECT status, count(*) FROM generations WHERE night = ? GROUP BY status",
                              (night,)).fetchall())

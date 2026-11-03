@@ -3,9 +3,12 @@
 A "style" job (queued by the web page) runs three steps, writing progress to
 data/lora/NAME/status.json for the dashboard:
 1. download: gallery-dl fetches up to LIMIT images from the source link into
-   data/lora/NAME/raw (images only; an archive skips files already fetched or rejected)
+   data/lora/NAME/raw (images only; an archive skips files already fetched or rejected), and
+   the text of each post into posts.jsonl
 2. check:    lora-prep in a child process (so its GPU memory is freed afterwards); drops
              photos, anything the adults-only or feral checks flag, and blocked tags
+   then the texts of posts whose images passed become the style's voice (voice.json), which
+   personas can write their captions like (captions.py)
 3. train:    a request file for the trainer service, which holds generation while it runs;
              this job waits for it to finish
 
@@ -18,6 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import captions
 from .config import Config
 from .lora import write_status
 
@@ -32,6 +36,10 @@ GALLERY_DL = {
         "cookies-update": False,
         "twitter": {"filename": "{tweet_id}_{num}.{extension}", "videos": False, "cards": False,
                     "quoted": False, "retweets": False, "text-tweets": False},
+        # Each post's text, once per post (also for posts whose images are already downloaded).
+        "postprocessors": [{"name": "metadata", "event": "post", "mode": "jsonl", "directory": "..",
+                            "filename": "posts.jsonl", "open": "a",
+                            "include": ["tweet_id", "content", "reply_id", "retweet_id"]}],
     },
 }
 IMAGE_FILTER = "extension in ('jpg', 'jpeg', 'png', 'webp')"
@@ -54,6 +62,7 @@ def run(cfg: Config, conn, job_id: int, params: dict) -> None:
     try:
         got = download(base, params["source"], params["limit"])
         kept = check(base, name, medium, trigger_for(base, name))
+        captions.build_voice(base)
         if kept < MIN_IMAGES:
             raise RuntimeError(f"only {kept} images passed the checks; at least {MIN_IMAGES} are needed")
         free_gpu(cfg)

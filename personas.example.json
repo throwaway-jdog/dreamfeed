@@ -1,5 +1,5 @@
 {
-  "_note": "Copy to data/personas.json and edit. Every persona is fictional and adult. Prompts are booru tags; placeholders {outfit} {cosplay} {setting} {character} are filled in per post. Blocked tags (see worker/dreamfeed/safety.py) make the whole file fail to load. Looks that read as feminine men, androgynous, trans or tomboy characters get the stricter adult prompts and age check automatically.",
+  "_note": "Copy to data/personas.json and edit. Every persona is fictional and adult. Prompts are booru tags; placeholders {outfit} {cosplay} {setting} {character} are filled in per post. Blocked tags (see worker/dreamfeed/safety.py) make the whole file fail to load. Captions are examples: each post gets a newly written caption in that voice (or, with \"voice\": \"style_name\", in the voice of the artist behind a trained style). Looks that read as feminine men, androgynous, trans or tomboy characters get the stricter adult prompts and age check automatically.",
   "personas": [
     {
       "handle": "example_artist",

@@ -3,7 +3,9 @@
 Each persona has a fixed look (tags that keep them recognisable from post to post) and a few
 kinds of post, each with its own prompt, rating and captions. The nightly run picks personas
 by weight (likes raise it, skips lower it), then a kind of post, then fills in an outfit and a
-setting. See personas.example.json for the format.
+setting. See personas.example.json for the format. A post's captions are examples: with
+CAPTION_MODEL set, every post gets a freshly written caption in that voice, or in the voice of
+the artist behind the style named in "voice" (captions.py).
 
 Placeholders allowed in a post prompt: {outfit} (from the persona's outfits, or a generic
 list), {cosplay} (generic costumes only, never named characters), {setting}, {character}
@@ -74,6 +76,7 @@ class Persona:
     trigger: str = ""                       # the LoRA's trigger word, put first in every prompt
     negative: str = ""                      # extra negative prompt for every post (e.g. "face, eyes")
     paused: bool = False                    # keeps the profile and posts, makes no new ones
+    voice: str = ""                         # a style whose artist's posts their captions sound like
 
     def prompt_for(self, post: Post, rng: random.Random) -> str:
         fill = {
@@ -161,7 +164,9 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
         hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
         weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),
-        paused=bool(p.get("paused", False)))
+        paused=bool(p.get("paused", False)), voice=str(p.get("voice") or ""))
+    if persona.voice and not HANDLE.match(persona.voice):
+        raise Invalid(f"{where}: voice must be the name of a trained style")
     text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.settings, *persona.characters,
                      *(k.prompt for k in posts)])
     bad = safety.blocked(text)

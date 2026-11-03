@@ -1,6 +1,6 @@
 # dreamfeed: a private timeline where fictional personas post generated images and clips.
 #   worker   Has ComfyUI make each persona's posts during GENERATE_WINDOW, runs the adults-only
-#            checks, keeps the best, and learns from your likes and skips.
+#            checks, keeps the best, writes their captions, and learns from your likes and skips.
 #   agecheck Age estimates for real people in images (CPU).
 #   comfyui  Image generation engine. Internal only; the worker drives it over its API.
 #   trainer  Style-LoRA training, on demand.
@@ -30,6 +30,7 @@ services:
       FEED_KEEP_TOP: ${FEED_KEEP_TOP:?set FEED_KEEP_TOP in .env}       # best N per night reach the feed
       FEED_KEEP_DAYS: ${FEED_KEEP_DAYS:-14}
       VIDEOS_PER_NIGHT: ${VIDEOS_PER_NIGHT:-0}           # Wan 2.2 clips after each night's images
+      CAPTION_MODEL: ${CAPTION_MODEL-}       # text model that writes each post's caption; empty: example captions
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data

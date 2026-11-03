@@ -63,6 +63,11 @@ class Vision:
                 t = self.clip.encode_text(tokenizer(texts).to(self.device)).float()
             self.prompts[name] = (labels, F.normalize(t, dim=-1))
 
+    def close(self) -> None:
+        """Free the GPU for what comes next (the caption model)."""
+        del self.tagger, self.clip, self.prompts
+        torch.cuda.empty_cache()
+
     @torch.no_grad()
     def _tag(self, img: Image.Image) -> np.ndarray:
         x = self.tag_tf(_pad_square(img)).unsqueeze(0)[:, [2, 1, 0]]   # model expects BGR
