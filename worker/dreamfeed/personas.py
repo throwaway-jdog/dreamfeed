@@ -70,6 +70,7 @@ class Persona:
     weight: float = 1.0
     strict: bool = False
     lora: tuple[str, float] | None = None   # (file in models/loras, strength)
+    lora_female_only: bool = False          # skip the LoRA for male characters
     trigger: str = ""                       # the LoRA's trigger word, put first in every prompt
     negative: str = ""                      # extra negative prompt for every post (e.g. "face, eyes")
 
@@ -85,6 +86,14 @@ class Persona:
             body += ", " + fill["setting"]
         parts = [p for p in (self.trigger, self.look, body) if p]
         return RATINGS[post.rating] + ", ".join(parts)
+
+    def lora_for(self, prompt: str) -> tuple[str, float] | None:
+        """The style LoRA, unless the prompt's character is male and the LoRA is marked
+        female-only (trained mostly on women, it would turn men into women)."""
+        if not self.lora or not self.lora_female_only:
+            return self.lora
+        tags = {t.strip() for t in prompt.split(",")}
+        return None if "male" in tags and "female" not in tags else self.lora
 
     def avatar_prompt(self, rng: random.Random) -> str:
         who = self.look or (rng.choice(self.characters) if self.characters else "")
@@ -145,6 +154,7 @@ def load(path: Path) -> list[Persona]:
             if not isinstance(lo, dict) or not str(lo.get("file", "")).endswith(".safetensors"):
                 raise SystemExit(f"personas: {where}: lora needs {{\"file\": \"x.safetensors\", \"strength\": 0.8, \"trigger\": \"word\"}}")
             persona.lora = (str(lo["file"]), float(lo.get("strength", 0.8)))
+            persona.lora_female_only = bool(lo.get("female_only", False))
             persona.trigger = str(lo.get("trigger", ""))
             if safety.blocked(persona.trigger):
                 raise SystemExit(f"personas: {where}: lora trigger uses blocked tags")

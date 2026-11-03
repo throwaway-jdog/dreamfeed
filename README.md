@@ -22,7 +22,10 @@ inspired them) and is not in git. Start from `personas.example.json`:
   persona recognisable), `avatar` (extra tags for the profile picture), `emoji`,
   `hashtags`, `video_share` (how much of the nightly video budget favours them), `weight`,
   `negative` (extra negative prompt, e.g. `face, eyes` for a faceless persona), and `lora`
-  (`{"file": "style-x.safetensors", "strength": 0.8, "trigger": "x_style"}`).
+  (`{"file": "style-x.safetensors", "strength": 0.8, "trigger": "x_style"}`; add
+  `"female_only": true` for a LoRA trained mostly on women, which otherwise turns male
+  characters female: those posts then skip the LoRA). Artist LoRAs can bake in the artist's
+  watermark faintly, so give those personas `"negative": "watermark, text, signature"`.
 - `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas

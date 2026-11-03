@@ -117,6 +117,9 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
     def make(p: people.Persona, kind: str, prompt: str, caption: str | None) -> None:
         ckpt = gen.checkpoints[p.medium]
         seed = rng.randrange(2 ** 32)
+        lora = p.lora_for(prompt)
+        if p.trigger and not lora:   # no LoRA for this one, so its trigger word means nothing
+            prompt = ", ".join(t for t in prompt.split(", ") if t != p.trigger)
         with conn:
             gid = conn.execute(
                 "INSERT INTO generations(night, medium, checkpoint, prompt, seed, persona, caption, kind, status)"
@@ -124,7 +127,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                 (night, p.medium, ckpt, prompt, seed, p.handle, caption, kind)).lastrowid
         try:
             path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}", strict=p.strict,
-                                 lora=p.lora, extra_negative=p.negative if kind == "image" else "")
+                                 lora=lora, extra_negative=p.negative if kind == "image" else "")
         except ValueError as e:   # safety.prompts refused it
             _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
             return
