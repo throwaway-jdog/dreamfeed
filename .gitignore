@@ -1,0 +1,10 @@
+.env
+*.cookies.txt
+cookies.txt
+data/
+models/
+state/
+logs/
+__pycache__/
+*.pyc
+docker-compose.override.yml
