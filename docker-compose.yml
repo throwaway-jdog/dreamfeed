@@ -34,6 +34,8 @@ services:
     volumes:
       - ./data:/data
       - ./models:/models                      # writable: downloads the tagger and CLIP on first run
+      # X cookies (Netscape cookies.txt) for downloading artists' images from x.com to train styles.
+      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/cookies.txt:ro
     deploy:
       resources:
         reservations:
@@ -87,13 +89,15 @@ services:
     logging:
       options: { max-size: 10m, max-file: "3" }
 
-  # Style-LoRA training, on demand only (never started by `up`):
+  # Style-LoRA training. Waits for requests from the dashboard's "Train a style" (the
+  # worker downloads and checks the images first); idle it holds no GPU memory. By hand:
   #   docker compose run --rm trainer NAME BASE_CHECKPOINT [STEPS]
-  # The worker holds generation while it runs (data/lora/.training).
+  # The worker holds generation while it trains (data/lora/.training).
   trainer:
     build: ./trainer
     image: dreamfeed-trainer:local
-    profiles: ["train"]
+    container_name: dreamfeed-trainer
+    restart: unless-stopped
     user: "${PUID}:${PGID}"
     shm_size: 8g
     environment:
@@ -109,6 +113,8 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    logging:
+      options: { max-size: 10m, max-file: "3" }
 
   # Feed at https://<your domain>/dreamfeed/ through Caddy (reachable from anywhere, behind
   # the sign-in page). Set the password with

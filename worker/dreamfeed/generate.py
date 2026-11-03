@@ -350,6 +350,9 @@ def run_job(cfg: Config, job_id: int) -> None:
     params = json.loads(row[0])
     if params.get("kind") == "animate":
         return animate_job(cfg, conn, job_id, params)
+    if params.get("kind") == "style":
+        from . import styles
+        return styles.run(cfg, conn, job_id, params)
     night = f"manual-{dt.datetime.now():%Y%m%d-%H%M%S}"
     with conn:
         conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))

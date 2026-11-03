@@ -63,21 +63,29 @@ the 12 GB; Wan 2.2 needs a fresh ComfyUI per clip (capped by `COMFY_MEM_LIMIT`).
 
 ## Style LoRAs
 
-A persona can post in a trained artist style. To train one, put the artist's images in
-`data/lora/NAME/raw/`, then:
+A persona can post in a trained artist style. On the Dashboard, **Trained styles** → **Train
+a new style**: give it a name, the medium, and the artist's page (an X media page such as
+`https://x.com/artist/media`, or any site gallery-dl reads; x.com needs `X_COOKIES_FILE`).
+The worker downloads up to the chosen number of images into `data/lora/NAME/raw/`, checks
+them, and the `trainer` service trains `models/loras/style-NAME.safetensors` (about half an
+hour for 300 images at the normal length). Nightly posts wait while it trains. **Retrain**
+fetches the artist's newer images and trains again; **Stop** cancels at any step. The style
+then appears in the persona editor for personas of the same medium.
 
-       docker compose exec worker python -m dreamfeed lora-prep NAME --medium furry --trigger NAME_style
+The checks before training drop photographs (styles learn drawings, never real people), then
+anything the strict adult checks, the feral filter or the blocked tags flag; dropped files are
+deleted and not downloaded again. A style needs at least 20 images that pass.
+
+By hand: put images in `data/lora/NAME/raw/`, then
+
+       docker compose exec worker python -m dreamfeed lora-prep NAME --medium furry --trigger namestyle
        docker compose run --rm trainer NAME BASE_CHECKPOINT
-
-`lora-prep` runs every image through the strict adult checks and the feral filter and
-deletes anything flagged before captioning. The trainer writes
-`models/loras/style-NAME.safetensors` and holds generation while it runs. The style then
-appears in the persona editor for personas of the same medium.
 
 ## Safety rules (built into the worker, not optional settings)
 
-- **Style LoRAs only learn drawings, never real people**, and every training image goes
-  through the checks below at the strict threshold first; flagged images are deleted.
+- **Style LoRAs only learn drawings, never real people.** Training images that look like
+  photographs are dropped, and every other one goes through the checks below at the strict
+  threshold first; flagged images are deleted.
 - **Adults only, in every medium.** Every prompt includes an explicit adult descriptor in
   that medium's style (e.g. `mature female, adult` for anime, `adult, anthro` for
   furry), and every negative prompt includes a fixed per-medium list of youth terms.
@@ -107,13 +115,13 @@ appears in the persona editor for personas of the same medium.
 dreamfeed/
   docker-compose.yml  .env  .env.example  README.md
   worker/    Dockerfile + personas, checks, ComfyUI client, ranker, lora-prep
-  trainer/   Dockerfile + kohya sd-scripts style-LoRA training
+  trainer/   Dockerfile + kohya sd-scripts style-LoRA training, and a watcher for dashboard requests
   comfyui/   Dockerfile pinning a ComfyUI release; workflow JSON the worker fills in
   web/       Dockerfile + small Python app using formlogin
   models/    checkpoints/, loras/, tagger/, clip/  (downloads and trained styles, ~20 GB)
   data/      feed.db                               (posts, embeddings, likes; small)
              personas.json                         (private persona definitions)
-             lora/NAME/                            (style training images and captions)
+             lora/NAME/                            (style training images, captions, progress)
              generated/                            (tonight's output and the feed)
              liked/                                (images you liked, copied out)
   state/     login.json, session.key

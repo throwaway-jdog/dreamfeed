@@ -12,6 +12,9 @@ GET  /api/personas/edit every persona as stored in data/personas.json, plus the 
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
 POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
 POST /api/personas/avatar  {"handle": H} new profile picture the next time they post
+GET  /api/styles        trained and in-progress style LoRAs
+POST /api/styles/train  {"name", "medium", "source", "limit", "steps"} download, check and train one
+POST /api/styles/cancel {"name": N} stop a style job
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
@@ -520,6 +523,88 @@ def new_avatar(req: dict) -> dict:
     return {"ok": True}
 
 
+# ---------- style training ----------
+# A "style" job for the worker: download the source's images, check them (photos and
+# anything the adults-only checks flag are dropped), then the trainer service trains.
+STYLE_LIMITS = (100, 300, 600)
+STYLE_STEPS = (1000, 2000, 3000)
+
+
+def style_list() -> dict:
+    lora = DATA / "lora"
+    with db() as conn:
+        jobs = {json.loads(r["params"]).get("name"): dict(r) for r in conn.execute(
+            "SELECT id, params, status FROM jobs WHERE status IN ('queued', 'running')"
+            " AND params LIKE '%\"kind\": \"style\"%'")}
+    try:
+        users = {}
+        for p in read_personas()["personas"]:
+            f = str((p.get("lora") or {}).get("file", ""))
+            if f and (p.get("lora") or {}).get("enabled", True) is not False:
+                users.setdefault(f, []).append(p.get("name") or p.get("handle"))
+    except ValueError:
+        users = {}
+    out = []
+    for d in sorted(x for x in lora.iterdir() if x.is_dir() and not x.name.startswith(".")) if lora.is_dir() else []:
+        prep, src, st = read_json(d / "prep.json"), read_json(d / "source.json"), read_json(d / "status.json")
+        file = LORA_DIR / f"style-{d.name}.safetensors"
+        job = jobs.get(d.name)
+        out.append({"name": d.name, "medium": src.get("medium") or prep.get("medium"), "kept": prep.get("kept"),
+                    "source": src.get("source"), "limit": src.get("limit"), "steps": src.get("steps"),
+                    "trained": int(file.stat().st_mtime) if file.is_file() else None,
+                    "used_by": users.get(file.name, []),
+                    "job": job and {"status": job["status"]},
+                    # status.json is only live while a job runs; otherwise it is the last result
+                    "status": st if job or st.get("phase") in ("failed", "cancelled") else None})
+    return {"styles": out, "limits": STYLE_LIMITS, "steps": STYLE_STEPS}
+
+
+def queue_style(req: dict) -> dict:
+    name = str(req.get("name", "")).strip().lower()
+    medium, source = req.get("medium"), str(req.get("source", "")).strip()
+    if not HANDLE.match(name):
+        raise ValueError("name must be 2-20 of a-z 0-9 _")
+    if medium not in MEDIUMS:
+        raise ValueError("pick anime or furry")
+    if not re.match(r"^https://[^\s/]+\.[^\s/]+/\S*$", source) or len(source) > 300:
+        raise ValueError("the source must be an https:// link to the artist's page")
+    try:
+        limit, steps = int(req.get("limit", 300)), int(req.get("steps", 2000))
+    except (TypeError, ValueError):
+        raise ValueError("bad numbers")
+    if limit not in STYLE_LIMITS or steps not in STYLE_STEPS:
+        raise ValueError("pick one of the offered sizes")
+    known = next((s for s in style_list()["styles"] if s["name"] == name), None)
+    if known and known["medium"] and known["medium"] != medium:
+        raise ValueError(f"the {name} style is {known['medium']}; use another name for {medium}")
+    with db() as conn:
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
+                        " AND params LIKE '%\"kind\": \"style\"%'").fetchone()[0]:
+            raise ValueError("a style is already being trained; one at a time")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
+            {"kind": "style", "name": name, "medium": medium, "source": source, "limit": limit,
+             "steps": steps}),)).lastrowid
+    return {"job": jid}
+
+
+def cancel_style(req: dict) -> dict:
+    name = str(req.get("name", ""))
+    if not HANDLE.match(name):
+        raise ValueError("bad name")
+    with db() as conn:
+        for r in conn.execute("SELECT id, params, status FROM jobs WHERE status IN ('queued', 'running')"
+                              " AND params LIKE '%\"kind\": \"style\"%'").fetchall():
+            if json.loads(r["params"]).get("name") != name:
+                continue
+            if r["status"] == "queued":
+                conn.execute("UPDATE jobs SET status = 'cancelled', finished_at = datetime('now') WHERE id = ?",
+                             (r["id"],))
+            else:
+                (DATA / "lora" / name / "cancel").touch()   # the worker and trainer watch for this
+            return {"ok": True}
+    raise LookupError("nothing is running for that style")
+
+
 class Handler(BaseHTTPRequestHandler):
     def send(self, code: int, body, ctype="application/json", cache="no-store"):
         if not isinstance(body, bytes):
@@ -600,6 +685,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, personas())
         if path == "/api/personas/edit":
             return self.send(200, persona_config())
+        if path == "/api/styles":
+            return self.send(200, style_list())
         if path.startswith("/avatar/"):
             file = avatar_path(path[len("/avatar/"):])
             if not file:
@@ -623,7 +710,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
                    "/api/animate": request_animation, "/api/personas/save": save_persona,
-                   "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar}
+                   "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
+                   "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
