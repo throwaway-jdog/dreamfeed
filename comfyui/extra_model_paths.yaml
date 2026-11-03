@@ -2,3 +2,8 @@ dreamfeed:
   base_path: /models
   checkpoints: checkpoints
   loras: loras
+  diffusion_models: |
+    diffusion_models
+    unet
+  text_encoders: text_encoders
+  vae: vae

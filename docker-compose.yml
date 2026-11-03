@@ -83,6 +83,9 @@ services:
     container_name: dreamfeed-comfyui
     restart: unless-stopped
     user: "${PUID}:${PGID}"
+    # RAM cap: if video generation runs out of memory, only ComfyUI is killed, never other services.
+    mem_limit: ${COMFY_MEM_LIMIT:?set COMFY_MEM_LIMIT in .env}
+    memswap_limit: ${COMFY_MEM_LIMIT}
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       # ComfyUI only runs while the worker uses it; stopped after this long without a job.
