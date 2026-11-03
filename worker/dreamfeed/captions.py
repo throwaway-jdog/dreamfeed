@@ -215,10 +215,14 @@ class Writer:
         del self.model
         self.torch.cuda.empty_cache()
 
-    def _sample(self, messages: list[dict]) -> str:
+    def ask(self, system: str, user: str, max_new_tokens: int = 90) -> str:
+        return _tidy(self._sample([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                  max_new_tokens))
+
+    def _sample(self, messages: list[dict], max_new_tokens: int = 90) -> str:
         ids = self.tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to("cuda")
         with self.torch.no_grad():
-            out = self.model.generate(ids, attention_mask=self.torch.ones_like(ids), max_new_tokens=90,
+            out = self.model.generate(ids, attention_mask=self.torch.ones_like(ids), max_new_tokens=max_new_tokens,
                                       do_sample=True, temperature=0.9, top_p=0.95,
                                       pad_token_id=self.tok.eos_token_id)
         return self.tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
@@ -241,7 +245,7 @@ class Writer:
                        + "\n".join(f"- {r}" for r in recent) if recent else "")
                     + f"\n\nThe new picture ({rating}): {', '.join(tags)}"
                     + f"\nWrite the caption, about {target} words.")
-            text = _tidy(self._sample([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]))
+            text = self.ask(SYSTEM, user)
             reason = problem(text, examples, allowed) or _repeats(text, recent)
             if not reason:
                 return text, why

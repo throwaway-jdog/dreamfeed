@@ -213,8 +213,8 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
             if skips is not None:
                 score -= SKIP_PENALTY * max(0.0, _closest(skips, emb) - score)
             score += rng.random() * 1e-3   # breaks ties while nothing is liked yet
-            _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes())
             tags[gid] = captions.picture(a.general)
+            _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes(), tags=", ".join(tags[gid]))
         vision.close()
 
     _progress(conn, night, "ranking", 0, 0)
@@ -382,9 +382,9 @@ def run_job(cfg: Config, job_id: int) -> None:
                          (status, message, job_id))
 
 
-MOTION = {
-    "anime": "smooth anime animation, natural motion, subtle body movement, hair and clothes moving, steady camera",
-    "furry": "smooth animation, natural motion, subtle body movement, fur, hair and clothes moving, steady camera",
+MOTION = {   # follows each clip's own motion description
+    "anime": "fluid anime animation, natural motion, hair and clothes moving",
+    "furry": "fluid animation, natural motion, fur, hair and clothes moving",
 }
 VIDEO_CHECK_FRAMES = 8   # every generated clip is checked on at least this many frames
 
@@ -419,11 +419,21 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
     """Turn feed images into ~5 s Wan 2.2 clips, check every clip, put the passing ones in the feed.
     motion_text, when given, leads the prompt; the image's own tags follow to keep the clip
     consistent with the picture."""
+    from . import motion
     from .comfy import Comfy
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
     rng = random.Random()
+    # The act and a written motion description per clip, before ComfyUI needs the GPU.
+    comfy.stop()   # may still hold the GPU from an earlier job
+    _progress(conn, night, "planning", 0, len(sources))
+    picture = {}
+    for src in sources:
+        row = conn.execute("SELECT tags, prompt FROM generations WHERE id = ?", (src,)).fetchone()
+        if row:   # posts from before tags were saved: their prompt's tags instead
+            picture[src] = [t.strip() for t in (row[0] or row[1]).split(",") if t.strip()]
+    plans = motion.plan(cfg, list(picture.items()), motion_text.strip())
     _progress(conn, night, "animating", 0, len(sources))
     made = 0
     try:
@@ -439,19 +449,30 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
             if not row or not (out_dir / row[2]).is_file() or row[0] not in MOTION:
                 continue
             medium, prompt, file, handle, caption, strict = row
-            motion = ", ".join(p for p in (motion_text.strip(), prompt, MOTION[medium]) if p)
+            act, written = plans.get(src, (None, None))
+            use_lora = gen.act_lora if act else None
+            # Wan follows sentences; without a written one, the act's fixed description and the
+            # picture's tags keep the clip consistent with the image.
+            body = written or ", ".join(p for p in (act.motion if act else "", prompt) if p)
+            motion_prompt = ", ".join(p for p in (act.trigger if use_lora else "", motion_text.strip(), body,
+                                                  MOTION[medium]) if p)
             seed = rng.randrange(2 ** 32)
             with conn:
                 gid = conn.execute(
                     "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
                     " caption, kind, status) VALUES (?,?,?,?,?,?,?,?, 'video', 'queued')",
-                    (night, medium, "wan2.2-i2v", motion, seed, src, handle, caption)).lastrowid
+                    (night, medium, "wan2.2-i2v" + (f" +{act.name}" if use_lora else ""), motion_prompt, seed,
+                     src, handle, caption)).lastrowid
             try:
-                path = comfy.img2vid("wan", out_dir / file, medium, motion, seed, night, f"video-{gid}",
-                                     strict=bool(strict))
+                path = comfy.img2vid("wan", out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
+                                     strict=bool(strict), act_lora=use_lora)
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue
+            except (OSError, RuntimeError) as e:   # ComfyUI died, e.g. killed for low memory
+                _set(conn, gid, status="dropped", reason=f"ComfyUI failed: {e}"[:200])
+                print(f"animate: ComfyUI failed ({e}); stopping clips for this run", flush=True)
+                break
             finally:
                 comfy.stop()   # fresh ComfyUI per clip, so Wan's models don't pile up in RAM
             _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)))

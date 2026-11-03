@@ -1,8 +1,10 @@
 """Starts ComfyUI only when asked, so the GPU is free the rest of the time.
 
-POST /start   start ComfyUI if needed, wait until its API answers (also resets the idle timer)
+POST /start   start ComfyUI if needed, wait until its API answers (also resets the idle timer);
+              ?mode=video restarts it with video options (MODES) if it runs as image, and back
 POST /stop    stop it
 GET  /status  {"running": bool}
+ComfyUI is also killed whenever the server runs short of memory (COMFY_HOST_MIN_FREE_GB).
 ComfyUI's own API is on :8188 while running. It is stopped automatically after
 COMFY_IDLE_STOP_SECONDS without a /start call, in case the worker dies mid-run.
 """
@@ -19,6 +21,13 @@ idle_value = os.environ.get("COMFY_IDLE_STOP_SECONDS", "").strip()
 if not idle_value.isdigit():
     sys.exit("supervisor: COMFY_IDLE_STOP_SECONDS must be set to a whole number")
 IDLE_STOP = int(idle_value)
+# ComfyUI is killed at once if the whole server has less than this much memory available
+# (GB), so a big video job can never push the server into swap and freeze it.
+try:
+    HOST_MIN_FREE = float(os.environ["COMFY_HOST_MIN_FREE_GB"])
+except (KeyError, ValueError):
+    sys.exit("supervisor: COMFY_HOST_MIN_FREE_GB must be set to a number of GB")
+PEAK = "/sys/fs/cgroup/memory.peak"   # this container's highest memory use (cgroup v2)
 
 CMD = [
     sys.executable, "/app/ComfyUI/main.py",
@@ -32,8 +41,14 @@ CMD = [
     "--disable-api-nodes",       # no paid cloud nodes
 ]
 
+# Extra ComfyUI options per kind of job. Video: drop each node's output as soon as nothing
+# needs it, so the text encoder and the first Wan half leave RAM before the second loads
+# (otherwise all three are held at once). Images keep the cache: one checkpoint serves the night.
+MODES = {"image": [], "video": ["--cache-none"]}
+
 lock = threading.Lock()
 proc: subprocess.Popen | None = None
+mode = "image"
 last_touch = 0.0
 
 
@@ -49,15 +64,19 @@ def api_up() -> bool:
         return False
 
 
-def start() -> None:
-    global proc, last_touch
+def start(want: str = "image") -> None:
+    global proc, last_touch, mode
+    if want not in MODES:
+        raise RuntimeError(f"unknown mode {want!r}")
+    if running() and mode != want:
+        stop()
     with lock:
         last_touch = time.time()
         if not running():
-            print("supervisor: starting ComfyUI", flush=True)
+            print(f"supervisor: starting ComfyUI for {want}", flush=True)
             for d in ("/tmp/comfy/user", "/tmp/comfy/temp", "/tmp/comfy/input", "/data/generated"):
                 os.makedirs(d, exist_ok=True)
-            proc = subprocess.Popen(CMD, cwd="/app/ComfyUI")
+            proc, mode = subprocess.Popen(CMD + MODES[want], cwd="/app/ComfyUI"), want
         for _ in range(300):
             if api_up():
                 return
@@ -78,7 +97,40 @@ def stop() -> None:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+        if proc is not None:
+            peak = peak_gb()
+            if peak is not None:
+                print(f"supervisor: container memory peak so far {peak:.1f} GB", flush=True)
         proc = None
+
+
+def host_available_gb() -> float:
+    """MemAvailable from /proc/meminfo, which in a container is the host's."""
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1024 / 1024
+    return float("inf")
+
+
+def peak_gb() -> float | None:
+    try:
+        with open(PEAK) as f:
+            return int(f.read()) / 1024 ** 3
+    except (OSError, ValueError):
+        return None
+
+
+def memory_watch() -> None:
+    global proc
+    while True:
+        time.sleep(1)
+        if running():
+            free = host_available_gb()
+            if free < HOST_MIN_FREE:
+                print(f"supervisor: server down to {free:.1f} GB available (limit {HOST_MIN_FREE:g}); "
+                      f"killing ComfyUI", flush=True)
+                proc.kill()
 
 
 def idle_watch() -> None:
@@ -92,8 +144,9 @@ def idle_watch() -> None:
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            if self.path == "/start":
-                start()
+            if self.path.split("?")[0] == "/start":
+                query = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
+                start(query.get("mode", "image"))
             elif self.path == "/stop":
                 stop()
             else:
@@ -120,5 +173,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 threading.Thread(target=idle_watch, daemon=True).start()
+threading.Thread(target=memory_watch, daemon=True).start()
 print("supervisor: ready on :8189 (ComfyUI stopped)", flush=True)
 ThreadingHTTPServer(("0.0.0.0", 8189), Handler).serve_forever()

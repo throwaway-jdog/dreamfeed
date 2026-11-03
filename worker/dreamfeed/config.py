@@ -68,7 +68,13 @@ class GenConfig:
             "dreamfeed: FEED_KEEP_TOP must be set")
         # Every enabled medium gets at least this share of the night, so it can come back.
         self.min_share = opt_float("MIN_MEDIUM_SHARE", 0.1)
-        # Wan 2.2 clips made after each night's images (0 = off). About 2.5 minutes each.
+        # Wan 2.2 clips made after each night's images (0 = off). About 5 minutes each.
         self.videos_per_night = int(opt_float("VIDEOS_PER_NIGHT", 0))
+        # Wan 2.2 I2V motion LoRA for clips of sex acts (high- and low-noise files in
+        # models/loras; motion.py has its trigger words). Empty: clips use Wan alone.
+        high, low = (os.environ.get(f"VIDEO_ACT_LORA_{x}", "").strip() for x in ("HIGH", "LOW"))
+        if bool(high) != bool(low):
+            sys.exit("dreamfeed: set both VIDEO_ACT_LORA_HIGH and VIDEO_ACT_LORA_LOW, or neither")
+        self.act_lora = (high, low, opt_float("VIDEO_ACT_LORA_STRENGTH", 0.8)) if high else None
         # Feed images you haven't liked are deleted after this many days.
         self.feed_keep_days = opt_float("FEED_KEEP_DAYS", 14)

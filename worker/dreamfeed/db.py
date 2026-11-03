@@ -80,4 +80,7 @@ def connect(path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE generations ADD COLUMN caption TEXT")
         conn.execute("ALTER TABLE generations ADD COLUMN posted_at TEXT")    # when it appears in the timeline
         conn.execute("CREATE INDEX IF NOT EXISTS generations_persona ON generations(persona, status)")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(generations)")}
+    if "tags" not in cols:        # added with written captions and video motion
+        conn.execute("ALTER TABLE generations ADD COLUMN tags TEXT")         # what the tagger saw, comma-separated
     return conn

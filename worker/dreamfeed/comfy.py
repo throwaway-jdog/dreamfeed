@@ -22,9 +22,10 @@ class Comfy:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.load(resp)
 
-    def start(self) -> None:
-        """Start ComfyUI (or keep it running). Call before each job; it resets the idle timer."""
-        self._post(f"{self.supervisor}/start", timeout=330)
+    def start(self, mode: str = "image") -> None:
+        """Start ComfyUI (or keep it running). Call before each job; it resets the idle timer.
+        mode "video" runs it with options that keep RAM down for Wan (see the supervisor)."""
+        self._post(f"{self.supervisor}/start?mode={mode}", timeout=400)
 
     def stop(self) -> None:
         self._post(f"{self.supervisor}/stop", timeout=60)
@@ -41,13 +42,18 @@ class Comfy:
             return json.load(resp)["name"]
 
     def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
-                subdir: str, name: str, strict: bool = False) -> Path:
-        """Animate a (generated, already checked) image into a ~5 second clip."""
+                subdir: str, name: str, strict: bool = False,
+                act_lora: tuple[str, str, float] | None = None) -> Path:
+        """Animate a (generated, already checked) image into a ~5 second clip. act_lora: a Wan
+        motion LoRA (high-noise file, low-noise file, strength) for clips of a sex act."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
-        self.start()
+        self.start("video")
         source = self.upload(image)
-        build = {"wan": _wan_workflow, "ltx": _ltx_workflow}[engine]
-        return self._run(build(source, positive, negative, seed, f"{subdir}/{name}"), timeout=1800)
+        if engine == "wan":
+            workflow = _wan_workflow(source, positive, negative, seed, f"{subdir}/{name}", act_lora)
+        else:
+            workflow = _ltx_workflow(source, positive, negative, seed, f"{subdir}/{name}")
+        return self._run(workflow, timeout=1800)
 
     def _run(self, workflow: dict, timeout: float = 600) -> Path:
         prompt_id = self._post(f"{self.api}/prompt",
@@ -112,16 +118,21 @@ class Comfy:
         raise TimeoutError(f"ComfyUI prompt {prompt_id} did not finish in 600s")
 
 
-VIDEO_NEGATIVE = ("blurry, low quality, worst quality, static, still image, distorted, deformed, bad anatomy, "
+VIDEO_NEGATIVE = ("blurry, low quality, worst quality, static, still image, frozen, slow motion, distorted, "
+                  "deformed, bad anatomy, "
                   "extra limbs, extra fingers, flicker, watermark, text, subtitles")
 
-# Wan 2.2 image-to-video, compressed (GGUF Q4) to fit 12 GB, with the 4-step lightx2v LoRAs:
-# the high-noise half does steps 0-2, the low-noise half steps 2-4.
+# Wan 2.2 image-to-video, compressed (GGUF Q4) to fit 12 GB, sampled in three stages:
+# 1. the high-noise expert on its own, at real CFG, for the first steps: this is where the
+#    motion is decided, and the 4-step lightx2v LoRA flattens it (and pulls away from NSFW)
+# 2. the high-noise expert with lightx2v, CFG 1
+# 3. the low-noise expert with lightx2v, CFG 1, for the detail
 WAN = {"high": "wan2.2-i2v-high-q4km.gguf", "low": "wan2.2-i2v-low-q4km.gguf",
        "lora_high": "wan2.2-i2v-lightx2v-4step-high.safetensors",
        "lora_low": "wan2.2-i2v-lightx2v-4step-low.safetensors",
        "text": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae": "wan_2.1_vae.safetensors",
-       "width": 480, "height": 704, "frames": 81, "fps": 16, "steps": 4, "shift": 5.0}
+       "width": 480, "height": 704, "frames": 81, "fps": 16, "shift": 5.0,
+       "steps": 8, "motion_steps": 2, "high_steps": 4, "motion_cfg": 3.5}
 LTX = {"ckpt": "ltxv-2b-0.9.8-distilled.safetensors", "text": "t5xxl_fp8_e4m3fn_scaled.safetensors",
        "width": 512, "height": 768, "frames": 121, "fps": 24, "steps": 8}
 
@@ -134,23 +145,10 @@ def _save_video(images: list, fps: float, prefix: str) -> dict:
     }
 
 
-def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: str) -> dict:
+def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: str,
+                  act_lora: tuple[str, str, float] | None = None) -> dict:
     w = WAN
-    half = w["steps"] // 2
-
-    def expert(tag: str) -> dict:
-        return {
-            f"unet_{tag}": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": w[tag]}},
-            f"lora_{tag}": {"class_type": "LoraLoaderModelOnly", "inputs": {
-                "model": [f"unet_{tag}", 0], "lora_name": w[f"lora_{tag}"], "strength_model": 1.0}},
-            f"model_{tag}": {"class_type": "ModelSamplingSD3", "inputs": {"model": [f"lora_{tag}", 0],
-                                                                         "shift": w["shift"]}},
-        }
-
-    sampler = {"cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "steps": w["steps"],
-               "noise_seed": seed, "positive": ["i2v", 0], "negative": ["i2v", 1]}
-    return {
-        **expert("high"), **expert("low"),
+    nodes = {
         "text": {"class_type": "CLIPLoader", "inputs": {"clip_name": w["text"], "type": "wan"}},
         "vae": {"class_type": "VAELoader", "inputs": {"vae_name": w["vae"]}},
         "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": positive}},
@@ -159,15 +157,32 @@ def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: 
         "i2v": {"class_type": "WanImageToVideo", "inputs": {
             "positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "start_image": ["image", 0],
             "width": w["width"], "height": w["height"], "length": w["frames"], "batch_size": 1}},
-        "first": {"class_type": "KSamplerAdvanced", "inputs": {
-            **sampler, "model": ["model_high", 0], "add_noise": "enable", "latent_image": ["i2v", 2],
-            "start_at_step": 0, "end_at_step": half, "return_with_leftover_noise": "enable"}},
-        "second": {"class_type": "KSamplerAdvanced", "inputs": {
-            **sampler, "model": ["model_low", 0], "add_noise": "disable", "latent_image": ["first", 0],
-            "start_at_step": half, "end_at_step": 10000, "return_with_leftover_noise": "disable"}},
-        "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["second", 0], "vae": ["vae", 0]}},
-        **_save_video(["decode", 0], w["fps"], prefix),
     }
+    for tag, act_file in (("high", act_lora and act_lora[0]), ("low", act_lora and act_lora[1])):
+        nodes[f"unet_{tag}"] = {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": w[tag]}}
+        base = [f"unet_{tag}", 0]
+        if act_file:
+            nodes[f"act_{tag}"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
+                "model": base, "lora_name": act_file, "strength_model": act_lora[2]}}
+            base = [f"act_{tag}", 0]
+        nodes[f"raw_{tag}"] = {"class_type": "ModelSamplingSD3", "inputs": {"model": base, "shift": w["shift"]}}
+        nodes[f"fast_lora_{tag}"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
+            "model": base, "lora_name": w[f"lora_{tag}"], "strength_model": 1.0}}
+        nodes[f"fast_{tag}"] = {"class_type": "ModelSamplingSD3", "inputs": {
+            "model": [f"fast_lora_{tag}", 0], "shift": w["shift"]}}
+
+    def stage(model: list, latent: list, start: int, end: int, cfg: float, first: bool, last: bool) -> dict:
+        return {"class_type": "KSamplerAdvanced", "inputs": {
+            "model": model, "positive": ["i2v", 0], "negative": ["i2v", 1], "latent_image": latent,
+            "noise_seed": seed, "steps": w["steps"], "cfg": cfg, "sampler_name": "euler", "scheduler": "simple",
+            "add_noise": "enable" if first else "disable", "start_at_step": start, "end_at_step": end,
+            "return_with_leftover_noise": "disable" if last else "enable"}}
+
+    nodes["motion"] = stage(["raw_high", 0], ["i2v", 2], 0, w["motion_steps"], w["motion_cfg"], True, False)
+    nodes["high"] = stage(["fast_high", 0], ["motion", 0], w["motion_steps"], w["high_steps"], 1.0, False, False)
+    nodes["low"] = stage(["fast_low", 0], ["high", 0], w["high_steps"], 10000, 1.0, False, True)
+    nodes["decode"] = {"class_type": "VAEDecode", "inputs": {"samples": ["low", 0], "vae": ["vae", 0]}}
+    return nodes | _save_video(["decode", 0], w["fps"], prefix)
 
 
 def _ltx_workflow(source: str, positive: str, negative: str, seed: int, prefix: str) -> dict:

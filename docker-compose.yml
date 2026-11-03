@@ -14,6 +14,9 @@ services:
     container_name: dreamfeed-worker
     restart: unless-stopped
     user: "${PUID}:${PGID}"
+    # RAM cap (the tagger, CLIP and the caption model load through here); no swap.
+    mem_limit: ${WORKER_MEM_LIMIT:?set WORKER_MEM_LIMIT in .env}
+    memswap_limit: ${WORKER_MEM_LIMIT}
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       DATA_DIR: /data
@@ -30,6 +33,10 @@ services:
       FEED_KEEP_TOP: ${FEED_KEEP_TOP:?set FEED_KEEP_TOP in .env}       # best N per night reach the feed
       FEED_KEEP_DAYS: ${FEED_KEEP_DAYS:-14}
       VIDEOS_PER_NIGHT: ${VIDEOS_PER_NIGHT:-0}           # Wan 2.2 clips after each night's images
+      # Wan 2.2 I2V motion LoRA for clips of sex acts (files in ./models/loras); empty: Wan alone
+      VIDEO_ACT_LORA_HIGH: ${VIDEO_ACT_LORA_HIGH-}
+      VIDEO_ACT_LORA_LOW: ${VIDEO_ACT_LORA_LOW-}
+      VIDEO_ACT_LORA_STRENGTH: ${VIDEO_ACT_LORA_STRENGTH:-0.8}
       CAPTION_MODEL: ${CAPTION_MODEL-}       # text model that writes each post's caption; empty: example captions
       TZ: ${TZ:?set TZ in .env}
     volumes:
@@ -77,6 +84,8 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       # ComfyUI only runs while the worker uses it; stopped after this long without a job.
       COMFY_IDLE_STOP_SECONDS: ${COMFY_IDLE_STOP_SECONDS:?set COMFY_IDLE_STOP_SECONDS in .env}
+      # ComfyUI is killed if the whole server has less than this much memory free (GB).
+      COMFY_HOST_MIN_FREE_GB: ${COMFY_HOST_MIN_FREE_GB:?set COMFY_HOST_MIN_FREE_GB in .env}
     volumes:
       - ./models:/models:ro
       - ./data:/data                          # writes to data/generated

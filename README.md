@@ -79,7 +79,34 @@ the best posts, edit personas and shows recent runs. From the shell:
 
 The worker only holds the GPU while it is working: each batch runs in a child process that
 exits when done, so the miner resumes in between. SDXL in ComfyUI needs about 8-10 GB of
-the 12 GB; Wan 2.2 needs a fresh ComfyUI per clip (capped by `COMFY_MEM_LIMIT`).
+the 12 GB; Wan 2.2 needs a fresh ComfyUI per clip.
+
+Memory: ComfyUI is capped at `COMFY_MEM_LIMIT` and the worker at `WORKER_MEM_LIMIT`, and
+ComfyUI is killed outright if the whole server drops below `COMFY_HOST_MIN_FREE_GB` free (a
+video job once pushed the server into swap and froze it). Keep `COMFY_MEM_LIMIT` a few GB
+under what `free -g` shows available with ComfyUI stopped. For clips ComfyUI runs with
+`--cache-none`, which frees the text encoder and the first half of Wan before the second loads:
+about 10 GB of RAM instead of 17+.
+
+## Clips
+
+`VIDEOS_PER_NIGHT` clips are made after each night's images (from your likes first, then the
+night's best), and the Dashboard can animate posts on request. Each is a ~5-second Wan 2.2
+image-to-video clip:
+
+- **The act.** The picture's tags decide whether it shows a sex act (cowgirl, missionary,
+  doggy, blowjob, double blowjob; `worker/dreamfeed/motion.py`). Those clips use a motion
+  LoRA trained for these acts (`VIDEO_ACT_LORA_HIGH` / `_LOW`, made for DR34ML4Y v2 from
+  Civitai) with the act's trigger word; Wan alone barely knows them. Other clips go without.
+- **The motion.** The caption model writes a plain-sentence description of what moves and
+  how, from the picture's tags (Wan follows sentences, not booru tags). It is checked like
+  a caption; without a text model, a fixed description of the act is used.
+- **Sampling.** Three stages: the high-noise half of Wan alone at real CFG for the first
+  steps, where the motion is decided, then both halves with the 4-step lightx2v LoRA for
+  speed. lightx2v on every step makes clips fast but nearly still. About 5 minutes a clip
+  (it was 2.5); in a test, the same picture moved about ten times as much.
+
+Every clip is checked on at least 8 frames, like images, before it reaches the feed.
 
 ## Style LoRAs
 
