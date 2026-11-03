@@ -15,7 +15,10 @@ from . import db, safety
 from .config import Config, GenConfig
 
 MAX_ATTEMPTS = 3
-TOP_K = 5   # taste score: mean similarity to the closest K bookmarks
+TOP_K = 5            # taste score: mean similarity to the closest K liked images/bookmarks
+SKIP_PENALTY = 0.5   # how much looking like something you skipped lowers the score
+LIKE_WEIGHT = 2      # a like counts as this many bookmarks for the medium split
+THUMB_WIDTH = 480
 
 # Tags that describe the file, not the content; never used in prompts.
 META_TAGS = {
@@ -66,8 +69,12 @@ def due_night(cfg: Config) -> str | None:
 
 
 def enabled_mediums(cfg: Config, gen: GenConfig, conn) -> dict[str, int]:
-    """Mediums with a checkpoint on disk and at least one bookmark, with bookmark counts."""
+    """Mediums with a checkpoint on disk and at least one bookmark, weighted by bookmarks and likes."""
     counts = dict(conn.execute("SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
+    for medium, likes in conn.execute(
+            "SELECT g.medium, count(*) FROM feedback f JOIN generations g ON g.id = f.generation_id"
+            " WHERE f.action = 'like' GROUP BY g.medium"):
+        counts[medium] = counts.get(medium, 0) + LIKE_WEIGHT * likes
     out = {}
     for medium, ckpt in gen.checkpoints.items():
         if not ckpt:
@@ -91,7 +98,7 @@ def plan(counts: dict[str, int], total_images: int, min_share: float) -> dict[st
 
 
 class PromptBuilder:
-    """Prompts start from one random bookmark's tags, plus a couple of the medium's
+    """Prompts start from one bookmark's tags (weighted by likes on its earlier images), plus a couple of the medium's
     most common tags, so combinations stay coherent but vary."""
 
     def __init__(self, conn, medium: str):
@@ -106,11 +113,19 @@ class PromptBuilder:
             if tag not in META_TAGS and tag not in safety.NEVER_PROMPT_TAGS:
                 self.tags[bid][tag] = score
         self.ids = sorted(self.rating)
+        # Bookmarks whose images you liked get picked more, skipped ones less.
+        weight = {bid: 1.0 for bid in self.ids}
+        for bid, action in conn.execute(
+                "SELECT g.source_bookmark, f.action FROM feedback f JOIN generations g"
+                " ON g.id = f.generation_id WHERE g.medium = ?", (medium,)):
+            if bid in weight:
+                weight[bid] += 1.0 if action == "like" else -0.5
+        self.weights = [max(0.2, weight[b]) for b in self.ids]
         freq = Counter(t for tags in self.tags.values() for t in tags)
         self.popular = [t for t, _ in freq.most_common(60)]
 
     def build(self, rng: random.Random) -> tuple[str, int]:
-        bid = rng.choice(self.ids)
+        bid = rng.choices(self.ids, weights=self.weights)[0]
         tags = self.tags.get(bid, {})
         # One people count per gender: the one the tagger was surest of.
         counts = [max((c for c in group if c in tags), key=tags.get)
@@ -149,6 +164,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                      " ON CONFLICT(night) DO UPDATE SET status='running', attempts=attempts+1",
                      (night,))
 
+    expire_old(cfg, conn, gen.feed_keep_days)
     counts = enabled_mediums(cfg, gen, conn)
     if not counts:
         _finish(conn, night, "done", {"note": "no medium has both a checkpoint and bookmarks"})
@@ -199,7 +215,7 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                         (night,)).fetchall()
     if rows:
         vision = Vision(cfg.models_dir)
-        taste = _taste_matrices(conn)
+        taste, skipped = _taste_matrices(conn)
         for gid, medium, file in rows:
             path = out_dir / file
             try:
@@ -214,8 +230,10 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
                 continue
             emb = a.embedding.astype(np.float32)
-            sims = np.sort(taste[medium] @ emb)[::-1][:TOP_K] if medium in taste else np.zeros(1)
-            _set(conn, gid, status="scored", score=float(sims.mean()))
+            score = _closest(taste.get(medium), emb)
+            if medium in skipped:
+                score -= SKIP_PENALTY * max(0.0, _closest(skipped[medium], emb) - score)
+            _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes())
 
     # Keep the best per medium, in proportion to what each medium produced.
     scored = conn.execute("SELECT id, medium, file, score FROM generations WHERE night = ? AND status = 'scored'",
@@ -228,7 +246,8 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
         quota = max(1, round(keep * len(items) / total))
         items.sort(key=lambda r: r[3], reverse=True)
         for gid, _, file, _ in items[:quota]:
-            _set(conn, gid, status="feed")
+            full, thumb = _to_jpeg(out_dir, file)
+            _set(conn, gid, status="feed", file=full, thumb=thumb)
         for gid, _, file, _ in items[quota:]:
             (out_dir / file).unlink(missing_ok=True)
             _set(conn, gid, status="ranked-out")
@@ -237,11 +256,56 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                              (night,)).fetchall())
 
 
-def _taste_matrices(conn) -> dict[str, np.ndarray]:
-    rows = defaultdict(list)
+def _taste_matrices(conn) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """What each medium should look like (bookmarks + liked images) and what to avoid (skips)."""
+    like, skip = defaultdict(list), defaultdict(list)
     for medium, blob in conn.execute("SELECT medium, embedding FROM bookmarks"):
-        rows[medium].append(np.frombuffer(blob, dtype=np.float16).astype(np.float32))
-    return {m: np.stack(v) for m, v in rows.items()}
+        like[medium].append(blob)
+    for medium, blob, action in conn.execute(
+            "SELECT g.medium, g.embedding, f.action FROM feedback f JOIN generations g"
+            " ON g.id = f.generation_id WHERE g.embedding IS NOT NULL"):
+        (like if action == "like" else skip)[medium].append(blob)
+    stack = lambda d: {m: np.stack([np.frombuffer(b, dtype=np.float16).astype(np.float32) for b in v])
+                       for m, v in d.items()}
+    return stack(like), stack(skip)
+
+
+def _closest(matrix: np.ndarray | None, emb: np.ndarray) -> float:
+    if matrix is None or not len(matrix):
+        return 0.0
+    return float(np.sort(matrix @ emb)[::-1][:TOP_K].mean())
+
+
+def _to_jpeg(out_dir: Path, file: str) -> tuple[str, str]:
+    """Feed images become a full-size JPEG and a small thumbnail, for phones on mobile data."""
+    from PIL import Image
+    src = out_dir / file
+    full, thumb = src.with_suffix(".jpg"), src.with_name(src.stem + ".thumb.jpg")
+    with Image.open(src) as img:
+        img = img.convert("RGB")
+        img.save(full, quality=90, optimize=True)
+        img.thumbnail((THUMB_WIDTH, THUMB_WIDTH * 2))
+        img.save(thumb, quality=78, optimize=True)
+    src.unlink(missing_ok=True)
+    return str(full.relative_to(out_dir)), str(thumb.relative_to(out_dir))
+
+
+def expire_old(cfg: Config, conn, keep_days: float) -> None:
+    """Delete feed images older than keep_days. Liked ones live on in data/liked."""
+    out_dir = cfg.data_dir / "generated"
+    rows = conn.execute(
+        "SELECT id, file, thumb FROM generations WHERE status = 'feed'"
+        " AND created_at < datetime('now', ?)", (f"-{keep_days} days",)).fetchall()
+    for gid, file, thumb in rows:
+        for f in (file, thumb):
+            if f:
+                (out_dir / f).unlink(missing_ok=True)
+        _set(conn, gid, status="expired")
+    for night_dir in out_dir.iterdir() if out_dir.is_dir() else []:
+        if night_dir.is_dir() and not any(night_dir.iterdir()):
+            night_dir.rmdir()
+    if rows:
+        print(f"generate: expired {len(rows)} feed images older than {keep_days:g} days", flush=True)
 
 
 def _set(conn, gid: int, **fields) -> None:

@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0e0d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f2ee" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="dreamfeed">
+<meta name="robots" content="noindex, nofollow">
+<title>dreamfeed</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%23e5604a'/></svg>">
+<style>
+/* Layout: phone-first contact sheet. Sticky header + filter chips, dense 2-column grid that
+   widens with the screen, full-screen viewer with thumb-reach Like / Skip. */
+:root {
+  --bg: #0f0e0d; --surface: #1a1917; --raise: #262421; --fg: #efece6; --muted: #9c978e;
+  --rule: #2e2b27; --accent: #e5604a; --like: #ff5d7d; --scrim: rgb(15 14 13 / .78);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --tap: 44px; --gap: 4px; --side: max(6px, env(safe-area-inset-left, 0px));
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f4f2ee; --surface: #e6e3dd; --raise: #fff; --fg: #1c1b19; --muted: #6a665e;
+    --rule: #d6d2ca; --accent: #b4321f; --like: #d62a52; --scrim: rgb(244 242 238 / .82); color-scheme: light; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 var(--font);
+  -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+svg { width: 22px; height: 22px; display: block; }
+
+/* Header */
+.top { position: sticky; top: 0; z-index: 5; background: var(--scrim);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border-bottom: 1px solid var(--rule);
+  padding-top: env(safe-area-inset-top, 0px); }
+.bar { display: flex; align-items: center; gap: 10px; min-height: 52px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+.mark { font-weight: 700; font-size: 19px; letter-spacing: -.02em; margin: 0; }
+.mark i { color: var(--accent); font-style: normal; }
+.stat { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.views { display: flex; background: var(--surface); border-radius: 999px; padding: 3px; }
+.views button { min-height: 34px; padding: 0 14px; border-radius: 999px; font-size: 14px; color: var(--muted); font-weight: 600; }
+.views button[aria-pressed="true"] { background: var(--raise); color: var(--fg); }
+.menu { width: var(--tap); height: var(--tap); display: grid; place-items: center; border-radius: 50%; color: var(--muted); }
+.chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0 10px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; min-height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--rule);
+  color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.chip[aria-pressed="true"] { border-color: var(--fg); color: var(--fg); }
+.chip span { font-size: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
+
+/* Grid */
+main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) var(--side); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
+@media (min-width: 640px) { :root { --gap: 8px; } .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 960px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } main { max-width: 1400px; margin: 0 auto; } }
+@media (min-width: 1280px) { .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.card { position: relative; margin: 0; aspect-ratio: 832 / 1216; border-radius: 6px; overflow: hidden;
+  background: var(--surface); transition: opacity .2s, transform .2s; }
+.card.gone { opacity: 0; transform: scale(.94); }
+.card .open { position: absolute; inset: 0; width: 100%; height: 100%; }
+.card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card .acts { position: absolute; inset: auto 0 0 0; display: flex; justify-content: space-between; padding: 6px;
+  background: linear-gradient(transparent, rgb(0 0 0 / .55)); pointer-events: none; }
+.card .act { pointer-events: auto; width: var(--tap); height: var(--tap); border-radius: 50%; display: grid; place-items: center;
+  color: #fff; background: rgb(0 0 0 / .32); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.act.like[aria-pressed="true"] { color: var(--like); }
+.act.like[aria-pressed="true"] svg path { fill: currentColor; }
+.badge { position: absolute; top: 6px; left: 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: #fff; background: rgb(0 0 0 / .4); padding: 3px 7px; border-radius: 999px; pointer-events: none; }
+.night { grid-column: 1 / -1; padding: 14px 8px 4px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+.night:first-child { padding-top: 6px; }
+.empty { text-align: center; color: var(--muted); padding: 18vh 24px; max-width: 34ch; margin: 0 auto; }
+.empty strong { display: block; color: var(--fg); font-size: 17px; margin-bottom: 6px; }
+#sentinel { height: 1px; }
+.loading { text-align: center; color: var(--muted); padding: 20px; font-size: 13px; }
+
+/* Menu sheet */
+.sheet { position: fixed; z-index: 8; right: max(8px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 54px);
+  background: var(--raise); border: 1px solid var(--rule); border-radius: 12px; padding: 6px; min-width: 200px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / .35); }
+.sheet p { margin: 0; padding: 8px 12px; color: var(--muted); font-size: 13px; }
+.sheet button { width: 100%; text-align: left; min-height: var(--tap); padding: 0 12px; border-radius: 8px; }
+.sheet button:hover { background: var(--surface); }
+
+/* Viewer */
+.viewer { position: fixed; inset: 0; z-index: 10; background: #000; display: grid; grid-template-rows: 1fr auto;
+  touch-action: pinch-zoom; }
+.viewer .stage { position: relative; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+.viewer .stage img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none;
+  transition: transform .18s ease, opacity .18s ease; }
+.viewer .top-row { position: absolute; z-index: 2; top: env(safe-area-inset-top, 0px); left: 0; right: 0; display: flex;
+  justify-content: space-between; align-items: center; padding: 8px max(8px, env(safe-area-inset-right, 0px)) 8px max(8px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(rgb(0 0 0 / .5), transparent); color: #fff; }
+.viewer .close { width: var(--tap); height: var(--tap); display: grid; place-items: center; border-radius: 50%; }
+.viewer .count { font-size: 13px; opacity: .8; font-variant-numeric: tabular-nums; }
+.viewer .nav { position: absolute; top: 0; bottom: 0; width: 22%; z-index: 1; }
+.viewer .nav.prev { left: 0; } .viewer .nav.next { right: 0; }
+.viewer .actions { display: flex; gap: 12px; justify-content: center; background: #000;
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.viewer .big { flex: 1; max-width: 220px; min-height: 56px; border-radius: 16px; display: flex; align-items: center;
+  justify-content: center; gap: 8px; font-weight: 600; font-size: 16px; color: #fff; background: #1f1e1c; }
+.viewer .big.like[aria-pressed="true"] { background: var(--like); }
+.viewer .big.like[aria-pressed="true"] svg path { fill: currentColor; }
+.viewer .heart { position: absolute; z-index: 3; color: #fff; opacity: 0; pointer-events: none; transform: scale(.6); transition: opacity .25s, transform .25s; }
+.viewer .heart svg { width: 96px; height: 96px; }
+.viewer .heart.show { opacity: .95; transform: scale(1); }
+.toast { position: fixed; z-index: 20; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--raise); color: var(--fg); border: 1px solid var(--rule); padding: 10px 16px; border-radius: 999px;
+  font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); max-width: calc(100vw - 32px); }
+@media (min-width: 960px) { .viewer .nav { width: 30%; cursor: pointer; } }
+@media (prefers-reduced-motion: reduce) { .card, .viewer .stage img, .viewer .heart { transition: none; } }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="bar">
+    <h1 class="mark">dream<i>feed</i></h1>
+    <span class="stat" id="stat"></span>
+    <div class="views" role="group" aria-label="View">
+      <button type="button" data-view="feed" aria-pressed="true">Feed</button>
+      <button type="button" data-view="liked" aria-pressed="false">Liked</button>
+    </div>
+    <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+    </button>
+  </div>
+  <nav class="chips" aria-label="Style">
+    <button class="chip" type="button" data-medium="all" aria-pressed="true">All</button>
+    <button class="chip" type="button" data-medium="photo" aria-pressed="false">Real-life</button>
+    <button class="chip" type="button" data-medium="anime" aria-pressed="false">Anime</button>
+    <button class="chip" type="button" data-medium="furry" aria-pressed="false">Furry</button>
+  </nav>
+</header>
+
+<div class="sheet" id="sheet" hidden>
+  <p id="sheet-info"></p>
+  <form method="post" action="logout"><button type="submit">Sign out</button></form>
+</div>
+
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden></div>
+  <div class="loading" id="loading" hidden>Loading…</div>
+  <div id="sentinel"></div>
+</main>
+
+<div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-label="Image viewer">
+  <div class="stage" id="stage">
+    <div class="top-row">
+      <button class="close" id="v-close" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <span class="count" id="v-count"></span>
+      <span style="width:44px"></span>
+    </div>
+    <button class="nav prev" id="v-prev" type="button" aria-label="Previous image"></button>
+    <img id="v-img" alt="">
+    <button class="nav next" id="v-next" type="button" aria-label="Next image"></button>
+    <div class="heart" id="v-heart"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.5h2c.7-1.3 2.2-2.5 4.3-2.5 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg></div>
+  </div>
+  <div class="actions">
+    <button class="big skip" id="v-skip" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      <span>Skip</span>
+    </button>
+    <button class="big like" id="v-like" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20s-7-4.3-8.9-8.6C1.7 8.2 3.6 5 6.9 5c1.9 0 3.3 1.1 4 2.3h2.2c.7-1.2 2.1-2.3 4-2.3 3.3 0 5.2 3.2 3.8 6.4C19 15.7 12 20 12 20z"/></svg>
+      <span>Like</span>
+    </button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<template id="card-tpl">
+  <figure class="card">
+    <button class="open" type="button" aria-label="Open image"><img loading="lazy" decoding="async" width="480" height="701" alt=""></button>
+    <span class="badge"></span>
+    <div class="acts">
+      <button class="act skip" type="button" aria-label="Skip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      <button class="act like" type="button" aria-label="Like" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20s-7-4.3-8.9-8.6C1.7 8.2 3.6 5 6.9 5c1.9 0 3.3 1.1 4 2.3h2.2c.7-1.2 2.1-2.3 4-2.3 3.3 0 5.2 3.2 3.8 6.4C19 15.7 12 20 12 20z"/></svg>
+      </button>
+    </div>
+  </figure>
+</template>
+
+<script>
+const LABEL = { photo: "Real-life", anime: "Anime", furry: "Furry" };
+const $ = id => document.getElementById(id);
+const grid = $("grid"), tpl = $("card-tpl");
+const state = { view: "feed", medium: "all", items: [], offset: 0, more: true, loading: false, idx: -1, gen: 0 };
+
+async function api(url, body) {
+  const opts = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
+  const r = await fetch(url, opts);
+  if (r.status === 401) { location.href = "login"; throw new Error("signed out"); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+  return data;
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600);
+}
+
+function nightLabel(n) {
+  if (n.startsWith("test-")) return "Test batch";
+  const d = new Date(n + "T12:00:00");
+  return isNaN(d) ? n : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+/* ---------- loading ---------- */
+async function reset() {
+  state.gen++; state.items = []; state.offset = 0; state.more = true; grid.replaceChildren();
+  $("empty").hidden = true; await loadMore();
+}
+
+async function loadMore() {
+  if (state.loading || !state.more) return;
+  state.loading = true; $("loading").hidden = false;
+  const gen = state.gen;
+  try {
+    const q = new URLSearchParams({ view: state.view, medium: state.medium, offset: state.offset });
+    const data = await api(`api/feed?${q}`);
+    if (gen !== state.gen) return;
+    state.offset += data.items.length; state.more = data.more;
+    for (const it of data.items) addCard(it);
+    showEmpty();
+  } catch (e) { if (e.message !== "signed out") toast(e.message); state.more = false; }
+  finally { state.loading = false; $("loading").hidden = true; }
+}
+
+function addCard(it) {
+  const last = state.items[state.items.length - 1];
+  if (state.view === "feed" && (!last || last.night !== it.night)) {
+    const h = document.createElement("div"); h.className = "night"; h.textContent = nightLabel(it.night);
+    grid.append(h);
+  }
+  state.items.push(it);
+  const card = tpl.content.firstElementChild.cloneNode(true);
+  card.dataset.id = it.id; it.el = card;
+  card.querySelector("img").src = `thumb/${it.id}`;
+  card.querySelector(".badge").textContent = LABEL[it.medium] || it.medium;
+  card.querySelector(".badge").hidden = state.medium !== "all";
+  card.querySelector(".open").onclick = () => openViewer(state.items.indexOf(it));
+  card.querySelector(".act.skip").onclick = () => skip(it);
+  const likeBtn = card.querySelector(".act.like"); likeBtn.onclick = () => toggleLike(it);
+  setLiked(it, it.liked);
+  grid.append(card);
+}
+
+function showEmpty() {
+  const e = $("empty");
+  if (state.items.length) { e.hidden = true; return; }
+  e.hidden = false;
+  e.innerHTML = state.view === "liked"
+    ? "<strong>No likes yet</strong>Tap the heart on images you like. They're kept here and steer what gets made next."
+    : "<strong>Nothing new</strong>New images arrive after each night's run.";
+}
+
+/* ---------- like / skip ---------- */
+function setLiked(it, liked) {
+  it.liked = liked;
+  it.el?.querySelector(".act.like").setAttribute("aria-pressed", String(liked));
+  if (state.idx >= 0 && state.items[state.idx] === it) $("v-like").setAttribute("aria-pressed", String(liked));
+}
+
+async function toggleLike(it) {
+  const want = !it.liked; setLiked(it, want);
+  try { await api("api/feedback", { id: it.id, action: want ? "like" : "clear" }); refreshSummary(); }
+  catch (e) { setLiked(it, !want); toast(e.message); return; }
+  if (!want && state.view === "liked") removeItem(it);
+}
+
+async function skip(it) {
+  const at = state.items.indexOf(it);
+  removeItem(it);
+  try { await api("api/feedback", { id: it.id, action: "skip" }); refreshSummary(); }
+  catch (e) { toast(e.message); reset(); return; }
+  if (state.idx >= 0) { if (!state.items.length) closeViewer(); else showAt(Math.min(at, state.items.length - 1)); }
+}
+
+function removeItem(it) {
+  const i = state.items.indexOf(it); if (i < 0) return;
+  state.items.splice(i, 1); state.offset = Math.max(0, state.offset - 1);
+  const el = it.el; el.classList.add("gone");
+  setTimeout(() => {
+    const prev = el.previousElementSibling, next = el.nextElementSibling;
+    el.remove();
+    if (prev?.classList.contains("night") && (!next || next.classList.contains("night"))) prev.remove();
+  }, 200);
+  showEmpty();
+  if (state.items.length < 8) loadMore();
+}
+
+/* ---------- viewer ---------- */
+const viewer = $("viewer"), vimg = $("v-img");
+function openViewer(i) {
+  viewer.hidden = false; document.body.style.overflow = "hidden";
+  history.pushState({ viewer: true }, ""); showAt(i);
+}
+function closeViewer(fromPop) {
+  if (viewer.hidden) return;
+  viewer.hidden = true; document.body.style.overflow = ""; const it = state.items[state.idx]; state.idx = -1;
+  it?.el.scrollIntoView({ block: "nearest" });
+  if (!fromPop && history.state?.viewer) history.back();
+}
+function showAt(i) {
+  if (i < 0 || i >= state.items.length) return;
+  state.idx = i; const it = state.items[i];
+  vimg.src = `img/${it.id}`; vimg.style.transform = ""; vimg.style.opacity = "";
+  $("v-count").textContent = `${LABEL[it.medium] || ""} · ${i + 1} of ${state.items.length}${state.more ? "+" : ""}`;
+  $("v-like").setAttribute("aria-pressed", String(it.liked));
+  $("v-skip").hidden = state.view === "liked";
+  for (const j of [i + 1, i - 1]) if (state.items[j]) new Image().src = `img/${state.items[j].id}`;
+  if (i >= state.items.length - 4) loadMore();
+}
+const step = d => showAt(Math.min(Math.max(state.idx + d, 0), state.items.length - 1));
+$("v-close").onclick = () => closeViewer();
+$("v-prev").onclick = () => step(-1);
+$("v-next").onclick = () => step(1);
+$("v-like").onclick = () => { const it = state.items[state.idx]; if (it) toggleLike(it); };
+$("v-skip").onclick = () => { const it = state.items[state.idx]; if (it) skip(it); };
+addEventListener("popstate", () => closeViewer(true));
+
+function flashHeart() { const h = $("v-heart"); h.classList.add("show"); setTimeout(() => h.classList.remove("show"), 450); }
+let lastTap = 0;
+vimg.addEventListener("click", () => {
+  const now = Date.now();
+  if (now - lastTap < 300) { const it = state.items[state.idx]; if (it && !it.liked) { toggleLike(it); } flashHeart(); }
+  lastTap = now;
+});
+
+let touch = null;
+$("stage").addEventListener("touchstart", e => {
+  if (e.touches.length !== 1) { touch = null; return; }
+  touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
+}, { passive: true });
+$("stage").addEventListener("touchmove", e => {
+  if (!touch || e.touches.length !== 1) return;
+  const dx = e.touches[0].clientX - touch.x, dy = e.touches[0].clientY - touch.y;
+  if (Math.abs(dy) > Math.abs(dx) && dy > 0) { vimg.style.transform = `translateY(${dy}px)`; vimg.style.opacity = String(1 - Math.min(dy / 400, .6)); }
+  else vimg.style.transform = `translateX(${dx * .6}px)`;
+}, { passive: true });
+$("stage").addEventListener("touchend", e => {
+  if (!touch) return;
+  const dx = e.changedTouches[0].clientX - touch.x, dy = e.changedTouches[0].clientY - touch.y; touch = null;
+  if (dy > 90 && Math.abs(dy) > Math.abs(dx)) return closeViewer();
+  vimg.style.transform = ""; vimg.style.opacity = "";
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
+});
+addEventListener("keydown", e => {
+  if (viewer.hidden) return;
+  const it = state.items[state.idx];
+  if (e.key === "Escape") closeViewer();
+  else if (e.key === "ArrowRight") step(1);
+  else if (e.key === "ArrowLeft") step(-1);
+  else if (e.key.toLowerCase() === "l" && it) toggleLike(it);
+  else if (e.key.toLowerCase() === "s" && it && state.view === "feed") skip(it);
+});
+
+/* ---------- header ---------- */
+for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => {
+  if (state.view === b.dataset.view) return;
+  state.view = b.dataset.view;
+  document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  reset();
+};
+for (const b of document.querySelectorAll("[data-medium]")) b.onclick = () => {
+  if (state.medium === b.dataset.medium) return;
+  state.medium = b.dataset.medium;
+  document.querySelectorAll("[data-medium]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  b.scrollIntoView({ inline: "nearest", block: "nearest" });
+  reset();
+};
+$("menu-btn").onclick = e => {
+  e.stopPropagation(); const s = $("sheet"); s.hidden = !s.hidden;
+  $("menu-btn").setAttribute("aria-expanded", String(!s.hidden));
+};
+document.addEventListener("click", e => { if (!$("sheet").hidden && !$("sheet").contains(e.target)) { $("sheet").hidden = true; $("menu-btn").setAttribute("aria-expanded", "false"); } });
+
+async function refreshSummary() {
+  try {
+    const s = await api("api/summary");
+    $("stat").textContent = s.unrated ? `${s.unrated} new` : "";
+    const r = s.last_run;
+    const run = r ? `Last run: ${nightLabel(r.night)}, ${r.status === "done" ? "finished" : r.status}` : "No nightly run yet";
+    const bm = Object.entries(s.bookmarks).map(([m, n]) => `${n} ${LABEL[m] || m}`).join(", ");
+    $("sheet-info").innerHTML = "";
+    for (const line of [run, `${s.liked} liked`, bm ? `Bookmarks: ${bm}` : ""]) {
+      if (!line) continue; const d = document.createElement("div"); d.textContent = line; $("sheet-info").append(d);
+    }
+  } catch {}
+}
+
+new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { rootMargin: "800px" }).observe($("sentinel"));
+refreshSummary();
+reset();
+</script>
+</body>
+</html>

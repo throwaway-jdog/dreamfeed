@@ -4,8 +4,10 @@ A private feed of generated images that learns your taste from your X bookmarks 
 your likes and skips. It learns *what kind of content* you like (tags), never *who* is in
 it: no bookmarked image is ever shown to the generator or used for training.
 
-Status: **sync**, **tagging**, **age checks** and **nightly generation** work. The feed page
-(`web/`) is not built yet; until then the night's picks are in `data/generated/<night>/`.
+Status: everything works: sync, tagging, age checks, nightly generation and the feed page at
+`https://<your domain>/dreamfeed/` (public, behind formlogin; phone-first). Likes and skips
+steer the next night: liked images' source bookmarks are picked more, ranking favours images
+like your likes and away from your skips, and a medium's share grows with its likes.
 
 Chosen models (in `.env`): LUSTIFY V9 for photo, WAI-Illustrious v17 for anime,
 FurryVision XL v2 for furry. Civitai downloads that need an account use `CIVITAI_API_KEY`.
@@ -124,11 +126,19 @@ dreamfeed/
 
 ## Caddy
 
-Add to the `<your domain>` block:
+In the public section of the `<your domain>` block (the app has its own sign-in):
 
 ```
-handle /dreamfeed* {
-	import lan_only
+redir /dreamfeed /dreamfeed/
+handle_path /dreamfeed/* {
 	reverse_proxy dreamfeed-web:8000
 }
 ```
+
+The Caddyfile is a single-file mount: after editing it, `docker restart caddy` (a reload
+alone keeps reading the old file).
+
+## Password
+
+First visit shows a set-password page that needs the one-time setup code from
+`docker logs dreamfeed-web`. Or: `docker compose exec web python -m formlogin passwd`.

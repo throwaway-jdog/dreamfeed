@@ -4,7 +4,7 @@
 #            generate during GENERATE_WINDOW, ranks the results, updates from likes/skips.
 #   agecheck Age estimates for real people in images (CPU).
 #   comfyui  Image generation engine. Internal only; the worker drives it over its API.
-#   web      The feed, behind formlogin, served through Caddy (home network only).
+#   web      The feed, behind formlogin, served through Caddy at /dreamfeed/.
 # Status: sync and the worker's tag phase are built; comfyui and web are not yet.
 # The miner's gpu-yield already stops mining while comfyui or the worker use the GPU.
 services:
@@ -45,6 +45,7 @@ services:
       GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env} # e.g. 01:00-07:00
       IMAGES_PER_NIGHT: ${IMAGES_PER_NIGHT:?set IMAGES_PER_NIGHT in .env}
       FEED_KEEP_TOP: ${FEED_KEEP_TOP:?set FEED_KEEP_TOP in .env}       # best N per night reach the feed
+      FEED_KEEP_DAYS: ${FEED_KEEP_DAYS:-14}
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data
@@ -99,8 +100,10 @@ services:
     logging:
       options: { max-size: 10m, max-file: "3" }
 
-  # Feed at https://<your domain>/dreamfeed through Caddy (lan_only). Set the password with
+  # Feed at https://<your domain>/dreamfeed/ through Caddy (reachable from anywhere, behind
+  # the sign-in page). Set the password with
   #   docker compose exec web python -m formlogin passwd
+  # or on first visit, with the setup code from `docker logs dreamfeed-web`.
   web:
     build:
       context: ./web
@@ -111,11 +114,12 @@ services:
     restart: unless-stopped
     user: "${PUID}:${PGID}"
     environment:
+      DATA_DIR: /data
+      STATE_DIR: /state
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
-      DREAMFEED_BASE_PATH: ${DREAMFEED_BASE_PATH:?set DREAMFEED_BASE_PATH in .env}
     volumes:
-      - ./data:/data        # feed.db (likes/skips) and generated images
+      - ./data:/data        # feed.db (likes/skips), generated images, liked copies
       - ./state:/state      # login.json, session.key
     networks: [default, apps]
     logging:

@@ -45,12 +45,18 @@ CREATE TABLE IF NOT EXISTS generations (
     seed        INTEGER NOT NULL,
     source_bookmark INTEGER,                 -- bookmark whose tags seeded the prompt
     file        TEXT,                        -- relative to data/generated
-    status      TEXT NOT NULL,               -- queued | generated | dropped | ranked-out | feed
+    status      TEXT NOT NULL,               -- queued | generated | dropped | scored | ranked-out | feed | expired
     reason      TEXT,                        -- why it was dropped
     score       REAL,                        -- taste score, higher is better
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS generations_night ON generations(night, status);
+CREATE TABLE IF NOT EXISTS feedback (
+    generation_id INTEGER PRIMARY KEY REFERENCES generations(id),
+    action        TEXT NOT NULL,             -- like | skip
+    liked_file    TEXT,                      -- copy in data/liked, kept when the feed expires
+    at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -62,4 +68,8 @@ def connect(path: Path) -> sqlite3.Connection:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(dropped)")}
     if "medium" not in cols:   # added after the first release
         conn.execute("ALTER TABLE dropped ADD COLUMN medium TEXT")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(generations)")}
+    if "embedding" not in cols:   # added with the feed
+        conn.execute("ALTER TABLE generations ADD COLUMN embedding BLOB")
+        conn.execute("ALTER TABLE generations ADD COLUMN thumb TEXT")
     return conn
