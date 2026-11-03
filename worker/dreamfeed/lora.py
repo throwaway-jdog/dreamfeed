@@ -28,7 +28,7 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 
 def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> dict:
     from PIL import Image
-    from .tagging import drop_reason
+    from .checks import drop_reason
     from .vision import Vision
 
     base = cfg.data_dir / "lora" / name

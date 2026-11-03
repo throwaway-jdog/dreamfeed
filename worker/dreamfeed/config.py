@@ -22,26 +22,21 @@ class Config:
     def __init__(self):
         self.data_dir = Path(need("DATA_DIR"))
         self.models_dir = Path(need("MODELS_DIR"))
-        self.bookmarks_dir = self.data_dir / "bookmarks"
         self.db_path = self.data_dir / "feed.db"
         # The fictional posters (private: describes who you follow, so it lives in data/, not git).
         self.personas_path = self.data_dir / "personas.json"
-        # Tagger confidence needed to keep a descriptive tag in the profile.
-        self.tag_threshold = opt_float("TAG_THRESHOLD", 0.35)
-        # Tagger confidence at which a youth tag drops the bookmark (deliberately low).
+        # Tagger confidence at which a youth tag drops an image (deliberately low).
         self.youth_tag_threshold = opt_float("YOUTH_TAG_THRESHOLD", 0.2)
         # Real-life images: MiVOLO age estimates from the agecheck service. Any clearly
-        # visible face estimated under this age drops the bookmark. Never below 18.
+        # visible face estimated under this age drops the image. Never below 18.
         self.agecheck_url = need("AGECHECK_URL").rstrip("/")
         self.photo_min_age = max(18.0, opt_float("PHOTO_MIN_AGE", 21))
         # Faces smaller than this (pixels, shorter side) are too small to judge.
         self.min_face_px = opt_float("MIN_FACE_PX", 48)
-        # CLIP share for "child" over "adult" descriptions at which a bookmark is dropped.
+        # CLIP share for "child" over "adult" descriptions at which an image is dropped.
         # Used for drawings, and for photos where no face is clear enough to estimate.
         self.age_threshold = opt_float("AGE_THRESHOLD", 0.35)
-        # Furry-tag confidence that moves a drawing from anime to furry.
-        self.furry_threshold = opt_float("FURRY_THRESHOLD", 0.5)
-        # How often the worker looks for new bookmarks, the nightly window and dashboard requests.
+        # How often the worker checks the nightly window and dashboard requests.
         self.scan_seconds = opt_float("SCAN_SECONDS", 10)
 
     def generation(self) -> "GenConfig":

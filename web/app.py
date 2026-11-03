@@ -7,13 +7,15 @@ GET  /avatar/<handle>   profile picture
 GET  /api/summary       counts and the last run, for the header
 GET  /thumb/<id>        small JPEG for the grid
 GET  /img/<id>          full image for the viewer
-GET  /api/dashboard     scan state, profile, queue, recent runs
+GET  /api/dashboard     queue and recent runs
+GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
+POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
+POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
+POST /api/personas/avatar  {"handle": H} new profile picture the next time they post
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
-POST /api/scan          ask the sync container to fetch bookmarks now
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images
-POST /api/reset         {"confirm": "start over"} forget all bookmarks/tags, re-download and re-tag
 (POSTs are JSON only.)
 """
 import json
@@ -22,12 +24,15 @@ import re
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import formlogin
 import formlogin.httpserver
+
+from dreamfeed import personas as people   # the worker's own persona rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -43,8 +48,8 @@ GENERATED = DATA / "generated"
 LIKED = DATA / "liked"
 DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
-SYNC = DATA / "sync"
-BOOKMARKS_IN = DATA / "bookmarks"
+PERSONAS = DATA / "personas.json"
+LORA_DIR = Path(required("LORA_DIR"))
 GENERATE_WINDOW = required("GENERATE_WINDOW")
 MAX_IMAGES = 400
 PORT = 8000
@@ -92,7 +97,7 @@ def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
         where.append("f.action = 'like'")
         order = "f.at DESC"
     else:   # the timeline: persona posts only (v1 images stay reachable from Liked)
-        where.append("g.status = 'feed' AND g.persona IS NOT NULL AND (f.action IS NULL OR f.action = 'like')")
+        where.append("g.status = 'feed' AND p.active = 1 AND (f.action IS NULL OR f.action = 'like')")
         order = "coalesce(g.posted_at, g.created_at) DESC, g.id DESC"
     sql = (f"SELECT g.id, g.night, g.medium, g.score, g.kind, g.caption, g.persona, g.posted_at, g.created_at,"
            f" f.action, p.name, p.avatar,"
@@ -134,15 +139,14 @@ def avatar_path(handle: str) -> Path | None:
 
 
 def summary() -> dict:
-    out = {"unrated": 0, "liked": 0, "bookmarks": {}, "last_run": None}
+    out = {"unrated": 0, "liked": 0, "last_run": None}
     try:
         with db() as conn:
             out["unrated"] = conn.execute(
                 "SELECT count(*) FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id"
-                " WHERE g.status = 'feed' AND g.persona IS NOT NULL AND f.action IS NULL").fetchone()[0]
+                " JOIN personas p ON p.handle = g.persona"
+                " WHERE g.status = 'feed' AND p.active = 1 AND f.action IS NULL").fetchone()[0]
             out["liked"] = conn.execute("SELECT count(*) FROM feedback WHERE action = 'like'").fetchone()[0]
-            out["bookmarks"] = dict(conn.execute(
-                "SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
             run = conn.execute("SELECT night, status, finished_at FROM runs WHERE night NOT LIKE 'test-%'"
                                " ORDER BY started_at DESC LIMIT 1").fetchone()
             if run:
@@ -208,15 +212,9 @@ def read_json(path: Path) -> dict:
 
 
 def dashboard() -> dict:
-    sync = read_json(SYNC / "status.json")
-    sync["requested"] = (SYNC / "scan-now").exists()
-    waiting = sum(1 for p in BOOKMARKS_IN.iterdir() if p.is_file()) if BOOKMARKS_IN.is_dir() else 0
-    out = {"sync": sync, "waiting": waiting, "window": GENERATE_WINDOW, "bookmarks": {}, "dropped": {},
-           "runs": [], "jobs": [], "liked": 0}
+    out = {"window": GENERATE_WINDOW, "runs": [], "jobs": [], "liked": 0}
     try:
         with db() as conn:
-            out["bookmarks"] = dict(conn.execute("SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
-            out["dropped"] = dict(conn.execute("SELECT reason, count(*) FROM dropped GROUP BY reason").fetchall())
             out["liked"] = conn.execute("SELECT count(*) FROM feedback WHERE action = 'like'").fetchone()[0]
             for r in conn.execute("SELECT night, status, stats, progress, started_at, finished_at FROM runs"
                                   " WHERE night NOT LIKE 'test-%' ORDER BY started_at DESC LIMIT 8"):
@@ -230,14 +228,6 @@ def dashboard() -> dict:
     except sqlite3.OperationalError:
         pass
     return out
-
-
-def request_scan() -> dict:
-    status = read_json(SYNC / "status.json")
-    if status.get("state") != "running":
-        SYNC.mkdir(exist_ok=True)
-        (SYNC / "scan-now").touch()
-    return {"ok": True}
 
 
 def queue_generation(req: dict) -> dict:
@@ -264,19 +254,6 @@ def queue_generation(req: dict) -> dict:
         gid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
                            (json.dumps(params),)).lastrowid
     return {"job": gid}
-
-
-def request_reset(req: dict) -> dict:
-    if req.get("confirm") != "start over":
-        raise ValueError('send {"confirm": "start over"}')
-    with db() as conn:
-        pending = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
-                               " AND params LIKE '%\"kind\": \"reset\"%'").fetchone()[0]
-        if pending:
-            raise ValueError("a start-over is already waiting")
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
-                           (json.dumps({"kind": "reset"}),)).lastrowid
-    return {"job": jid}
 
 
 MAX_PROMPT = 500
@@ -327,6 +304,219 @@ def cancel(req: dict) -> dict:
                          " WHERE id = ? AND status = 'queued'", (int(req["job"]),))
         if "night" in req:
             conn.execute("UPDATE runs SET cancel = 1 WHERE night = ? AND status = 'running'", (str(req["night"]),))
+    return {"ok": True}
+
+
+# ---------- persona editor ----------
+# Edits go to data/personas.json, the same file the worker reads every run. Each save is
+# checked with the worker's own rules (blocked tags, placeholders, strict mode) before it is
+# written, so a bad edit is refused here instead of breaking the nightly run.
+EDIT_LOCK = threading.Lock()
+TEXT_FIELDS = {"name": 60, "bio": 300, "look": 1000, "avatar": 500, "negative": 500, "based_on": 200}
+LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "settings": (40, 200), "emoji": (10, 16),
+               "hashtags": (10, 40)}
+MAX_POST_KINDS = 12
+NEW_FILE = {"_note": "Private. Fictional posters for the dreamfeed timeline, edited from the dashboard or by hand. "
+                     "based_on is a private reminder only; it is never shown or used in prompts.", "personas": []}
+
+
+def read_personas() -> dict:
+    if not PERSONAS.is_file():
+        return json.loads(json.dumps(NEW_FILE))
+    raw = json.loads(PERSONAS.read_text())
+    raw.setdefault("personas", [])
+    return raw
+
+
+def write_personas(raw: dict) -> None:
+    tmp = PERSONAS.with_name(PERSONAS.name + ".tmp")
+    tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n")
+    if PERSONAS.is_file():
+        shutil.copy2(PERSONAS, PERSONAS.with_name(PERSONAS.name + ".bak"))   # one step of undo
+    os.replace(tmp, PERSONAS)
+
+
+def styles() -> list[dict]:
+    """Trained style LoRAs: a prep.json from lora-prep and the trainer's output file."""
+    out = []
+    for prep in sorted((DATA / "lora").glob("*/prep.json")):
+        info, name = read_json(prep), prep.parent.name
+        file = f"style-{name}.safetensors"
+        if info.get("trigger") and info.get("medium") in MEDIUMS and (LORA_DIR / file).is_file():
+            out.append({"name": name, "medium": info["medium"], "trigger": info["trigger"], "file": file})
+    return out
+
+
+def persona_config() -> dict:
+    out = {"personas": [], "styles": styles(), "error": None,
+           "ratings": list(people.RATINGS), "mediums": list(MEDIUMS)}
+    try:
+        raw = read_personas()
+    except ValueError as e:
+        out["error"] = f"data/personas.json is not valid JSON: {e}"
+        return out
+    try:
+        checked = {p.handle: p for p in people.parse(raw)}
+    except (ValueError, TypeError) as e:
+        checked, out["error"] = {}, str(e)
+    with db() as conn:
+        avatars = {r[0] for r in conn.execute("SELECT handle FROM personas WHERE avatar IS NOT NULL")}
+    for entry in raw["personas"]:
+        p = checked.get(entry.get("handle"))
+        lo = entry.get("lora") or None
+        out["personas"].append(entry | {
+            "strict": bool(p and p.strict), "has_avatar": entry.get("handle") in avatars,
+            "lora": lo and {"style": str(lo.get("file", "")).removeprefix("style-").removesuffix(".safetensors"),
+                            "strength": lo.get("strength", 0.8), "female_only": bool(lo.get("female_only")),
+                            "enabled": lo.get("enabled", True) is not False}})
+    return out
+
+
+def _text(v, limit: int, what: str) -> str:
+    v = " ".join(str(v or "").split())
+    if len(v) > limit:
+        raise ValueError(f"{what} is too long (at most {limit} characters)")
+    return v
+
+
+def _list(v, n: int, limit: int, what: str) -> list[str]:
+    items = [_text(x, limit, what) for x in (v or []) if str(x).strip()]
+    if len(items) > n:
+        raise ValueError(f"at most {n} {what}")
+    return items
+
+
+def _num(v, lo: float, hi: float, what: str) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a number")
+    if not lo <= x <= hi:
+        raise ValueError(f"{what} must be between {lo:g} and {hi:g}")
+    return round(x, 3)
+
+
+def _apply(entry: dict, src: dict) -> dict:
+    """The editable fields from the dashboard onto the stored entry (other keys are kept)."""
+    if not isinstance(src, dict):
+        raise ValueError("send the persona as an object")
+    entry = dict(entry)
+    for k, limit in TEXT_FIELDS.items():
+        if k in src:
+            entry[k] = _text(src[k], limit, k)
+            if not entry[k] and k != "name":
+                entry.pop(k)
+    for k, (n, limit) in LIST_FIELDS.items():
+        if k in src:
+            entry[k] = _list(src[k], n, limit, k)
+            if not entry[k]:
+                entry.pop(k)
+    if "medium" in src:
+        entry["medium"] = src["medium"]
+    if "weight" in src:
+        entry["weight"] = _num(src["weight"], 0.1, 5, "how often they post")
+    if "video_share" in src:
+        entry["video_share"] = _num(src["video_share"], 0, 1, "video share")
+    if "paused" in src:
+        entry["paused"] = bool(src["paused"])
+        if not entry["paused"]:
+            entry.pop("paused")
+    if "posts" in src:
+        if not isinstance(src["posts"], list) or len(src["posts"]) > MAX_POST_KINDS:
+            raise ValueError(f"at most {MAX_POST_KINDS} kinds of post")
+        entry["posts"] = [{"kind": _text(k.get("kind") or "post", 40, "kind"),
+                           "weight": _num(k.get("weight", 1), 0.1, 10, "post weight"),
+                           "rating": k.get("rating") if k.get("rating") in people.RATINGS else "explicit",
+                           "prompt": _text(k.get("prompt"), 1000, "prompt"),
+                           "captions": _list(k.get("captions"), 30, 280, "captions")}
+                          for k in src["posts"] if isinstance(k, dict)]
+    if "lora" in src:
+        entry["lora"] = _lora(entry.get("lora"), src["lora"], entry.get("medium"))
+        if not entry["lora"]:
+            entry.pop("lora")
+    return entry
+
+
+def _lora(old: dict | None, want, medium: str | None) -> dict | None:
+    if not want:
+        return None
+    if not isinstance(want, dict):
+        raise ValueError("bad style settings")
+    name = str(want.get("style", ""))
+    style = next((s for s in styles() if s["name"] == name), None)
+    if style:
+        if style["medium"] != medium:
+            raise ValueError(f"the {name} style is trained for {style['medium']}, not {medium}")
+        out = {"file": style["file"], "trigger": style["trigger"]}
+    elif old and str(old.get("file", "")) == f"style-{name}.safetensors":
+        out = {"file": old["file"], "trigger": old.get("trigger", "")}   # file missing for now; keep it
+    else:
+        raise ValueError("pick a trained style")
+    out["strength"] = _num(want.get("strength", 0.8), 0.2, 1.2, "style strength")
+    if want.get("female_only"):
+        out["female_only"] = True
+    if want.get("enabled", True) is False:
+        out["enabled"] = False
+    return out
+
+
+def _commit(raw: dict) -> list:
+    checked = people.parse(raw)   # people.Invalid (a ValueError) becomes a 400 with its message
+    write_personas(raw)
+    with db() as conn:
+        people.sync(conn, checked)
+    return checked
+
+
+def save_persona(req: dict) -> dict:
+    original = req.get("original")
+    with EDIT_LOCK:
+        raw = read_personas()
+        handles = [p.get("handle") for p in raw["personas"]]
+        if original:
+            if original not in handles:
+                raise LookupError("that persona no longer exists; reload the page")
+            i = handles.index(original)
+            raw["personas"][i] = _apply(raw["personas"][i], req.get("persona")) | {"handle": original}
+        else:
+            handle = str((req.get("persona") or {}).get("handle", "")).strip().lower()
+            if not HANDLE.match(handle):
+                raise ValueError("handle must be 2-20 of a-z 0-9 _")
+            if handle in handles:
+                raise ValueError(f"@{handle} is taken")
+            with db() as conn:   # a removed persona's old posts would come back under the new one
+                if conn.execute("SELECT 1 FROM personas WHERE handle = ?", (handle,)).fetchone():
+                    raise ValueError(f"@{handle} was used before; pick another handle")
+            raw["personas"].append(_apply({"handle": handle}, req.get("persona")) | {"handle": handle})
+        _commit(raw)
+    return {"ok": True}
+
+
+def delete_persona(req: dict) -> dict:
+    handle = str(req.get("handle", ""))
+    with EDIT_LOCK:
+        raw = read_personas()
+        keep = [p for p in raw["personas"] if p.get("handle") != handle]
+        if len(keep) == len(raw["personas"]):
+            raise LookupError("no such persona")
+        raw["personas"] = keep
+        _commit(raw)
+    return {"ok": True}
+
+
+def new_avatar(req: dict) -> dict:
+    handle = str(req.get("handle", ""))
+    if not HANDLE.match(handle):
+        raise ValueError("bad handle")
+    with db() as conn:
+        row = conn.execute("SELECT avatar FROM personas WHERE handle = ? AND active = 1", (handle,)).fetchone()
+        if not row:
+            raise LookupError("no such persona")
+        conn.execute("UPDATE personas SET avatar = NULL WHERE handle = ?", (handle,))
+    if row["avatar"]:
+        old = (GENERATED / row["avatar"]).resolve()
+        if old.is_relative_to(GENERATED.resolve()):
+            old.unlink(missing_ok=True)
     return {"ok": True}
 
 
@@ -408,6 +598,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset, persona))
         if path == "/api/personas":
             return self.send(200, personas())
+        if path == "/api/personas/edit":
+            return self.send(200, persona_config())
         if path.startswith("/avatar/"):
             file = avatar_path(path[len("/avatar/"):])
             if not file:
@@ -429,9 +621,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
-        actions = {"/api/feedback": self.feedback, "/api/scan": lambda r: request_scan(),
-                   "/api/generate": queue_generation, "/api/cancel": cancel, "/api/reset": request_reset,
-                   "/api/animate": request_animation}
+        actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
+                   "/api/animate": request_animation, "/api/personas/save": save_persona,
+                   "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

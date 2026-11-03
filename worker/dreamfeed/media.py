@@ -1,14 +1,12 @@
 import io
-import re
 import subprocess
-import time
 from pathlib import Path
 
 from PIL import Image
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".m4v"}
-FRAME_MAX_SIDE = 1280   # frames are shrunk to this, plenty for tagging and age estimates
+FRAME_MAX_SIDE = 1280   # frames are shrunk to this, plenty for the age checks
 
 
 def frame_count(duration: float) -> int:
@@ -28,23 +26,6 @@ def frame_times(duration: float, minimum: int = 3) -> list[float]:
 
 class Unreadable(Exception):
     pass
-
-
-def ready_files(folder: Path, min_age: float = 30) -> list[Path]:
-    """Finished downloads (gallery-dl moves them in from .part when complete)."""
-    if not folder.is_dir():
-        return []
-    now = time.time()
-    return sorted(
-        p for p in folder.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXT | VIDEO_EXT
-        and now - p.stat().st_mtime >= min_age
-    )
-
-
-def tweet_id(path: Path) -> str | None:
-    m = re.match(r"(\d+)_\d+$", path.stem)
-    return m.group(1) if m else None
 
 
 def kind(path: Path) -> str:

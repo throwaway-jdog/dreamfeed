@@ -1,20 +1,17 @@
 """
-python -m dreamfeed run       Scheduler (container default). Every SCAN_SECONDS: age-checks new
-                              bookmarks, and inside GENERATE_WINDOW runs tonight's persona posts
-                              if it hasn't finished. Each job runs in a child process, so the
+python -m dreamfeed run       Scheduler (container default). Every SCAN_SECONDS: runs requests
+                              from the dashboard, and inside GENERATE_WINDOW tonight's persona
+                              posts if they haven't finished. Each job runs in a child process, so the
                               GPU is only held while there is work (the miner's gpu-yield
                               pauses mining whenever any process holds it).
-python -m dreamfeed tag       Tag whatever is waiting, then exit.
 python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
     --now                     Run a test batch right away instead (night "test-<time>").
     --images N --keep K       Override IMAGES_PER_NIGHT / FEED_KEEP_TOP for this run.
     --persona HANDLE          Only these personas (repeatable).
-python -m dreamfeed job ID    Run a request queued from the dashboard (generation or reset).
-python -m dreamfeed reset     Forget all bookmarks and tags and re-download everything.
-                              Prefer the dashboard's "Start over"; it waits for running work.
+python -m dreamfeed job ID    Run a request queued from the dashboard (posts or clips).
 python -m dreamfeed lora-prep NAME --medium M --trigger W
                               Check and caption data/lora/NAME/raw for style-LoRA training.
-python -m dreamfeed report    Profile summary: mediums, dropped counts, top tags, recent runs.
+python -m dreamfeed report    Per-persona posts, likes and drops, and recent runs.
 """
 import argparse
 import datetime as dt
@@ -35,7 +32,7 @@ TRAINING_STALE = 8 * 3600   # a lock older than this is left over from a crashed
 
 
 def training(cfg: Config) -> bool:
-    """The trainer container holds the GPU; generation waits (tagging is light enough to go on)."""
+    """The trainer container holds the GPU; generation and dashboard requests wait."""
     lock = cfg.data_dir / "lora" / ".training"
     try:
         return time.time() - lock.stat().st_mtime < TRAINING_STALE
@@ -46,16 +43,12 @@ def training(cfg: Config) -> bool:
 def main() -> None:
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("run", [])
     if cmd == "run":
-        from . import media
         from .generate import due_night, next_job, recover
         cfg = Config()
         cfg.generation()   # fail at start, not at 1am, if generation settings are missing
         recover(cfg)
-        cfg.bookmarks_dir.mkdir(parents=True, exist_ok=True)
-        print(f"dreamfeed: watching {cfg.bookmarks_dir}", flush=True)
+        print("dreamfeed: waiting for the nightly window and dashboard requests", flush=True)
         while True:
-            if media.ready_files(cfg.bookmarks_dir):
-                child("tag")
             if not training(cfg):
                 if due_night(cfg):
                     child("generate")
@@ -63,9 +56,6 @@ def main() -> None:
                 if job:
                     child("job", str(job))
             time.sleep(cfg.scan_seconds)
-    elif cmd == "tag":
-        from .tagging import run_once
-        run_once(Config())
     elif cmd == "generate":
         ap = argparse.ArgumentParser(prog="dreamfeed generate")
         ap.add_argument("--now", action="store_true")
@@ -79,11 +69,6 @@ def main() -> None:
     elif cmd == "job":
         from .generate import run_job
         run_job(Config(), int(rest[0]))
-    elif cmd == "reset":
-        from . import db
-        from .generate import reset_profile
-        cfg = Config()
-        reset_profile(cfg, db.connect(cfg.db_path))
     elif cmd == "lora-prep":
         from .lora import main as lora_prep
         lora_prep(rest)

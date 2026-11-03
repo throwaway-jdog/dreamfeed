@@ -15,8 +15,16 @@ I2V for clips. Civitai downloads that need an account use `CIVITAI_API_KEY`.
 
 ## Personas
 
-They live in `data/personas.json`, which is private (it describes whose posting styles
-inspired them) and is not in git. Start from `personas.example.json`:
+Add, change, pause and remove them on the Dashboard (**Personas**). The editor covers
+everything below, including turning a trained style on or off. Every save is checked with
+the worker's own rules first (blocked tags, placeholders, style medium), so a bad edit is
+refused with a message instead of breaking the nightly run. Removing a persona takes their
+posts out of the timeline; liked posts stay in Liked.
+
+They are stored in `data/personas.json`, which is private (it describes whose posting
+styles inspired them) and is not in git; you can also edit it by hand. Each dashboard save
+keeps the previous version as `data/personas.json.bak`. The format, from
+`personas.example.json`:
 
 - `handle`, `name`, `bio`, `medium` (`anime` or `furry`), `look` (tags that keep the
   persona recognisable), `avatar` (extra tags for the profile picture), `emoji`,
@@ -26,6 +34,9 @@ inspired them) and is not in git. Start from `personas.example.json`:
   `"female_only": true` for a LoRA trained mostly on women, which otherwise turns male
   characters female: those posts then skip the LoRA). Artist LoRAs can bake in the artist's
   watermark faintly, so give those personas `"negative": "watermark, text, signature"`.
+  `"enabled": false` switches the style off and keeps its settings.
+- `paused`: keeps the profile and posts but makes nothing new, except on **Post now**.
+- `based_on`: a private note, never shown or used in prompts.
 - `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
@@ -36,13 +47,12 @@ Invalid entries or blocked tags stop the run with a clear error instead of being
 
 ## Running
 
-1. Export your X cookies (Netscape `cookies.txt`) and set `X_COOKIES_FILE`; bookmarks are
-   still synced into `BOOKMARK_COPY_DIR` and age-checked, but no longer steer generation.
-2. `cp .env.example .env`, fill it in, and `cp personas.example.json data/personas.json`.
-3. `docker compose up -d --build`
+1. `cp .env.example .env` and fill it in.
+2. `docker compose up -d --build`
+3. Add personas on the Dashboard (or `cp personas.example.json data/personas.json`).
 
 Generation runs every night inside `GENERATE_WINDOW`. The Dashboard can queue a run, animate
-the best posts, scan bookmarks and shows recent runs. From the shell:
+the best posts, edit personas and shows recent runs. From the shell:
 
        docker compose exec worker python -m dreamfeed generate --now --images 12 --keep 6
        docker compose exec worker python -m dreamfeed generate --now --images 8 --keep 3 --persona some_handle
@@ -51,21 +61,33 @@ The worker only holds the GPU while it is working: each batch runs in a child pr
 exits when done, so the miner resumes in between. SDXL in ComfyUI needs about 8-10 GB of
 the 12 GB; Wan 2.2 needs a fresh ComfyUI per clip (capped by `COMFY_MEM_LIMIT`).
 
+## Style LoRAs
+
+A persona can post in a trained artist style. To train one, put the artist's images in
+`data/lora/NAME/raw/`, then:
+
+       docker compose exec worker python -m dreamfeed lora-prep NAME --medium furry --trigger NAME_style
+       docker compose run --rm trainer NAME BASE_CHECKPOINT
+
+`lora-prep` runs every image through the strict adult checks and the feral filter and
+deletes anything flagged before captioning. The trainer writes
+`models/loras/style-NAME.safetensors` and holds generation while it runs. The style then
+appears in the persona editor for personas of the same medium.
+
 ## Safety rules (built into the worker, not optional settings)
 
-- **Bookmarks never reach the generator.** No img2img, IP-Adapter, face swap, or LoRA
-  training on bookmark media. Bookmarks only contribute tag counts and an embedding.
+- **Style LoRAs only learn drawings, never real people**, and every training image goes
+  through the checks below at the strict threshold first; flagged images are deleted.
 - **Adults only, in every medium.** Every prompt includes an explicit adult descriptor in
   that medium's style (e.g. `mature female, adult` for anime, `adult, anthro` for
   furry), and every negative prompt includes a fixed per-medium list of youth terms.
   Booru and e621 tags that mean a minor (`loli`, `shota`, `cub`, `child`, `young`,
-  `aged_down` and their variants) are never used in prompts. A bookmark carrying any of
-  them is dropped and deleted.
-- **Real-life age estimates.** Real-life bookmarks go through MiVOLO v2, a dedicated age
-  estimator, in the `agecheck` service. If any clearly visible face (at least
-  `MIN_FACE_PX`) is estimated under `PHOTO_MIN_AGE` (default 21, never below 18), the
-  bookmark is dropped. Body-only estimates are ignored as too unreliable. Photos with
-  no clear face fall back to the CLIP check (`AGE_THRESHOLD`), as drawings do.
+  `aged_down` and their variants) are never used in prompts: a persona using one is
+  refused. A generated image carrying any of them is dropped and deleted.
+- **Real-life age estimates.** Any real-life image goes through MiVOLO v2, a dedicated
+  age estimator, in the `agecheck` service. If any clearly visible face (at least
+  `MIN_FACE_PX`) is estimated under `PHOTO_MIN_AGE` (default 21, never below 18), it is
+  dropped. Drawings use the CLIP check (`AGE_THRESHOLD`).
 - **Stricter for characters models draw young.** Personas whose look reads as a feminine
   man, androgynous, trans or tomboy are marked strict automatically (a file can turn it on,
   never off). Their prompts get extra adult terms and youth negatives, and their images
@@ -84,13 +106,14 @@ the 12 GB; Wan 2.2 needs a fresh ComfyUI per clip (capped by `COMFY_MEM_LIMIT`).
 ```
 dreamfeed/
   docker-compose.yml  .env  .env.example  README.md
-  sync/      Dockerfile + loop around gallery-dl
-  worker/    Dockerfile + tagger, CLIP, prompt builder, ComfyUI client, ranker
+  worker/    Dockerfile + personas, checks, ComfyUI client, ranker, lora-prep
+  trainer/   Dockerfile + kohya sd-scripts style-LoRA training
   comfyui/   Dockerfile pinning a ComfyUI release; workflow JSON the worker fills in
   web/       Dockerfile + small Python app using formlogin
-  models/    checkpoints/, tagger/, clip/          (downloads, ~15 GB)
-  data/      feed.db                               (tags, embeddings, likes; small)
-             bookmarks/                            (transient downloads)
+  models/    checkpoints/, loras/, tagger/, clip/  (downloads and trained styles, ~20 GB)
+  data/      feed.db                               (posts, embeddings, likes; small)
+             personas.json                         (private persona definitions)
+             lora/NAME/                            (style training images and captions)
              generated/                            (tonight's output and the feed)
              liked/                                (images you liked, copied out)
   state/     login.json, session.key
@@ -99,12 +122,10 @@ dreamfeed/
 
 ## Backup
 
-- **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/liked/`,
-  `state/`, `.env`, and the source folders.
-- **Excluded** in `backup/excludes.txt`: `models/` (re-downloadable),
-  `data/bookmarks/`, `data/generated/`, and `logs/`.
-- **Restore note:** the cookies file lives at `X_COOKIES_FILE`. If it's outside
-  ~/docker, re-export it from the browser after a restore.
+- **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,
+  `data/liked/`, `state/`, `.env`, and the source folders.
+- **Excluded** in `backup/excludes.txt`: `models/` (re-downloadable; trained styles can be
+  retrained from `data/lora/`), `data/generated/`, and `logs/`.
 
 ## Caddy
 

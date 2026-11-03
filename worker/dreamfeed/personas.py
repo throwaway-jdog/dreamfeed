@@ -73,6 +73,7 @@ class Persona:
     lora_female_only: bool = False          # skip the LoRA for male characters
     trigger: str = ""                       # the LoRA's trigger word, put first in every prompt
     negative: str = ""                      # extra negative prompt for every post (e.g. "face, eyes")
+    paused: bool = False                    # keeps the profile and posts, makes no new ones
 
     def prompt_for(self, post: Post, rng: random.Random) -> str:
         fill = {
@@ -108,58 +109,79 @@ class Persona:
         return text
 
 
+class Invalid(ValueError):
+    """A persona that can't be used, with a message fit to show on the dashboard."""
+
+
 def load(path: Path) -> list[Persona]:
     """Read and check the personas file. Fails loudly on anything invalid or blocked."""
     if not path.is_file():
         return []
     try:
-        raw = json.loads(path.read_text())
-    except ValueError as e:
-        raise SystemExit(f"personas: {path} is not valid JSON: {e}")
+        return parse(json.loads(path.read_text()))
+    except ValueError as e:   # bad JSON, or Invalid
+        raise SystemExit(f"personas: {path}: {e}")
+
+
+def parse(raw: dict) -> list[Persona]:
+    """Check every persona in the file's contents (the dashboard runs this before saving)."""
     out, seen = [], set()
     for i, p in enumerate(raw.get("personas", [])):
-        where = f"personas[{i}] ({p.get('handle', '?')})"
-        handle = str(p.get("handle", ""))
-        if not HANDLE.match(handle) or handle in seen:
-            raise SystemExit(f"personas: {where}: handle must be 2-20 of a-z 0-9 _ and unique")
-        seen.add(handle)
-        if p.get("medium") not in MEDIUMS:
-            raise SystemExit(f"personas: {where}: medium must be one of {MEDIUMS}")
-        posts = []
-        for k in p.get("posts", []):
-            rating = k.get("rating", "explicit")
-            if rating not in RATINGS or not k.get("prompt") or not k.get("captions"):
-                raise SystemExit(f"personas: {where}: every post needs prompt, captions and a valid rating")
-            posts.append(Post(str(k.get("kind", "post")), float(k.get("weight", 1)), k["prompt"], rating,
-                              [str(c) for c in k["captions"]]))
-        if not posts:
-            raise SystemExit(f"personas: {where}: needs at least one post")
-        persona = Persona(
-            handle=handle, name=str(p.get("name") or handle), medium=p["medium"], bio=str(p.get("bio", "")),
-            look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
-            posts=posts, outfits=list(p.get("outfits", [])), settings=list(p.get("settings", [])),
-            characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
-            hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
-            weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")))
-        text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.settings, *persona.characters,
-                         *(k.prompt for k in posts)])
-        bad = safety.blocked(text)
-        if bad:
-            raise SystemExit(f"personas: {where}: uses blocked tags: {', '.join(bad)}")
-        # Strict is automatic for feminine-man, androgynous, trans and tomboy looks; the file can
-        # turn it on for anyone but never off.
-        persona.strict = bool(p.get("strict")) or safety.needs_strict(text)
-        if p.get("lora"):
-            lo = p["lora"]
-            if not isinstance(lo, dict) or not str(lo.get("file", "")).endswith(".safetensors"):
-                raise SystemExit(f"personas: {where}: lora needs {{\"file\": \"x.safetensors\", \"strength\": 0.8, \"trigger\": \"word\"}}")
+        out.append(_persona(p, f"{p.get('name') or p.get('handle') or f'persona {i + 1}'}", seen))
+    return out
+
+
+def _persona(p: dict, where: str, seen: set) -> Persona:
+    handle = str(p.get("handle", ""))
+    if not HANDLE.match(handle) or handle in seen:
+        raise Invalid(f"{where}: handle must be 2-20 of a-z 0-9 _ and unique")
+    seen.add(handle)
+    if p.get("medium") not in MEDIUMS:
+        raise Invalid(f"{where}: medium must be one of {', '.join(MEDIUMS)}")
+    posts = []
+    for k in p.get("posts", []):
+        rating = k.get("rating", "explicit")
+        if rating not in RATINGS or not k.get("prompt") or not k.get("captions"):
+            raise Invalid(f"{where}: every kind of post needs a prompt, captions and a rating")
+        try:
+            k["prompt"].format(outfit="", cosplay="", setting="", character="")
+        except (KeyError, IndexError, ValueError):
+            raise Invalid(f"{where}: a prompt uses an unknown placeholder; allowed are "
+                          "{outfit} {cosplay} {setting} {character}")
+        posts.append(Post(str(k.get("kind", "post")), float(k.get("weight", 1)), k["prompt"], rating,
+                          [str(c) for c in k["captions"]]))
+    if not posts:
+        raise Invalid(f"{where}: needs at least one kind of post")
+    if "{character}" in " ".join(k.prompt for k in posts) and not p.get("characters"):
+        raise Invalid(f"{where}: a prompt uses {{character}} but there are no characters")
+    persona = Persona(
+        handle=handle, name=str(p.get("name") or handle), medium=p["medium"], bio=str(p.get("bio", "")),
+        look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
+        posts=posts, outfits=list(p.get("outfits", [])), settings=list(p.get("settings", [])),
+        characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
+        hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
+        weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),
+        paused=bool(p.get("paused", False)))
+    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.settings, *persona.characters,
+                     *(k.prompt for k in posts)])
+    bad = safety.blocked(text)
+    if bad:
+        raise Invalid(f"{where}: uses blocked tags: {', '.join(bad)}")
+    # Strict is automatic for feminine-man, androgynous, trans and tomboy looks; the file can
+    # turn it on for anyone but never off.
+    persona.strict = bool(p.get("strict")) or safety.needs_strict(text)
+    lo = p.get("lora")
+    if lo:
+        if not isinstance(lo, dict) or not str(lo.get("file", "")).endswith(".safetensors"):
+            raise Invalid(f"{where}: lora needs {{\"file\": \"x.safetensors\", \"strength\": 0.8, \"trigger\": \"word\"}}")
+        trigger = str(lo.get("trigger", ""))
+        if safety.blocked(trigger):
+            raise Invalid(f"{where}: the style's trigger word uses blocked tags")
+        if lo.get("enabled", True):   # switched off keeps the settings for later
             persona.lora = (str(lo["file"]), float(lo.get("strength", 0.8)))
             persona.lora_female_only = bool(lo.get("female_only", False))
-            persona.trigger = str(lo.get("trigger", ""))
-            if safety.blocked(persona.trigger):
-                raise SystemExit(f"personas: {where}: lora trigger uses blocked tags")
-        out.append(persona)
-    return out
+            persona.trigger = trigger
+    return persona
 
 
 def sync(conn, personas: list[Persona]) -> None:

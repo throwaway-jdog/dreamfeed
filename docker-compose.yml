@@ -1,30 +1,13 @@
-# dreamfeed: a private feed of generated images that learns what you like.
-#   sync     Downloads your X bookmarks with gallery-dl on a schedule.
-#   worker   Tags and embeds bookmarks (taste profile), writes prompts, has ComfyUI
-#            generate during GENERATE_WINDOW, ranks the results, updates from likes/skips.
+# dreamfeed: a private timeline where fictional personas post generated images and clips.
+#   worker   Has ComfyUI make each persona's posts during GENERATE_WINDOW, runs the adults-only
+#            checks, keeps the best, and learns from your likes and skips.
 #   agecheck Age estimates for real people in images (CPU).
 #   comfyui  Image generation engine. Internal only; the worker drives it over its API.
-#   web      The feed, behind formlogin, served through Caddy at /dreamfeed/.
-# Status: sync and the worker's tag phase are built; comfyui and web are not yet.
+#   trainer  Style-LoRA training, on demand.
+#   web      The timeline and dashboard (including the persona editor), behind formlogin,
+#            served through Caddy at /dreamfeed/.
 # The miner's gpu-yield already stops mining while comfyui or the worker use the GPU.
 services:
-  sync:
-    build: ./sync
-    image: dreamfeed-sync:local
-    container_name: dreamfeed-sync
-    restart: unless-stopped
-    user: "${PUID:?set PUID in .env}:${PGID:?set PGID in .env}"
-    environment:
-      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:?set SYNC_INTERVAL_HOURS in .env}
-      TZ: ${TZ:?set TZ in .env}
-    volumes:
-      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/cookies.txt:ro
-      - ./data/bookmarks:/data/bookmarks      # raw downloads, deleted once tagged
-      - ./data/sync:/data/sync                # gallery-dl archive: what was already fetched
-      - ${BOOKMARK_COPY_DIR:?set BOOKMARK_COPY_DIR in .env}:/copy   # permanent copy of every bookmark
-    logging:
-      options: { max-size: 10m, max-file: "3" }
-
   worker:
     build: ./worker
     image: dreamfeed-worker:local
@@ -51,7 +34,6 @@ services:
     volumes:
       - ./data:/data
       - ./models:/models                      # writable: downloads the tagger and CLIP on first run
-      - ${BOOKMARK_COPY_DIR:?set BOOKMARK_COPY_DIR in .env}:/copy   # rejected posts are removed from the copy
     deploy:
       resources:
         reservations:
@@ -63,7 +45,7 @@ services:
     logging:
       options: { max-size: 10m, max-file: "3" }
 
-  # Age estimates (MiVOLO v2) for real-life bookmarks and, later, generated images.
+  # Age estimates (MiVOLO v2) for real people in images; the worker's checks call it.
   # CPU only, so it never holds the GPU. Internal; the worker calls it.
   agecheck:
     build: ./agecheck
@@ -137,6 +119,7 @@ services:
       context: ./web
       additional_contexts:
         formlogin: ${FORMLOGIN_SRC:?set FORMLOGIN_SRC in .env}   # the formlogin library, a git URL with a tag or a local folder
+        worker: ./worker    # the persona editor checks edits with the worker's own rules
     image: dreamfeed-web:local
     container_name: dreamfeed-web
     restart: unless-stopped
@@ -144,12 +127,14 @@ services:
     environment:
       DATA_DIR: /data
       STATE_DIR: /state
+      LORA_DIR: /loras      # trained styles the persona editor can offer
       GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env}   # shown on the dashboard
       TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
     volumes:
-      - ./data:/data        # feed.db (likes/skips), generated images, liked copies
+      - ./data:/data        # feed.db (likes/skips), generated images, liked copies, personas.json
+      - ./models/loras:/loras:ro
       - ./state:/state      # login.json, session.key
     networks: [default, apps]
     logging:

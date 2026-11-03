@@ -1,15 +1,15 @@
-"""Adults-only rules shared by tagging and generation. Not configurable."""
+"""Adults-only rules for prompts, generated posts and LoRA training images. Not configurable."""
 import re
 
-# Any of these on a bookmark (danbooru names from the WD tagger, plus e621 terms)
-# drops it: nothing from it is stored and the file is deleted.
+# Any of these on a generated post, clip or training image (danbooru names from the WD
+# tagger, plus e621 terms) drops it and deletes the file.
 YOUTH_TAGS = {
     "child", "female child", "male child", "toddler", "baby", "aged down",
     "loli", "shota", "teenage", "teen", "cub", "young",
     "kindergarten uniform", "randoseru",
 }
 
-# Never stored in the taste profile, so never used in prompts. Youth tags plus tags
+# Never allowed in a prompt (a persona using one is refused). Youth tags plus tags
 # that push generated characters toward looking young.
 NEVER_PROMPT_TAGS = YOUTH_TAGS | {
     "flat chest", "petite", "school uniform", "serafuku", "school swimsuit",

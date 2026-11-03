@@ -1,7 +1,7 @@
 """Nightly run, in three phases so ComfyUI and the vision models never share the GPU:
 1. generate: split IMAGES_PER_NIGHT between the personas in data/personas.json and have
              ComfyUI make their posts (plus a profile picture for anyone without one)
-2. check:    the same adults-only checks as bookmarks, stricter for strict personas;
+2. check:    the adults-only checks (worker/dreamfeed/checks.py), stricter for strict personas;
              anything flagged is deleted
 3. rank:     score the rest against what you liked and skipped from that persona, keep the
              best FEED_KEEP_TOP, spread over the night as posts in the timeline
@@ -62,6 +62,8 @@ def active_personas(cfg: Config, gen: GenConfig, conn, mediums: list[str] | None
     people.sync(conn, loaded)
     for p in loaded:
         if (mediums and p.medium not in mediums) or (handles and p.handle not in handles):
+            continue
+        if p.paused and not handles:   # paused: only posts when asked for by name (Post now)
             continue
         ckpt = gen.checkpoints.get(p.medium)
         if not ckpt or not (cfg.models_dir / "checkpoints" / ckpt).exists():
@@ -171,7 +173,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
 
 def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
     from PIL import Image
-    from .tagging import drop_reason
+    from .checks import drop_reason
     from .vision import Vision
 
     out_dir = cfg.data_dir / "generated"
@@ -346,8 +348,6 @@ def run_job(cfg: Config, job_id: int) -> None:
     if not row or row[1] != "queued":
         return
     params = json.loads(row[0])
-    if params.get("kind") == "reset":
-        return reset_profile(cfg, conn, job_id)
     if params.get("kind") == "animate":
         return animate_job(cfg, conn, job_id, params)
     night = f"manual-{dt.datetime.now():%Y%m%d-%H%M%S}"
@@ -451,7 +451,7 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
 
 def check_videos(cfg: Config, conn, night: str) -> dict:
     from . import media
-    from .tagging import drop_reason
+    from .checks import drop_reason
     from .vision import Vision
     out_dir = cfg.data_dir / "generated"
     rows = conn.execute("SELECT g.id, g.medium, g.file, s.score, coalesce(p.strict, 1) FROM generations g"
@@ -510,37 +510,6 @@ def animate_job(cfg: Config, conn, job_id: int, params: dict) -> None:
         with conn:
             conn.execute("UPDATE jobs SET status = ?, message = ?, finished_at = datetime('now') WHERE id = ?",
                          (status, message, job_id))
-
-
-def reset_profile(cfg: Config, conn, job_id: int | None = None) -> None:
-    """Start the taste profile over: forget every bookmark, tag and drop, clear the
-    downloader's archive and ask it to scan, so everything is downloaded and tagged again.
-    Liked images, the feed and run history stay."""
-    sync_dir = cfg.data_dir / "sync"
-    try:
-        sync = json.loads((sync_dir / "status.json").read_text())
-    except (OSError, ValueError):
-        sync = {}
-    if sync.get("state") == "running":
-        print("reset: waiting for the current scan to finish", flush=True)
-        return   # job stays queued; the scheduler tries again next scan
-    with conn:
-        if job_id:
-            conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,))
-        counts = {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("bookmarks", "dropped")}
-        conn.execute("DELETE FROM bookmark_tags")
-        conn.execute("DELETE FROM bookmarks")
-        conn.execute("DELETE FROM dropped")
-    for name in ("archive.sqlite3", "archive.sqlite3-journal", "archive.sqlite3-wal", "archive.sqlite3-shm"):
-        (sync_dir / name).unlink(missing_ok=True)
-    sync_dir.mkdir(exist_ok=True)
-    (sync_dir / "scan-now").touch()
-    message = f"removed {counts['bookmarks']} bookmarks and {counts['dropped']} drop records; rescanning"
-    print(f"reset: {message}", flush=True)
-    if job_id:
-        with conn:
-            conn.execute("UPDATE jobs SET status = 'done', message = ?, finished_at = datetime('now') WHERE id = ?",
-                         (message, job_id))
 
 
 def next_job(cfg: Config) -> int | None:

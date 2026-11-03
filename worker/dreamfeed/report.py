@@ -1,51 +1,24 @@
-"""`python -m dreamfeed report [--top N] [--dropped]`: what the taste profile looks like."""
-import argparse
-
-from . import db, media
+"""`python -m dreamfeed report`: posts, likes and drops per persona, and recent runs."""
+from . import db
 from .config import Config
 
 
 def main(argv: list[str]) -> None:
-    ap = argparse.ArgumentParser(prog="dreamfeed report")
-    ap.add_argument("--top", type=int, default=25, help="tags to show per medium")
-    ap.add_argument("--dropped", action="store_true", help="list dropped tweet IDs")
-    args = ap.parse_args(argv)
-
     cfg = Config()
     conn = db.connect(cfg.db_path)
-    total = conn.execute("SELECT count(*) FROM bookmarks").fetchone()[0]
-    waiting = len(media.ready_files(cfg.bookmarks_dir, min_age=0))
-    print(f"Bookmarks in profile: {total}   waiting to be tagged: {waiting}")
+    print(f"{'persona':16} {'in feed':>8} {'liked':>6} {'skipped':>8} {'dropped':>8}")
+    for handle, feed, liked, skipped, dropped in conn.execute(
+            "SELECT g.persona, sum(g.status = 'feed'), sum(f.action = 'like'), sum(f.action = 'skip'),"
+            " sum(g.status = 'dropped') FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id"
+            " WHERE g.persona IS NOT NULL GROUP BY g.persona ORDER BY g.persona"):
+        print(f"{handle:16} {feed or 0:8} {liked or 0:6} {skipped or 0:8} {dropped or 0:8}")
 
-    kinds = dict(conn.execute("SELECT kind, count(*) FROM bookmarks GROUP BY kind").fetchall())
-    print(f"  images {kinds.get('image', 0)}, videos {kinds.get('video', 0)}")
+    print("\nDropped by the checks:")
+    for reason, n in conn.execute(
+            "SELECT substr(reason, 1, instr(reason || ':', ':') - 1), count(*) FROM generations"
+            " WHERE status = 'dropped' GROUP BY 1 ORDER BY 2 DESC"):
+        print(f"  {reason:20} {n}")
 
-    print("\nBy medium:")
-    mediums = conn.execute("SELECT medium, count(*) FROM bookmarks GROUP BY medium ORDER BY 2 DESC").fetchall()
-    for medium, n in mediums:
-        print(f"  {medium:6} {n:6}  {100 * n / max(total, 1):5.1f}%")
-
-    print("\nDropped:")
-    for reason, medium, n in conn.execute(
-            "SELECT reason, coalesce(medium, '?'), count(*) FROM dropped GROUP BY 1, 2 ORDER BY 3 DESC"):
-        print(f"  {reason:12} {medium:6} {n}")
-
-    runs = conn.execute("SELECT night, status, stats FROM runs ORDER BY started_at DESC LIMIT 5").fetchall()
-    if runs:
-        print("\nRecent generation runs:")
-        for night, status, stats in runs:
-            print(f"  {night:20} {status:8} {stats or ''}")
-
-    for medium, n in mediums:
-        print(f"\nTop tags, {medium} (share of its {n} bookmarks):")
-        rows = conn.execute(
-            "SELECT t.tag, count(*) FROM bookmark_tags t JOIN bookmarks b ON b.id = t.bookmark_id"
-            " WHERE b.medium = ? GROUP BY t.tag ORDER BY 2 DESC LIMIT ?", (medium, args.top)).fetchall()
-        for tag, c in rows:
-            print(f"  {100 * c / n:5.1f}%  {tag}")
-
-    if args.dropped:
-        print("\nDropped tweets (check them on X: https://x.com/i/status/<id>):")
-        for tid, reason, medium, detail, at in conn.execute(
-                "SELECT tweet_id, reason, coalesce(medium, '?'), detail, at FROM dropped ORDER BY at DESC"):
-            print(f"  {at}  {tid}  {reason}  {medium}  {detail}")
+    print("\nRecent runs:")
+    for night, status, stats in conn.execute("SELECT night, status, stats FROM runs ORDER BY started_at DESC LIMIT 8"):
+        print(f"  {night:22} {status:9} {stats or ''}")
