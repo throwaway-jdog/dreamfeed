@@ -10,6 +10,7 @@ POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/scan          ask the sync container to fetch bookmarks now
 POST /api/generate      {"images": N, "keep": K, "mediums": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
+POST /api/reset         {"confirm": "start over"} forget all bookmarks/tags, re-download and re-tag
 (POSTs are JSON only.)
 """
 import json
@@ -217,6 +218,19 @@ def queue_generation(req: dict) -> dict:
     return {"job": gid}
 
 
+def request_reset(req: dict) -> dict:
+    if req.get("confirm") != "start over":
+        raise ValueError('send {"confirm": "start over"}')
+    with db() as conn:
+        pending = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
+                               " AND params LIKE '%\"kind\": \"reset\"%'").fetchone()[0]
+        if pending:
+            raise ValueError("a start-over is already waiting")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
+                           (json.dumps({"kind": "reset"}),)).lastrowid
+    return {"job": jid}
+
+
 def cancel(req: dict) -> dict:
     with db() as conn:
         if "job" in req:
@@ -276,7 +290,7 @@ class Handler(BaseHTTPRequestHandler):
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
         actions = {"/api/feedback": self.feedback, "/api/scan": lambda r: request_scan(),
-                   "/api/generate": queue_generation, "/api/cancel": cancel}
+                   "/api/generate": queue_generation, "/api/cancel": cancel, "/api/reset": request_reset}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

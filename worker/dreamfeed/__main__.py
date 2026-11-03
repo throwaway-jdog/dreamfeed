@@ -8,7 +8,9 @@ python -m dreamfeed tag       Tag whatever is waiting, then exit.
 python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
     --now                     Run a test batch right away instead (night "test-<time>").
     --images N --keep K       Override IMAGES_PER_NIGHT / FEED_KEEP_TOP for this run.
-python -m dreamfeed job ID    Run a generation request queued from the dashboard.
+python -m dreamfeed job ID    Run a request queued from the dashboard (generation or reset).
+python -m dreamfeed reset     Forget all bookmarks and tags and re-download everything.
+                              Prefer the dashboard's "Start over"; it waits for running work.
 python -m dreamfeed report    Profile summary: mediums, dropped counts, top tags, recent runs.
 """
 import argparse
@@ -60,6 +62,11 @@ def main() -> None:
     elif cmd == "job":
         from .generate import run_job
         run_job(Config(), int(rest[0]))
+    elif cmd == "reset":
+        from . import db
+        from .generate import reset_profile
+        cfg = Config()
+        reset_profile(cfg, db.connect(cfg.db_path))
     elif cmd == "report":
         from .report import main as report
         report(rest)

@@ -137,6 +137,12 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
 .primary:disabled, .secondary:disabled { opacity: .45; cursor: default; }
 .secondary { min-height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); font-weight: 600; width: 100%; background: var(--bg); }
 #live:empty { display: none; }
+.confirm { display: grid; gap: 10px; padding: 14px; border-radius: 12px; border: 1px solid #d64545; background: var(--bg); }
+.confirm p { margin: 0; font-size: 14px; color: var(--muted); }
+.confirm p strong { color: var(--fg); font-size: 15px; }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 420px) { .confirm-actions { grid-template-columns: 1fr; } }
+.danger { min-height: var(--tap); border-radius: 12px; background: #c23b3b; color: #fff; font-weight: 700; padding: 0 12px; }
 #live { display: grid; gap: 8px; }
 .live { display: grid; gap: 8px; padding: 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--rule); }
 .live .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; }
@@ -234,6 +240,17 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
       <div class="split" id="b-split"></div>
       <dl class="facts" id="b-facts"></dl>
       <button class="secondary" type="button" id="b-scan">Scan bookmarks now</button>
+      <button class="linkish" type="button" id="b-reset-open" style="justify-self:start">Start over…</button>
+      <div class="confirm" id="b-reset" hidden>
+        <p><strong>Start the taste profile over?</strong></p>
+        <p>This forgets every bookmark, its tags and the drop records, then downloads and tags all your
+        bookmarks again with the current checks (about 10 minutes). Your liked images, feed and runs stay.
+        Tonight's run uses whatever has been re-tagged by then.</p>
+        <div class="confirm-actions">
+          <button class="secondary" type="button" id="b-reset-no">Keep my profile</button>
+          <button class="danger" type="button" id="b-reset-yes">Delete tags and re-download</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
@@ -547,6 +564,19 @@ $("b-scan").onclick = async () => {
   refreshDash();
 };
 
+$("b-reset-open").onclick = () => { $("b-reset").hidden = false; $("b-reset-open").hidden = true; $("b-reset").scrollIntoView({ block: "nearest", behavior: "smooth" }); };
+$("b-reset-no").onclick = () => { $("b-reset").hidden = true; $("b-reset-open").hidden = false; };
+$("b-reset-yes").onclick = async () => {
+  $("b-reset-yes").disabled = true;
+  try {
+    await api("api/reset", { confirm: "start over" });
+    toast("Starting over. Bookmarks are being downloaded and tagged again.");
+    $("b-reset").hidden = true; $("b-reset-open").hidden = false;
+  } catch (e) { toast(e.message); }
+  $("b-reset-yes").disabled = false;
+  refreshDash();
+};
+
 const dashState = { busy: false, timer: 0 };
 function clock(iso) {
   if (!iso) return "–";
@@ -575,7 +605,12 @@ function renderLive(d) {
     box.append(head, meter, el("div", "sub", `${label}${p.medium ? " · " + (LABEL[p.medium] || p.medium) : ""}`));
     live.append(box);
   }
-  for (const j of queued) {
+  for (const j of d.jobs.filter(j => j.params.kind === "reset")) {
+    const box = el("div", "live");
+    box.append(el("div", "head", j.status === "running" ? "Starting over…" : "Start over is waiting for the current scan or run"));
+    live.append(box);
+  }
+  for (const j of queued.filter(j => j.params.kind !== "reset")) {
     const box = el("div", "live"), head = el("div", "head");
     head.append(el("span", null, `Waiting: ${j.params.images} images, keep ${j.params.keep}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";

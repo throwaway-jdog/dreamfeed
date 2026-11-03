@@ -33,7 +33,9 @@ FurryVision XL v2 for furry. Civitai downloads that need an account use `CIVITAI
 
 Generation runs on its own every night inside `GENERATE_WINDOW`. The page's **Dashboard** tab
 (`/dreamfeed/#dashboard`) can scan bookmarks now, queue a generation run (how many, how many to
-keep, which styles) with live progress and Cancel, and shows the profile and recent runs. From
+keep, which styles) with live progress and Cancel, shows the profile and recent runs, and has
+**Start over**: forget every bookmark, tag and drop record, then download and re-tag everything
+with the current checks (liked images, feed and runs stay). From
 the shell:
 
        docker compose exec worker python -m dreamfeed generate --now --images 12 --keep 6
