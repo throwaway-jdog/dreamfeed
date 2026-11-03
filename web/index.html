@@ -501,8 +501,8 @@ function showAt(i) {
   else { vvid.pause(); vvid.removeAttribute("src"); vvid.load(); vimg.src = `img/${it.id}`; }
   const shown = isVid ? vvid : vimg; shown.style.transform = ""; shown.style.opacity = "";
   const ab = $("v-animate");
-  ab.hidden = isVid; ab.disabled = !!it.animated;
-  ab.querySelector("span").textContent = it.animated ? "Animating" : "Animate";
+  ab.hidden = isVid; ab.disabled = false;
+  ab.querySelector("span").textContent = it.animated ? "Animate again" : "Animate";
   $("v-count").textContent = `${LABEL[it.medium] || ""} · ${i + 1} of ${state.items.length}${state.more ? "+" : ""}`;
   $("v-like").setAttribute("aria-pressed", String(it.liked));
   $("v-skip").hidden = state.view === "liked";
@@ -527,7 +527,7 @@ const onTap = () => {
 vimg.addEventListener("click", onTap); vvid.addEventListener("click", onTap);
 function closeMotion() { $("motion").hidden = true; }
 $("v-animate").onclick = () => {
-  const it = state.items[state.idx]; if (!it || it.animated) return;
+  const it = state.items[state.idx]; if (!it) return;
   $("motion").hidden = false; $("motion-text").value = "";
   setTimeout(() => $("motion-text").focus(), 50);
 };
@@ -539,7 +539,7 @@ $("motion").onsubmit = async e => {
   try {
     await api("api/animate", { id: it.id, prompt: $("motion-text").value.trim() }); it.animated = true;
     closeMotion();
-    $("v-animate").disabled = true; $("v-animate").querySelector("span").textContent = "Animating";
+    $("v-animate").querySelector("span").textContent = "Animate again";
     toast("Animating. The clip shows up in the feed in a few minutes.");
   } catch (err) { toast(err.message); }
   go.disabled = false;

@@ -254,10 +254,6 @@ def request_animation(req: dict) -> dict:
             row = conn.execute("SELECT kind, status FROM generations WHERE id = ?", (gid,)).fetchone()
             if not row or row["kind"] != "image" or row["status"] != "feed":
                 raise LookupError("only images in the feed can be animated")
-            dup = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
-                               " AND params LIKE ?", (f'%"ids": [{gid}]%',)).fetchone()[0]
-            if dup:
-                raise ValueError("this image is already being animated")
             text = " ".join(str(req.get("prompt") or "").split())
             if len(text) > MAX_PROMPT:
                 raise ValueError(f"keep the description under {MAX_PROMPT} characters")
@@ -267,6 +263,11 @@ def request_animation(req: dict) -> dict:
             params = {"kind": "animate", "ids": [gid]}
             if text:
                 params["prompt"] = text
+            # Same image with a new description is fine; the identical request twice is a double tap.
+            dup = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
+                               (json.dumps(params),)).fetchone()[0]
+            if dup:
+                raise ValueError("this exact animation is already waiting")
         else:
             count = int(req.get("count", 0))
             if not 1 <= count <= 50:
