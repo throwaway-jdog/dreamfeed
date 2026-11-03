@@ -71,6 +71,7 @@ class Persona:
     strict: bool = False
     lora: tuple[str, float] | None = None   # (file in models/loras, strength)
     trigger: str = ""                       # the LoRA's trigger word, put first in every prompt
+    negative: str = ""                      # extra negative prompt for every post (e.g. "face, eyes")
 
     def prompt_for(self, post: Post, rng: random.Random) -> str:
         fill = {
@@ -130,7 +131,7 @@ def load(path: Path) -> list[Persona]:
             posts=posts, outfits=list(p.get("outfits", [])), settings=list(p.get("settings", [])),
             characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
             hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
-            weight=float(p.get("weight", 1.0)))
+            weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")))
         text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.settings, *persona.characters,
                          *(k.prompt for k in posts)])
         bad = safety.blocked(text)

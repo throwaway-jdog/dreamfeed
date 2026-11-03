@@ -124,7 +124,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                 (night, p.medium, ckpt, prompt, seed, p.handle, caption, kind)).lastrowid
         try:
             path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}", strict=p.strict,
-                                 lora=p.lora)
+                                 lora=p.lora, extra_negative=p.negative if kind == "image" else "")
         except ValueError as e:   # safety.prompts refused it
             _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
             return

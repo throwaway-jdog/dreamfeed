@@ -20,7 +20,9 @@ inspired them) and is not in git. Start from `personas.example.json`:
 
 - `handle`, `name`, `bio`, `medium` (`anime` or `furry`), `look` (tags that keep the
   persona recognisable), `avatar` (extra tags for the profile picture), `emoji`,
-  `hashtags`, `video_share` (how much of the nightly video budget favours them), `weight`.
+  `hashtags`, `video_share` (how much of the nightly video budget favours them), `weight`,
+  `negative` (extra negative prompt, e.g. `face, eyes` for a faceless persona), and `lora`
+  (`{"file": "style-x.safetensors", "strength": 0.8, "trigger": "x_style"}`).
 - `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
