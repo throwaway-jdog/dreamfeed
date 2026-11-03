@@ -1,0 +1,4 @@
+dreamfeed:
+  base_path: /models
+  checkpoints: checkpoints
+  loras: loras

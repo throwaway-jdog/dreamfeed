@@ -1,4 +1,5 @@
-"""Adults-only rules shared by tagging and (later) generation. Not configurable."""
+"""Adults-only rules shared by tagging and generation. Not configurable."""
+import re
 
 # Any of these on a bookmark (danbooru names from the WD tagger, plus e621 terms)
 # drops it: nothing from it is stored and the file is deleted.
@@ -15,7 +16,30 @@ NEVER_PROMPT_TAGS = YOUTH_TAGS | {
     "gym uniform", "buruma", "school bag",
 }
 
-FURRY_TAGS = {"furry", "furry female", "furry male", "body fur", "snout", "animal nose"}
+# Added to every generation prompt, per medium.
+ADULT_POSITIVE = {
+    "photo": "adult, ",
+    "anime": "adult, mature, ",
+    "furry": "adult, anthro, ",
+}
+YOUTH_NEGATIVE = {
+    "photo": "child, kid, teen, teenager, young, underage, minor, school uniform, petite, flat chest",
+    "anime": "loli, shota, child, female child, male child, young, aged down, petite, flat chest, "
+             "school uniform, chibi",
+    "furry": "cub, young, child, loli, shota, petite, flat chest, school uniform, chibi",
+}
+
+
+def prompts(medium: str, positive: str, negative: str) -> tuple[str, str]:
+    """Wrap a prompt with the medium's adult-only terms. Refuses prompts with youth tags."""
+    text = positive.lower().replace("_", " ")
+    bad = sorted(t for t in NEVER_PROMPT_TAGS if re.search(rf"\b{re.escape(t)}\b", text))
+    if bad:
+        raise ValueError(f"prompt contains blocked tags: {', '.join(bad)}")
+    return ADULT_POSITIVE[medium] + positive, f"{YOUTH_NEGATIVE[medium]}, {negative}"
+
+
+FURRY_TAGS ={"furry", "furry female", "furry male", "body fur", "snout", "animal nose"}
 
 # CLIP zero-shot descriptions. Groups are the same size so none is favored.
 MEDIUM_PROMPTS = {

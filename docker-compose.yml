@@ -37,6 +37,7 @@ services:
       HF_HOME: /models/hf                     # tagger downloads land in ./models
       AGECHECK_URL: http://dreamfeed-agecheck:8080
       COMFYUI_URL: http://dreamfeed-comfyui:8188
+      COMFYUI_SUPERVISOR_URL: http://dreamfeed-comfyui:8189
       # One model per medium, file names in ./models/checkpoints. Leave one empty to skip that medium.
       CHECKPOINT_PHOTO: ${CHECKPOINT_PHOTO-}
       CHECKPOINT_ANIME: ${CHECKPOINT_ANIME-}
@@ -76,13 +77,15 @@ services:
       options: { max-size: 10m, max-file: "3" }
 
   comfyui:
-    build: ./comfyui        # pinned ComfyUI release, no custom nodes beyond what the worker needs
+    build: ./comfyui        # pinned ComfyUI release, no custom nodes
     image: dreamfeed-comfyui:local
     container_name: dreamfeed-comfyui
     restart: unless-stopped
     user: "${PUID}:${PGID}"
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # ComfyUI only runs while the worker uses it; stopped after this long without a job.
+      COMFY_IDLE_STOP_SECONDS: ${COMFY_IDLE_STOP_SECONDS:?set COMFY_IDLE_STOP_SECONDS in .env}
     volumes:
       - ./models:/models:ro
       - ./data/generated:/output
