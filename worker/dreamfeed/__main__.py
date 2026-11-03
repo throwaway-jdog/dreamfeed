@@ -8,6 +8,7 @@ python -m dreamfeed tag       Tag whatever is waiting, then exit.
 python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
     --now                     Run a test batch right away instead (night "test-<time>").
     --images N --keep K       Override IMAGES_PER_NIGHT / FEED_KEEP_TOP for this run.
+python -m dreamfeed job ID    Run a generation request queued from the dashboard.
 python -m dreamfeed report    Profile summary: mediums, dropped counts, top tags, recent runs.
 """
 import argparse
@@ -29,9 +30,10 @@ def main() -> None:
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("run", [])
     if cmd == "run":
         from . import media
-        from .generate import due_night
+        from .generate import due_night, next_job, recover
         cfg = Config()
         cfg.generation()   # fail at start, not at 1am, if generation settings are missing
+        recover(cfg)
         cfg.bookmarks_dir.mkdir(parents=True, exist_ok=True)
         print(f"dreamfeed: watching {cfg.bookmarks_dir}", flush=True)
         while True:
@@ -39,6 +41,9 @@ def main() -> None:
                 child("tag")
             if due_night(cfg):
                 child("generate")
+            job = next_job(cfg)
+            if job:
+                child("job", str(job))
             time.sleep(cfg.scan_seconds)
     elif cmd == "tag":
         from .tagging import run_once
@@ -52,6 +57,9 @@ def main() -> None:
         from .generate import run
         night = f"test-{dt.datetime.now():%Y%m%d-%H%M}" if args.now else None
         run(Config(), night=night, images=args.images, keep=args.keep, ignore_window=args.now)
+    elif cmd == "job":
+        from .generate import run_job
+        run_job(Config(), int(rest[0]))
     elif cmd == "report":
         from .report import main as report
         report(rest)

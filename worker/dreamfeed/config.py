@@ -39,7 +39,8 @@ class Config:
         self.age_threshold = opt_float("AGE_THRESHOLD", 0.35)
         # Furry-tag confidence that moves a drawing from anime to furry.
         self.furry_threshold = opt_float("FURRY_THRESHOLD", 0.5)
-        self.scan_seconds = opt_float("SCAN_SECONDS", 60)
+        # How often the worker looks for new bookmarks, the nightly window and dashboard requests.
+        self.scan_seconds = opt_float("SCAN_SECONDS", 10)
 
     def generation(self) -> "GenConfig":
         return GenConfig()

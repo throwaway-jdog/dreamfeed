@@ -31,7 +31,10 @@ FurryVision XL v2 for furry. Civitai downloads that need an account use `CIVITAI
    `worker/dreamfeed/config.py`. The age check errs toward dropping, so a few adult
    bookmarks being dropped is expected.
 
-Generation runs on its own every night inside `GENERATE_WINDOW`. To try it now:
+Generation runs on its own every night inside `GENERATE_WINDOW`. The page's **Dashboard** tab
+(`/dreamfeed/#dashboard`) can scan bookmarks now, queue a generation run (how many, how many to
+keep, which styles) with live progress and Cancel, and shows the profile and recent runs. From
+the shell:
 
        docker compose exec worker python -m dreamfeed generate --now --images 12 --keep 6
 

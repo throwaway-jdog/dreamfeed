@@ -5,7 +5,12 @@ GET  /api/feed          ?view=feed|liked&medium=all|photo|anime|furry&offset=N
 GET  /api/summary       counts and the last run, for the header
 GET  /thumb/<id>        small JPEG for the grid
 GET  /img/<id>          full image for the viewer
-POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"} (JSON only)
+GET  /api/dashboard     scan state, profile, queue, recent runs
+POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
+POST /api/scan          ask the sync container to fetch bookmarks now
+POST /api/generate      {"images": N, "keep": K, "mediums": [...]} queue a generation run
+POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
+(POSTs are JSON only.)
 """
 import json
 import os
@@ -33,6 +38,10 @@ GENERATED = DATA / "generated"
 LIKED = DATA / "liked"
 DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
+SYNC = DATA / "sync"
+BOOKMARKS_IN = DATA / "bookmarks"
+GENERATE_WINDOW = required("GENERATE_WINDOW")
+MAX_IMAGES = 400
 PORT = 8000
 PAGE_SIZE = 30
 MEDIUMS = ("photo", "anime", "furry")
@@ -50,6 +59,9 @@ def db() -> sqlite3.Connection:
         generation_id INTEGER PRIMARY KEY REFERENCES generations(id),
         action TEXT NOT NULL, liked_file TEXT,
         at TEXT NOT NULL DEFAULT (datetime('now')))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
+        id INTEGER PRIMARY KEY, params TEXT NOT NULL, status TEXT NOT NULL, night TEXT, message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT)""")
     return conn
 
 
@@ -147,6 +159,74 @@ def set_feedback(gid: int, action: str) -> dict:
     return {"id": gid, "action": None if action == "clear" else action}
 
 
+def read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def dashboard() -> dict:
+    sync = read_json(SYNC / "status.json")
+    sync["requested"] = (SYNC / "scan-now").exists()
+    waiting = sum(1 for p in BOOKMARKS_IN.iterdir() if p.is_file()) if BOOKMARKS_IN.is_dir() else 0
+    out = {"sync": sync, "waiting": waiting, "window": GENERATE_WINDOW, "bookmarks": {}, "dropped": {},
+           "runs": [], "jobs": [], "liked": 0}
+    try:
+        with db() as conn:
+            out["bookmarks"] = dict(conn.execute("SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
+            out["dropped"] = dict(conn.execute("SELECT reason, count(*) FROM dropped GROUP BY reason").fetchall())
+            out["liked"] = conn.execute("SELECT count(*) FROM feedback WHERE action = 'like'").fetchone()[0]
+            for r in conn.execute("SELECT night, status, stats, progress, started_at, finished_at FROM runs"
+                                  " WHERE night NOT LIKE 'test-%' ORDER BY started_at DESC LIMIT 8"):
+                run = dict(r)
+                run["stats"] = json.loads(run["stats"]) if run["stats"] else {}
+                run["progress"] = json.loads(run["progress"]) if run["progress"] else None
+                out["runs"].append(run)
+            out["jobs"] = [dict(r) | {"params": json.loads(r["params"])} for r in conn.execute(
+                "SELECT id, params, status, night, message, created_at FROM jobs"
+                " WHERE status IN ('queued', 'running') ORDER BY id")]
+    except sqlite3.OperationalError:
+        pass
+    return out
+
+
+def request_scan() -> dict:
+    status = read_json(SYNC / "status.json")
+    if status.get("state") != "running":
+        SYNC.mkdir(exist_ok=True)
+        (SYNC / "scan-now").touch()
+    return {"ok": True}
+
+
+def queue_generation(req: dict) -> dict:
+    images, keep = int(req.get("images", 0)), int(req.get("keep", 0))
+    mediums = [m for m in req.get("mediums") or [] if m in MEDIUMS]
+    if not 1 <= images <= MAX_IMAGES:
+        raise ValueError(f"images must be between 1 and {MAX_IMAGES}")
+    if not 1 <= keep <= images:
+        raise ValueError("keep must be between 1 and the number of images")
+    if req.get("mediums") and not mediums:
+        raise ValueError("pick at least one style")
+    with db() as conn:
+        busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
+        if busy >= 3:
+            raise ValueError("three requests are already waiting; let one finish first")
+        gid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
+                           (json.dumps({"images": images, "keep": keep, "mediums": mediums}),)).lastrowid
+    return {"job": gid}
+
+
+def cancel(req: dict) -> dict:
+    with db() as conn:
+        if "job" in req:
+            conn.execute("UPDATE jobs SET status = 'cancelled', finished_at = datetime('now')"
+                         " WHERE id = ? AND status = 'queued'", (int(req["job"]),))
+        if "night" in req:
+            conn.execute("UPDATE runs SET cancel = 1 WHERE night = ? AND status = 'running'", (str(req["night"]),))
+    return {"ok": True}
+
+
 class Handler(BaseHTTPRequestHandler):
     def send(self, code: int, body, ctype="application/json", cache="no-store"):
         if not isinstance(body, bytes):
@@ -180,6 +260,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset))
         if path == "/api/summary":
             return self.send(200, summary())
+        if path == "/api/dashboard":
+            return self.send(200, dashboard())
         for prefix, thumb in (("/thumb/", True), ("/img/", False)):
             if path.startswith(prefix) and path[len(prefix):].isdigit():
                 file = image_path(int(path[len(prefix):]), thumb)
@@ -193,22 +275,31 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
-        if path != "/api/feedback":
+        actions = {"/api/feedback": self.feedback, "/api/scan": lambda r: request_scan(),
+                   "/api/generate": queue_generation, "/api/cancel": cancel}
+        if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
         if not (self.headers.get("Content-Type") or "").startswith("application/json"):
             return self.send(415, {"error": "send JSON"})
         try:
             req = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
-            gid, action = int(req["id"]), req["action"]
-            if action not in ("like", "skip", "clear"):
-                raise ValueError
-        except (ValueError, KeyError, TypeError):
-            return self.send(400, {"error": 'send {"id": number, "action": "like" | "skip" | "clear"}'})
-        try:
-            self.send(200, set_feedback(gid, action))
+            if not isinstance(req, dict):
+                raise ValueError("send a JSON object")
+            self.send(200, actions[path](req))
         except LookupError as e:
             self.send(404, {"error": str(e)})
+        except (ValueError, TypeError) as e:
+            self.send(400, {"error": str(e) or "bad request"})
+
+    def feedback(self, req: dict) -> dict:
+        try:
+            gid, action = int(req["id"]), req["action"]
+        except (KeyError, TypeError, ValueError):
+            raise ValueError('send {"id": number, "action": "like" | "skip" | "clear"}')
+        if action not in ("like", "skip", "clear"):
+            raise ValueError('action must be "like", "skip" or "clear"')
+        return set_feedback(gid, action)
 
     def log_message(self, *args):
         pass

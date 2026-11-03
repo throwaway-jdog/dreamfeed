@@ -116,6 +116,8 @@ services:
     environment:
       DATA_DIR: /data
       STATE_DIR: /state
+      GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env}   # shown on the dashboard
+      TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
     volumes:

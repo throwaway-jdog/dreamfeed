@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS dropped (
 CREATE TABLE IF NOT EXISTS runs (
     night       TEXT PRIMARY KEY,            -- local date the window started
     attempts    INTEGER NOT NULL DEFAULT 0,
-    status      TEXT NOT NULL,               -- running | done | failed
+    status      TEXT NOT NULL,               -- running | done | failed | cancelled
     stats       TEXT,                        -- JSON
     started_at  TEXT,
     finished_at TEXT
@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS generations (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS generations_night ON generations(night, status);
+CREATE TABLE IF NOT EXISTS jobs (           -- generation requests from the dashboard
+    id          INTEGER PRIMARY KEY,
+    params      TEXT NOT NULL,               -- JSON: images, keep, mediums
+    status      TEXT NOT NULL,               -- queued | running | done | failed | cancelled
+    night       TEXT,                        -- the run it became (runs.night)
+    message     TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+);
 CREATE TABLE IF NOT EXISTS feedback (
     generation_id INTEGER PRIMARY KEY REFERENCES generations(id),
     action        TEXT NOT NULL,             -- like | skip
@@ -72,4 +81,8 @@ def connect(path: Path) -> sqlite3.Connection:
     if "embedding" not in cols:   # added with the feed
         conn.execute("ALTER TABLE generations ADD COLUMN embedding BLOB")
         conn.execute("ALTER TABLE generations ADD COLUMN thumb TEXT")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+    if "progress" not in cols:    # added with the dashboard
+        conn.execute("ALTER TABLE runs ADD COLUMN progress TEXT")
+        conn.execute("ALTER TABLE runs ADD COLUMN cancel INTEGER NOT NULL DEFAULT 0")
     return conn

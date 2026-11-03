@@ -63,12 +63,12 @@ def due_night(cfg: Config) -> str | None:
     conn = db.connect(cfg.db_path)
     row = conn.execute("SELECT status, attempts FROM runs WHERE night = ?", (night,)).fetchone()
     conn.close()
-    if row and (row[0] == "done" or row[1] >= MAX_ATTEMPTS):
+    if row and (row[0] in ("done", "cancelled") or row[1] >= MAX_ATTEMPTS):
         return None
     return night
 
 
-def enabled_mediums(cfg: Config, gen: GenConfig, conn) -> dict[str, int]:
+def enabled_mediums(cfg: Config, gen: GenConfig, conn, only: list[str] | None = None) -> dict[str, int]:
     """Mediums with a checkpoint on disk and at least one bookmark, weighted by bookmarks and likes."""
     counts = dict(conn.execute("SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
     for medium, likes in conn.execute(
@@ -77,7 +77,7 @@ def enabled_mediums(cfg: Config, gen: GenConfig, conn) -> dict[str, int]:
         counts[medium] = counts.get(medium, 0) + LIKE_WEIGHT * likes
     out = {}
     for medium, ckpt in gen.checkpoints.items():
-        if not ckpt:
+        if not ckpt or (only and medium not in only):
             continue
         if not (cfg.models_dir / "checkpoints" / ckpt).exists():
             print(f"generate: {medium} skipped, checkpoint {ckpt} not found", flush=True)
@@ -149,7 +149,8 @@ class PromptBuilder:
 
 
 def run(cfg: Config, night: str | None = None, images: int | None = None, keep: int | None = None,
-        ignore_window: bool = False) -> None:
+        ignore_window: bool = False, mediums: list[str] | None = None) -> str:
+    """Returns the run's final status: done | cancelled."""
     from .comfy import Comfy
 
     gen = cfg.generation()
@@ -161,15 +162,20 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
     conn = db.connect(cfg.db_path)
     with conn:
         conn.execute("INSERT INTO runs(night, status, attempts, started_at) VALUES (?, 'running', 1, datetime('now'))"
-                     " ON CONFLICT(night) DO UPDATE SET status='running', attempts=attempts+1",
+                     " ON CONFLICT(night) DO UPDATE SET status='running', attempts=attempts+1, cancel=0",
                      (night,))
 
     expire_old(cfg, conn, gen.feed_keep_days)
-    counts = enabled_mediums(cfg, gen, conn)
+    counts = enabled_mediums(cfg, gen, conn, mediums)
     if not counts:
         _finish(conn, night, "done", {"note": "no medium has both a checkpoint and bookmarks"})
-        return
+        return "done"
     targets = plan(counts, images, gen.min_share)
+    total = sum(targets.values())
+    made = conn.execute("SELECT count(*) FROM generations WHERE night = ? AND status != 'queued'",
+                        (night,)).fetchone()[0]
+    _progress(conn, night, "generating", made, total)
+    cancelled = False
     print(f"generate: night {night}, plan {targets}", flush=True)
 
     out_dir = cfg.data_dir / "generated"
@@ -184,6 +190,9 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                 if not ignore_window and night_key(dt.datetime.now(), gen.window) != night:
                     print("generate: window closed, stopping generation", flush=True)
                     break
+                if _cancel_requested(conn, night):
+                    cancelled = True
+                    break
                 prompt, source = builder.build(rng)
                 seed = rng.randrange(2 ** 32)
                 with conn:
@@ -197,12 +206,19 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                     _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                     continue
                 _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)))
+                made += 1
+                _progress(conn, night, "generating", made, total, medium)
+            if cancelled:
+                print("generate: cancelled, checking what was made so far", flush=True)
+                break
     finally:
         comfy.stop()
 
     stats = check_and_rank(cfg, conn, night, keep)
-    _finish(conn, night, "done", stats)
-    print(f"generate: night {night} done {stats}", flush=True)
+    status = "cancelled" if cancelled else "done"
+    _finish(conn, night, status, stats)
+    print(f"generate: night {night} {status} {stats}", flush=True)
+    return status
 
 
 def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
@@ -214,9 +230,12 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
     rows = conn.execute("SELECT id, medium, file FROM generations WHERE night = ? AND status = 'generated'",
                         (night,)).fetchall()
     if rows:
+        _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
         taste, skipped = _taste_matrices(conn)
-        for gid, medium, file in rows:
+        for n, (gid, medium, file) in enumerate(rows, 1):
+            if n % 5 == 0:
+                _progress(conn, night, "checking", n, len(rows))
             path = out_dir / file
             try:
                 img = Image.open(path).convert("RGB")
@@ -235,6 +254,7 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                 score -= SKIP_PENALTY * max(0.0, _closest(skipped[medium], emb) - score)
             _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes())
 
+    _progress(conn, night, "ranking", 0, 0)
     # Keep the best per medium, in proportion to what each medium produced.
     scored = conn.execute("SELECT id, medium, file, score FROM generations WHERE night = ? AND status = 'scored'",
                           (night,)).fetchall()
@@ -314,7 +334,61 @@ def _set(conn, gid: int, **fields) -> None:
         conn.execute(f"UPDATE generations SET {cols} WHERE id = ?", (*fields.values(), gid))
 
 
+def _progress(conn, night: str, phase: str, done: int, total: int, medium: str | None = None) -> None:
+    with conn:
+        conn.execute("UPDATE runs SET progress = ? WHERE night = ?",
+                     (json.dumps({"phase": phase, "done": done, "total": total, "medium": medium}), night))
+
+
+def _cancel_requested(conn, night: str) -> bool:
+    row = conn.execute("SELECT cancel FROM runs WHERE night = ?", (night,)).fetchone()
+    return bool(row and row[0])
+
+
+def run_job(cfg: Config, job_id: int) -> None:
+    """Run a generation request queued from the dashboard."""
+    conn = db.connect(cfg.db_path)
+    row = conn.execute("SELECT params, status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row or row[1] != "queued":
+        return
+    params = json.loads(row[0])
+    night = f"manual-{dt.datetime.now():%Y%m%d-%H%M%S}"
+    with conn:
+        conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
+    try:
+        status = run(cfg, night=night, images=int(params["images"]), keep=int(params["keep"]),
+                     ignore_window=True, mediums=params.get("mediums") or None)
+        message = None
+    except Exception as e:
+        status, message = "failed", str(e)[:300]
+        with conn:
+            conn.execute("UPDATE runs SET status = 'failed', finished_at = datetime('now') WHERE night = ?", (night,))
+        raise
+    finally:
+        with conn:
+            conn.execute("UPDATE jobs SET status = ?, message = ?, finished_at = datetime('now') WHERE id = ?",
+                         (status, message, job_id))
+
+
+def next_job(cfg: Config) -> int | None:
+    conn = db.connect(cfg.db_path)
+    row = conn.execute("SELECT id FROM jobs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def recover(cfg: Config) -> None:
+    """At worker start: anything left 'running' died with the previous worker."""
+    conn = db.connect(cfg.db_path)
+    with conn:
+        conn.execute("UPDATE jobs SET status = 'failed', message = 'worker restarted', finished_at = datetime('now')"
+                     " WHERE status = 'running'")
+        conn.execute("UPDATE runs SET status = 'failed', finished_at = datetime('now')"
+                     " WHERE status = 'running' AND night NOT GLOB '[0-9]*'")
+    conn.close()
+
+
 def _finish(conn, night: str, status: str, stats: dict) -> None:
     with conn:
-        conn.execute("UPDATE runs SET status = ?, stats = ?, finished_at = datetime('now') WHERE night = ?",
-                     (status, json.dumps(stats), night))
+        conn.execute("UPDATE runs SET status = ?, stats = ?, progress = NULL, finished_at = datetime('now')"
+                     " WHERE night = ?", (status, json.dumps(stats), night))

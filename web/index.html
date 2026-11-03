@@ -115,6 +115,54 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
   font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); max-width: calc(100vw - 32px); }
 @media (min-width: 960px) { .viewer .nav { width: 30%; cursor: pointer; } }
 @media (prefers-reduced-motion: reduce) { .card, .viewer .stage img, .viewer .heart { transition: none; } }
+/* Dashboard */
+.dash { display: grid; gap: 10px; padding: 6px 2px 0; }
+@media (min-width: 900px) { .dash { grid-template-columns: 1fr 1fr; max-width: 1100px; margin: 0 auto; align-items: start; } }
+.panel { background: var(--surface); border-radius: 16px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.panel h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.panel .note { margin: 0; color: var(--muted); font-size: 13px; }
+.field { display: grid; gap: 8px; }
+.field > span { font-size: 14px; font-weight: 600; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.seg button, .toggle { min-height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); background: var(--bg);
+  font-weight: 600; font-variant-numeric: tabular-nums; }
+.seg button[aria-pressed="true"], .toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.toggle { font-size: 14px; }
+.stepper { display: flex; align-items: center; gap: 8px; }
+.stepper button { width: var(--tap); height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); background: var(--bg); font-size: 20px; }
+.stepper output { min-width: 3ch; text-align: center; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stepper small { color: var(--muted); font-size: 13px; }
+.primary { min-height: 52px; border-radius: 14px; background: var(--accent); color: #fff; font-weight: 700; font-size: 16px; width: 100%; }
+.primary:disabled, .secondary:disabled { opacity: .45; cursor: default; }
+.secondary { min-height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); font-weight: 600; width: 100%; background: var(--bg); }
+#live:empty { display: none; }
+#live { display: grid; gap: 8px; }
+.live { display: grid; gap: 8px; padding: 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--rule); }
+.live .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; }
+.live .sub { color: var(--muted); font-size: 13px; }
+.meter { height: 8px; border-radius: 999px; background: var(--rule); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s; }
+.linkish { color: var(--accent); font-weight: 600; min-height: 32px; padding: 0 4px; }
+.big-num { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.big-num small { font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+.split { display: grid; gap: 8px; }
+.split .row { display: grid; grid-template-columns: 76px 1fr 40px; align-items: center; gap: 10px; font-size: 14px; }
+.split .row b { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.facts { display: grid; gap: 6px; margin: 0; font-size: 14px; }
+.facts div { display: flex; justify-content: space-between; gap: 12px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.runs { list-style: none; margin: 0; padding: 0; display: grid; }
+.runs li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+.runs li:first-child { border-top: 0; padding-top: 0; }
+.runs .what { color: var(--muted); font-size: 13px; grid-column: 1 / -1; }
+.pill { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--rule); color: var(--muted); align-self: start; }
+.pill.ok { background: color-mix(in srgb, #3fa66a 22%, transparent); color: #3fa66a; }
+.pill.run { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.pill.bad { background: color-mix(in srgb, #d64545 22%, transparent); color: #d64545; }
+.views .n { font-size: 11px; margin-left: 4px; color: var(--accent); font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { .stat { display: none; } .views button { padding: 0 11px; } }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -126,12 +174,13 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
     <div class="views" role="group" aria-label="View">
       <button type="button" data-view="feed" aria-pressed="true">Feed</button>
       <button type="button" data-view="liked" aria-pressed="false">Liked</button>
+      <button type="button" data-view="dash" aria-pressed="false">Dashboard</button>
     </div>
     <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false">
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
     </button>
   </div>
-  <nav class="chips" aria-label="Style">
+  <nav class="chips" id="chips" aria-label="Style">
     <button class="chip" type="button" data-medium="all" aria-pressed="true">All</button>
     <button class="chip" type="button" data-medium="photo" aria-pressed="false">Real-life</button>
     <button class="chip" type="button" data-medium="anime" aria-pressed="false">Anime</button>
@@ -145,6 +194,54 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
 </div>
 
 <main>
+  <section class="dash" id="dash" hidden aria-label="Dashboard">
+    <div class="panel" id="gen-panel">
+      <h2>Generate</h2>
+      <div id="live"></div>
+      <div class="field">
+        <span>How many images</span>
+        <div class="seg" id="g-count" role="group" aria-label="How many images">
+          <button type="button" data-n="12" aria-pressed="true">12</button>
+          <button type="button" data-n="50" aria-pressed="false">50</button>
+          <button type="button" data-n="100" aria-pressed="false">100</button>
+          <button type="button" data-n="200" aria-pressed="false">200</button>
+        </div>
+      </div>
+      <div class="field">
+        <span>Keep the best</span>
+        <div class="stepper">
+          <button type="button" id="g-less" aria-label="Keep fewer">−</button>
+          <output id="g-keep">6</output>
+          <button type="button" id="g-more" aria-label="Keep more">+</button>
+          <small id="g-keep-note">the rest are deleted</small>
+        </div>
+      </div>
+      <div class="field">
+        <span>Styles</span>
+        <div class="toggles" id="g-styles" role="group" aria-label="Styles">
+          <button class="toggle" type="button" data-m="photo" aria-pressed="true">Real-life</button>
+          <button class="toggle" type="button" data-m="anime" aria-pressed="true">Anime</button>
+          <button class="toggle" type="button" data-m="furry" aria-pressed="true">Furry</button>
+        </div>
+      </div>
+      <button class="primary" type="button" id="g-go">Generate</button>
+      <p class="note" id="g-est"></p>
+    </div>
+
+    <div class="panel">
+      <h2>Bookmarks</h2>
+      <div class="big-num" id="b-total">–<small>in your taste profile</small></div>
+      <div class="split" id="b-split"></div>
+      <dl class="facts" id="b-facts"></dl>
+      <button class="secondary" type="button" id="b-scan">Scan bookmarks now</button>
+    </div>
+
+    <div class="panel">
+      <h2>Recent runs</h2>
+      <p class="note" id="r-window"></p>
+      <ul class="runs" id="r-list"></ul>
+    </div>
+  </section>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
   <div class="loading" id="loading" hidden>Loading…</div>
@@ -217,6 +314,11 @@ function toast(msg) {
 
 function nightLabel(n) {
   if (n.startsWith("test-")) return "Test batch";
+  const m = n.match(/^manual-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  if (m) {
+    const d = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]);
+    return "Made " + d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
   const d = new Date(n + "T12:00:00");
   return isNaN(d) ? n : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
@@ -228,7 +330,7 @@ async function reset() {
 }
 
 async function loadMore() {
-  if (state.loading || !state.more) return;
+  if (state.view === "dash" || state.loading || !state.more) return;
   state.loading = true; $("loading").hidden = false;
   const gen = state.gen;
   try {
@@ -372,12 +474,17 @@ addEventListener("keydown", e => {
 });
 
 /* ---------- header ---------- */
-for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => {
-  if (state.view === b.dataset.view) return;
-  state.view = b.dataset.view;
-  document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-  reset();
-};
+for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => setView(b.dataset.view);
+function setView(v) {
+  if (state.view === v) return;
+  state.view = v;
+  document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
+  const dash = v === "dash";
+  $("dash").hidden = !dash; $("grid").hidden = dash; $("chips").hidden = dash; $("sentinel").hidden = dash;
+  try { localStorage.setItem("dreamfeed-view", v); } catch {}
+  if (dash) { grid.replaceChildren(); $("empty").hidden = true; state.gen++; refreshDash(); }
+  else reset();
+}
 for (const b of document.querySelectorAll("[data-medium]")) b.onclick = () => {
   if (state.medium === b.dataset.medium) return;
   state.medium = b.dataset.medium;
@@ -395,6 +502,8 @@ async function refreshSummary() {
   try {
     const s = await api("api/summary");
     $("stat").textContent = s.unrated ? `${s.unrated} new` : "";
+    const fb = document.querySelector('[data-view="feed"]');
+    fb.innerHTML = "Feed" + (s.unrated ? `<span class="n">${s.unrated}</span>` : "");
     const r = s.last_run;
     const run = r ? `Last run: ${nightLabel(r.night)}, ${r.status === "done" ? "finished" : r.status}` : "No nightly run yet";
     const bm = Object.entries(s.bookmarks).map(([m, n]) => `${n} ${LABEL[m] || m}`).join(", ");
@@ -405,9 +514,137 @@ async function refreshSummary() {
   } catch {}
 }
 
+/* ---------- dashboard ---------- */
+const SEC_PER_IMAGE = 10.5;
+const gen = { n: 12, keep: 6, styles: new Set(["photo", "anime", "furry"]) };
+const defaultKeep = n => Math.max(1, Math.round(n <= 12 ? n / 2 : n * 0.2));
+function renderGenForm() {
+  document.querySelectorAll("#g-count button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.n === gen.n)));
+  document.querySelectorAll("#g-styles button").forEach(b => b.setAttribute("aria-pressed", String(gen.styles.has(b.dataset.m))));
+  $("g-keep").textContent = gen.keep;
+  $("g-keep-note").textContent = gen.keep === gen.n ? "keeps all of them" : `of ${gen.n}; the rest are deleted`;
+  const mins = Math.max(1, Math.round(gen.n * SEC_PER_IMAGE / 60));
+  $("g-est").textContent = `Takes about ${mins} minute${mins > 1 ? "s" : ""}. You can leave this page; new images show up in the feed when it's done.`;
+  $("g-go").disabled = !gen.styles.size || dashState.busy;
+}
+document.querySelectorAll("#g-count button").forEach(b => b.onclick = () => { gen.n = +b.dataset.n; gen.keep = defaultKeep(gen.n); renderGenForm(); });
+document.querySelectorAll("#g-styles button").forEach(b => b.onclick = () => {
+  gen.styles.has(b.dataset.m) ? gen.styles.delete(b.dataset.m) : gen.styles.add(b.dataset.m); renderGenForm();
+});
+$("g-less").onclick = () => { gen.keep = Math.max(1, gen.keep - (gen.n > 50 ? 5 : 1)); renderGenForm(); };
+$("g-more").onclick = () => { gen.keep = Math.min(gen.n, gen.keep + (gen.n > 50 ? 5 : 1)); renderGenForm(); };
+$("g-go").onclick = async () => {
+  $("g-go").disabled = true;
+  try {
+    await api("api/generate", { images: gen.n, keep: gen.keep, mediums: [...gen.styles] });
+    toast("Queued. It starts within a few seconds.");
+  } catch (e) { toast(e.message); }
+  refreshDash();
+};
+$("b-scan").onclick = async () => {
+  $("b-scan").disabled = true;
+  try { await api("api/scan", {}); toast("Scan requested"); } catch (e) { toast(e.message); }
+  refreshDash();
+};
+
+const dashState = { busy: false, timer: 0 };
+function clock(iso) {
+  if (!iso) return "–";
+  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  if (isNaN(d)) return iso;
+  const today = new Date().toDateString() === d.toDateString();
+  return d.toLocaleString(undefined, today ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+const PHASE = { generating: "Generating", checking: "Checking ages", ranking: "Picking the best" };
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+function renderLive(d) {
+  const live = $("live"); live.replaceChildren();
+  const running = d.runs.find(r => r.status === "running");
+  const queued = d.jobs.filter(j => j.status === "queued");
+  dashState.busy = !!running || queued.length > 0;
+  if (running) {
+    const p = running.progress || { phase: "generating", done: 0, total: 0 };
+    const box = el("div", "live"), head = el("div", "head");
+    head.append(el("span", null, `${PHASE[p.phase] || "Working"}${p.total ? ` ${p.done} of ${p.total}` : "…"}`));
+    const stop = el("button", "linkish", "Cancel"); stop.type = "button";
+    stop.onclick = async () => { stop.disabled = true; try { await api("api/cancel", { night: running.night }); toast("Stopping after the current image"); } catch (e) { toast(e.message); } refreshDash(); };
+    head.append(stop);
+    const meter = el("div", "meter"), bar = el("i"); bar.style.width = `${p.total ? Math.round(100 * p.done / p.total) : 4}%`; meter.append(bar);
+    const label = /^\d/.test(running.night) ? "Tonight's run" : nightLabel(running.night);
+    box.append(head, meter, el("div", "sub", `${label}${p.medium ? " · " + (LABEL[p.medium] || p.medium) : ""}`));
+    live.append(box);
+  }
+  for (const j of queued) {
+    const box = el("div", "live"), head = el("div", "head");
+    head.append(el("span", null, `Waiting: ${j.params.images} images, keep ${j.params.keep}`));
+    const stop = el("button", "linkish", "Remove"); stop.type = "button";
+    stop.onclick = async () => { try { await api("api/cancel", { job: j.id }); } catch (e) { toast(e.message); } refreshDash(); };
+    head.append(stop); box.append(head); live.append(box);
+  }
+}
+
+function renderBookmarks(d) {
+  const total = Object.values(d.bookmarks).reduce((a, b) => a + b, 0);
+  $("b-total").firstChild.textContent = total;
+  const split = $("b-split"); split.replaceChildren();
+  for (const m of ["photo", "anime", "furry"]) {
+    const n = d.bookmarks[m] || 0, row = el("div", "row"), meter = el("div", "meter"), bar = el("i");
+    bar.style.width = `${total ? Math.round(100 * n / total) : 0}%`; meter.append(bar);
+    row.append(el("span", null, LABEL[m]), meter, el("b", null, n)); split.append(row);
+  }
+  const s = d.sync, facts = $("b-facts"); facts.replaceChildren();
+  const dropped = Object.values(d.dropped).reduce((a, b) => a + b, 0);
+  const scanning = s.state === "running";
+  const last = scanning ? `Scanning now · ${s.new_files || 0} new` :
+    s.finished ? `${clock(s.finished)} · ${s.new_files || 0} new${s.result && s.result !== "ok" ? " · " + s.result : ""}` : "–";
+  for (const [k, v] of [["Last scan", last], ["Next scan", s.next_scan ? clock(s.next_scan) : "–"],
+                        ["Waiting to be tagged", d.waiting], ["Dropped by the checks", dropped], ["Liked images", d.liked]]) {
+    const row = el("div"); row.append(el("dt", null, k), el("dd", null, v)); facts.append(row);
+  }
+  if (s.error && s.result !== "ok") { const row = el("div"); row.append(el("dt", null, "Problem"), el("dd", null, s.error)); facts.append(row); }
+  $("b-scan").disabled = scanning || s.requested;
+  $("b-scan").textContent = scanning ? "Scanning…" : s.requested ? "Starting scan…" : "Scan bookmarks now";
+}
+
+function renderRuns(d) {
+  const [a, b] = d.window.split("-");
+  const t = hm => { const [h, m] = hm.split(":").map(Number); return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); };
+  $("r-window").textContent = `Nightly run every night ${t(a)}–${t(b)}.`;
+  const list = $("r-list"); list.replaceChildren();
+  if (!d.runs.length) { list.append(el("li", null, "No runs yet.")); return; }
+  for (const r of d.runs) {
+    const li = el("li"), name = /^\d/.test(r.night) ? "Night of " + nightLabel(r.night) : nightLabel(r.night);
+    const cls = { done: "ok", running: "run", failed: "bad", cancelled: "" }[r.status] ?? "";
+    li.append(el("span", null, name), el("span", "pill " + cls, r.status === "done" ? "done" : r.status));
+    const st = r.stats || {};
+    const parts = [];
+    if (st.feed != null) parts.push(`${st.feed} kept`);
+    if (st.dropped) parts.push(`${st.dropped} dropped by the checks`);
+    if (st.note) parts.push(st.note);
+    if (r.finished_at) parts.push("finished " + clock(r.finished_at));
+    li.append(el("span", "what", parts.join(" · ") || (r.status === "running" ? "in progress" : "")));
+    list.append(li);
+  }
+}
+
+async function refreshDash() {
+  clearTimeout(dashState.timer);
+  if (state.view !== "dash") return;
+  try {
+    const d = await api("api/dashboard");
+    renderLive(d); renderBookmarks(d); renderRuns(d); renderGenForm();
+    dashState.timer = setTimeout(refreshDash, dashState.busy || d.sync.state === "running" || d.sync.requested || d.waiting ? 3000 : 15000);
+  } catch (e) { if (e.message !== "signed out") toast(e.message); dashState.timer = setTimeout(refreshDash, 15000); }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshDash(); });
+
 new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { rootMargin: "800px" }).observe($("sentinel"));
 refreshSummary();
-reset();
+let startView = "feed";
+try { startView = localStorage.getItem("dreamfeed-view") || "feed"; } catch {}
+if (location.hash === "#dashboard") startView = "dash";
+if (startView === "dash" || startView === "liked") setView(startView); else reset();
 </script>
 </body>
 </html>
