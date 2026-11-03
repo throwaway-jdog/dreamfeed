@@ -17,11 +17,10 @@ import sys
 from . import safety
 from .config import Config
 
-SKIP_TAGS = {
-    "text", "english text", "japanese text", "chinese text", "watermark", "signature", "artist name",
-    "web address", "patreon username", "twitter username", "patreon logo", "logo", "dated", "copyright name",
-    "commentary", "translated", "speech bubble", "artist logo", "character name", "multiple views",
-}
+# Text, watermark and signature tags stay in the captions on purpose: tagged, the LoRA learns
+# them as removable things (and the negative prompt removes them); untagged, it would bake the
+# artist's watermark into the style itself.
+SKIP_TAGS = {"commentary", "translated", "character name"}
 TAG_MIN = 0.35
 MAX_TAGS = 40
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
