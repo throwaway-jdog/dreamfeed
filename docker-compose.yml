@@ -105,6 +105,29 @@ services:
     logging:
       options: { max-size: 10m, max-file: "3" }
 
+  # Style-LoRA training, on demand only (never started by `up`):
+  #   docker compose run --rm trainer NAME BASE_CHECKPOINT [STEPS]
+  # The worker holds generation while it runs (data/lora/.training).
+  trainer:
+    build: ./trainer
+    image: dreamfeed-trainer:local
+    profiles: ["train"]
+    user: "${PUID}:${PGID}"
+    shm_size: 8g
+    environment:
+      HF_HOME: /models/hf                     # SDXL tokenizers, downloaded once
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./data/lora:/data/lora
+      - ./models:/models                      # reads checkpoints, writes loras/style-*.safetensors
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   # Feed at https://<your domain>/dreamfeed/ through Caddy (reachable from anywhere, behind
   # the sign-in page). Set the password with
   #   docker compose exec web python -m formlogin passwd

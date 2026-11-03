@@ -12,6 +12,8 @@ python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
 python -m dreamfeed job ID    Run a request queued from the dashboard (generation or reset).
 python -m dreamfeed reset     Forget all bookmarks and tags and re-download everything.
                               Prefer the dashboard's "Start over"; it waits for running work.
+python -m dreamfeed lora-prep NAME --medium M --trigger W
+                              Check and caption data/lora/NAME/raw for style-LoRA training.
 python -m dreamfeed report    Profile summary: mediums, dropped counts, top tags, recent runs.
 """
 import argparse
@@ -29,6 +31,18 @@ def child(*args: str) -> None:
         print(f"dreamfeed: {args[0]} failed (exit {code}), retrying next scan", flush=True)
 
 
+TRAINING_STALE = 8 * 3600   # a lock older than this is left over from a crashed trainer
+
+
+def training(cfg: Config) -> bool:
+    """The trainer container holds the GPU; generation waits (tagging is light enough to go on)."""
+    lock = cfg.data_dir / "lora" / ".training"
+    try:
+        return time.time() - lock.stat().st_mtime < TRAINING_STALE
+    except OSError:
+        return False
+
+
 def main() -> None:
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("run", [])
     if cmd == "run":
@@ -42,11 +56,12 @@ def main() -> None:
         while True:
             if media.ready_files(cfg.bookmarks_dir):
                 child("tag")
-            if due_night(cfg):
-                child("generate")
-            job = next_job(cfg)
-            if job:
-                child("job", str(job))
+            if not training(cfg):
+                if due_night(cfg):
+                    child("generate")
+                job = next_job(cfg)
+                if job:
+                    child("job", str(job))
             time.sleep(cfg.scan_seconds)
     elif cmd == "tag":
         from .tagging import run_once
@@ -69,6 +84,9 @@ def main() -> None:
         from .generate import reset_profile
         cfg = Config()
         reset_profile(cfg, db.connect(cfg.db_path))
+    elif cmd == "lora-prep":
+        from .lora import main as lora_prep
+        lora_prep(rest)
     elif cmd == "report":
         from .report import main as report
         report(rest)

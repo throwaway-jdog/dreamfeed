@@ -114,5 +114,15 @@ AGE_PROMPTS = {
 }
 
 
+# Sexual content with (non-anthro) animals is never generated or trained on. Generated
+# posts and LoRA training images with any of these at FERAL_THRESHOLD are dropped.
+FERAL_TAGS = {"bestiality", "zoophilia", "animal focus", "pokemon (creature)", "feral"}
+FERAL_THRESHOLD = 0.25
+
+
+def feral_hits(scores: dict[str, float]) -> list[str]:
+    return sorted(t for t in FERAL_TAGS if scores.get(t, 0.0) >= FERAL_THRESHOLD)
+
+
 def youth_tag_hits(scores: dict[str, float], threshold: float) -> list[str]:
     return sorted(t for t in YOUTH_TAGS if scores.get(t, 0.0) >= threshold)

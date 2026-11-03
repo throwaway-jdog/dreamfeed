@@ -69,6 +69,8 @@ class Persona:
     video_share: float = 0.2
     weight: float = 1.0
     strict: bool = False
+    lora: tuple[str, float] | None = None   # (file in models/loras, strength)
+    trigger: str = ""                       # the LoRA's trigger word, put first in every prompt
 
     def prompt_for(self, post: Post, rng: random.Random) -> str:
         fill = {
@@ -80,12 +82,12 @@ class Persona:
         body = post.prompt.format(**fill)
         if "{setting}" not in post.prompt:
             body += ", " + fill["setting"]
-        parts = [p for p in (self.look, body) if p]
+        parts = [p for p in (self.trigger, self.look, body) if p]
         return RATINGS[post.rating] + ", ".join(parts)
 
     def avatar_prompt(self, rng: random.Random) -> str:
         who = self.look or (rng.choice(self.characters) if self.characters else "")
-        return ", ".join(p for p in (who, self.avatar) if p)
+        return ", ".join(p for p in (self.trigger, who, self.avatar) if p)
 
     def caption_for(self, post: Post, rng: random.Random) -> str:
         text = rng.choice(post.captions)
@@ -137,6 +139,14 @@ def load(path: Path) -> list[Persona]:
         # Strict is automatic for feminine-man, androgynous, trans and tomboy looks; the file can
         # turn it on for anyone but never off.
         persona.strict = bool(p.get("strict")) or safety.needs_strict(text)
+        if p.get("lora"):
+            lo = p["lora"]
+            if not isinstance(lo, dict) or not str(lo.get("file", "")).endswith(".safetensors"):
+                raise SystemExit(f"personas: {where}: lora needs {{\"file\": \"x.safetensors\", \"strength\": 0.8, \"trigger\": \"word\"}}")
+            persona.lora = (str(lo["file"]), float(lo.get("strength", 0.8)))
+            persona.trigger = str(lo.get("trigger", ""))
+            if safety.blocked(persona.trigger):
+                raise SystemExit(f"personas: {where}: lora trigger uses blocked tags")
         out.append(persona)
     return out
 

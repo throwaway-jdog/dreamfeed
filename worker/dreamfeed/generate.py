@@ -67,6 +67,9 @@ def active_personas(cfg: Config, gen: GenConfig, conn, mediums: list[str] | None
         if not ckpt or not (cfg.models_dir / "checkpoints" / ckpt).exists():
             print(f"generate: @{p.handle} skipped, no {p.medium} checkpoint on disk", flush=True)
             continue
+        if p.lora and not (cfg.models_dir / "loras" / p.lora[0]).exists():
+            print(f"generate: @{p.handle} posting without {p.lora[0]} (not in models/loras)", flush=True)
+            p.lora, p.trigger = None, ""
         out.append(p)
     return out
 
@@ -120,7 +123,8 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                 " VALUES (?,?,?,?,?,?,?,?, 'queued')",
                 (night, p.medium, ckpt, prompt, seed, p.handle, caption, kind)).lastrowid
         try:
-            path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}", strict=p.strict)
+            path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}", strict=p.strict,
+                                 lora=p.lora)
         except ValueError as e:   # safety.prompts refused it
             _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
             return
@@ -187,7 +191,7 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                 _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
                 continue
             a = vision.analyze([img])
-            reason = drop_reason(a, medium, [img], cfg, strict=bool(strict))
+            reason = drop_reason(a, medium, [img], cfg, strict=bool(strict)) or _feral(a)
             if reason:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
@@ -228,6 +232,12 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
 
     return dict(conn.execute("SELECT status, count(*) FROM generations WHERE night = ? GROUP BY status",
                              (night,)).fetchall())
+
+
+def _feral(a) -> tuple[str, str] | None:
+    from . import safety
+    hits = safety.feral_hits(a.general)
+    return ("feral", ", ".join(f"{h} {a.general[h]:.2f}" for h in hits)) if hits else None
 
 
 def _use_avatar(conn, out_dir: Path, gid: int, handle: str, path: Path, img) -> None:
@@ -457,7 +467,7 @@ def check_videos(cfg: Config, conn, night: str) -> dict:
                 _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
                 continue
             a = vision.analyze(frames)
-            reason = drop_reason(a, medium, frames, cfg, strict=bool(strict))
+            reason = drop_reason(a, medium, frames, cfg, strict=bool(strict)) or _feral(a)
             if reason:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
