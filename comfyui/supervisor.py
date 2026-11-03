@@ -24,7 +24,7 @@ CMD = [
     sys.executable, "/app/ComfyUI/main.py",
     "--listen", "0.0.0.0", "--port", "8188",
     "--extra-model-paths-config", "/app/extra_model_paths.yaml",
-    "--output-directory", "/output",
+    "--output-directory", "/data/generated",
     "--user-directory", "/tmp/comfy/user",
     "--temp-directory", "/tmp/comfy/temp",
     "--input-directory", "/tmp/comfy/input",
@@ -55,8 +55,8 @@ def start() -> None:
         last_touch = time.time()
         if not running():
             print("supervisor: starting ComfyUI", flush=True)
-            for d in ("user", "temp", "input"):
-                os.makedirs(f"/tmp/comfy/{d}", exist_ok=True)
+            for d in ("/tmp/comfy/user", "/tmp/comfy/temp", "/tmp/comfy/input", "/data/generated"):
+                os.makedirs(d, exist_ok=True)
             proc = subprocess.Popen(CMD, cwd="/app/ComfyUI")
         for _ in range(300):
             if api_up():

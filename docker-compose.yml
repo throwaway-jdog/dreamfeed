@@ -88,7 +88,7 @@ services:
       COMFY_IDLE_STOP_SECONDS: ${COMFY_IDLE_STOP_SECONDS:?set COMFY_IDLE_STOP_SECONDS in .env}
     volumes:
       - ./models:/models:ro
-      - ./data/generated:/output
+      - ./data:/data                          # writes to data/generated
     deploy:
       resources:
         reservations:
