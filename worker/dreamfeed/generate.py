@@ -1,44 +1,28 @@
 """Nightly run, in three phases so ComfyUI and the vision models never share the GPU:
-1. generate: split IMAGES_PER_NIGHT between mediums and have ComfyUI make them
-2. check:    the same adults-only checks as bookmarks; anything flagged is deleted
-3. rank:     score the rest against the medium's bookmarks, keep the best FEED_KEEP_TOP
+1. generate: split IMAGES_PER_NIGHT between the personas in data/personas.json and have
+             ComfyUI make their posts (plus a profile picture for anyone without one)
+2. check:    the same adults-only checks as bookmarks, stricter for strict personas;
+             anything flagged is deleted
+3. rank:     score the rest against what you liked and skipped from that persona, keep the
+             best FEED_KEEP_TOP, spread over the night as posts in the timeline
 """
 import datetime as dt
 import json
 import random
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-from . import db, safety
+from . import db, personas as people
 from .config import Config, GenConfig
 
 MAX_ATTEMPTS = 3
-TOP_K = 5            # taste score: mean similarity to the closest K liked images/bookmarks
+TOP_K = 5            # taste score: mean similarity to the closest K liked posts
 SKIP_PENALTY = 0.5   # how much looking like something you skipped lowers the score
-LIKE_WEIGHT = 2      # a like counts as this many bookmarks for the medium split
 THUMB_WIDTH = 480
-
-# Tags that describe the file, not the content; never used in prompts.
-META_TAGS = {
-    "no humans", "1other", "text", "english text", "japanese text", "watermark", "signature",
-    "artist name", "web address", "patreon username", "twitter username", "logo", "dated",
-    "multiple views", "comic", "speech bubble", "censored", "mosaic censoring", "bar censor",
-    "blurry", "jpeg artifacts", "lowres", "letterboxed", "border", "subtitled", "copyright name",
-    "meme", "user interface", "artist logo", "fine art parody", "parody", "out-of-frame censoring",
-    "monochrome", "greyscale", "spot color", "pokemon (creature)", "spoken heart", "commentary",
-    "translated", "virtual youtuber", "screencap", "lens flare", "what", "photo background",
-}
-MAX_TAGS = 24
-GIRL_COUNTS = ["1girl", "2girls", "3girls", "multiple girls"]
-BOY_COUNTS = ["1boy", "2boys", "3boys", "multiple boys"]
-COUNT_TAGS = GIRL_COUNTS + BOY_COUNTS
-PHOTO_COUNTS = {"1girl": "a woman", "2girls": "two women", "3girls": "three women",
-                "multiple girls": "several women", "1boy": "a man", "2boys": "two men",
-                "3boys": "three men", "multiple boys": "several men"}
-PHOTO_DROP = {"realistic", "photorealistic", "photo (medium)", "solo", "solo focus", "cosplay photo"}
-RATING_PREFIX = {"explicit": "nsfw, explicit, ", "questionable": "nsfw, ", "sensitive": "", "general": ""}
+AVATAR_SIZE = 256
+AVATAR_TRIES = 3     # candidates per missing profile picture; the first that passes is used
 
 
 def night_key(now: dt.datetime, window: tuple[int, int]) -> str | None:
@@ -68,88 +52,27 @@ def due_night(cfg: Config) -> str | None:
     return night
 
 
-def enabled_mediums(cfg: Config, gen: GenConfig, conn, only: list[str] | None = None) -> dict[str, int]:
-    """Mediums with a checkpoint on disk and at least one bookmark, weighted by bookmarks and likes."""
-    counts = dict(conn.execute("SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
-    for medium, likes in conn.execute(
-            "SELECT g.medium, count(*) FROM feedback f JOIN generations g ON g.id = f.generation_id"
-            " WHERE f.action = 'like' GROUP BY g.medium"):
-        counts[medium] = counts.get(medium, 0) + LIKE_WEIGHT * likes
-    out = {}
-    for medium, ckpt in gen.checkpoints.items():
-        if not ckpt or (only and medium not in only):
+
+
+def active_personas(cfg: Config, gen: GenConfig, conn, mediums: list[str] | None = None,
+                    handles: list[str] | None = None) -> list[people.Persona]:
+    """Personas from the file that have a checkpoint on disk, optionally narrowed down."""
+    out = []
+    loaded = people.load(cfg.personas_path)
+    people.sync(conn, loaded)
+    for p in loaded:
+        if (mediums and p.medium not in mediums) or (handles and p.handle not in handles):
             continue
-        if not (cfg.models_dir / "checkpoints" / ckpt).exists():
-            print(f"generate: {medium} skipped, checkpoint {ckpt} not found", flush=True)
+        ckpt = gen.checkpoints.get(p.medium)
+        if not ckpt or not (cfg.models_dir / "checkpoints" / ckpt).exists():
+            print(f"generate: @{p.handle} skipped, no {p.medium} checkpoint on disk", flush=True)
             continue
-        if counts.get(medium):
-            out[medium] = counts[medium]
+        out.append(p)
     return out
 
 
-def plan(counts: dict[str, int], total_images: int, min_share: float) -> dict[str, int]:
-    total = sum(counts.values())
-    shares = {m: max(min_share, n / total) for m, n in counts.items()}
-    norm = sum(shares.values())
-    alloc = {m: int(total_images * s / norm) for m, s in shares.items()}
-    for m in sorted(shares, key=shares.get, reverse=True)[: total_images - sum(alloc.values())]:
-        alloc[m] += 1
-    return alloc
-
-
-class PromptBuilder:
-    """Prompts start from one bookmark's tags (weighted by likes on its earlier images), plus a couple of the medium's
-    most common tags, so combinations stay coherent but vary."""
-
-    def __init__(self, conn, medium: str):
-        self.medium = medium
-        self.tags: dict[int, dict[str, float]] = defaultdict(dict)
-        self.rating: dict[int, str] = {}
-        for bid, rating in conn.execute("SELECT id, rating FROM bookmarks WHERE medium = ?", (medium,)):
-            self.rating[bid] = rating or "general"
-        for bid, tag, score in conn.execute(
-                "SELECT t.bookmark_id, t.tag, t.score FROM bookmark_tags t JOIN bookmarks b"
-                " ON b.id = t.bookmark_id WHERE b.medium = ?", (medium,)):
-            if tag not in META_TAGS and tag not in safety.NEVER_PROMPT_TAGS:
-                self.tags[bid][tag] = score
-        self.ids = sorted(self.rating)
-        # Bookmarks whose images you liked get picked more, skipped ones less.
-        weight = {bid: 1.0 for bid in self.ids}
-        for bid, action in conn.execute(
-                "SELECT g.source_bookmark, f.action FROM feedback f JOIN generations g"
-                " ON g.id = f.generation_id WHERE g.medium = ?", (medium,)):
-            if bid in weight:
-                weight[bid] += 1.0 if action == "like" else -0.5
-        self.weights = [max(0.2, weight[b]) for b in self.ids]
-        freq = Counter(t for tags in self.tags.values() for t in tags)
-        self.popular = [t for t, _ in freq.most_common(60)]
-
-    def build(self, rng: random.Random) -> tuple[str, int]:
-        bid = rng.choices(self.ids, weights=self.weights)[0]
-        tags = self.tags.get(bid, {})
-        # One people count per gender: the one the tagger was surest of.
-        counts = [max((c for c in group if c in tags), key=tags.get)
-                  for group in (GIRL_COUNTS, BOY_COUNTS) if any(c in tags for c in group)]
-        content = {t: s for t, s in tags.items() if t not in COUNT_TAGS}
-        strong = sorted((t for t, s in content.items() if s >= 0.5), key=content.get, reverse=True)
-        weak = [t for t, s in content.items() if s < 0.5]
-        chosen = strong + rng.sample(weak, k=len(weak) // 2)
-        extra = [t for t in self.popular if t not in chosen and t not in COUNT_TAGS]
-        chosen = chosen[: MAX_TAGS - len(counts) - 2] + rng.sample(extra, k=min(2, len(extra)))
-        rng.shuffle(chosen)
-        return self._format(counts, chosen, self.rating.get(bid, "general")), bid
-
-    def _format(self, counts: list[str], rest: list[str], rating: str) -> str:
-        esc = lambda t: t.replace("(", r"\(").replace(")", r"\)")
-        if self.medium == "photo":
-            people = " and ".join(PHOTO_COUNTS[c] for c in counts)
-            body = [esc(t) for t in rest if t not in PHOTO_DROP]
-            return "photo, " + RATING_PREFIX[rating] + ", ".join(([people] if people else []) + body)
-        return RATING_PREFIX[rating] + ", ".join(esc(t) for t in counts + rest)
-
-
 def run(cfg: Config, night: str | None = None, images: int | None = None, keep: int | None = None,
-        ignore_window: bool = False, mediums: list[str] | None = None) -> str:
+        ignore_window: bool = False, mediums: list[str] | None = None, handles: list[str] | None = None) -> str:
     """Returns the run's final status: done | cancelled."""
     from .comfy import Comfy
 
@@ -166,51 +89,65 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                      (night,))
 
     expire_old(cfg, conn, gen.feed_keep_days)
-    counts = enabled_mediums(cfg, gen, conn, mediums)
-    if not counts:
-        _finish(conn, night, "done", {"note": "no medium has both a checkpoint and bookmarks"})
+    cast = active_personas(cfg, gen, conn, mediums, handles)
+    if not cast:
+        _finish(conn, night, "done", {"note": f"no personas to post: add some to {cfg.personas_path.name}"})
         return "done"
-    targets = plan(counts, images, gen.min_share)
-    total = sum(targets.values())
-    made = conn.execute("SELECT count(*) FROM generations WHERE night = ? AND status != 'queued'",
-                        (night,)).fetchone()[0]
-    _progress(conn, night, "generating", made, total)
+    rng = random.Random()
+    made = conn.execute("SELECT count(*) FROM generations WHERE night = ? AND kind = 'image' AND persona IS NOT NULL AND status != 'queued'",
+                        (night,)).fetchone()[0]   # earlier attempt of the same night
+    targets = people.plan(conn, cast, max(0, images - made), rng)
+    have_avatar = {h for (h,) in conn.execute("SELECT handle FROM personas WHERE avatar IS NOT NULL")}
+    tried = {h for (h,) in conn.execute("SELECT DISTINCT persona FROM generations WHERE night = ? AND kind = 'avatar'",
+                                        (night,))}
+    need_avatar = [p for p in cast if p.handle not in have_avatar and p.handle not in tried]
+    total = sum(targets.values()) + AVATAR_TRIES * len(need_avatar)
+    done = 0
+    _progress(conn, night, "generating", done, total)
     cancelled = False
-    print(f"generate: night {night}, plan {targets}", flush=True)
+    print(f"generate: night {night}, {sum(targets.values())} posts for {len(targets)} personas, "
+          f"{len(need_avatar)} profile pictures", flush=True)
 
     out_dir = cfg.data_dir / "generated"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
-    rng = random.Random()
+
+    def make(p: people.Persona, kind: str, prompt: str, caption: str | None) -> None:
+        ckpt = gen.checkpoints[p.medium]
+        seed = rng.randrange(2 ** 32)
+        with conn:
+            gid = conn.execute(
+                "INSERT INTO generations(night, medium, checkpoint, prompt, seed, persona, caption, kind, status)"
+                " VALUES (?,?,?,?,?,?,?,?, 'queued')",
+                (night, p.medium, ckpt, prompt, seed, p.handle, caption, kind)).lastrowid
+        try:
+            path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}", strict=p.strict)
+        except ValueError as e:   # safety.prompts refused it
+            _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
+            return
+        _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)))
+
+    by_handle = {p.handle: p for p in cast}
+    order = [h for h, n in targets.items() for _ in range(n)]
+    rng.shuffle(order)
     try:
-        for medium, target in targets.items():
-            done = conn.execute("SELECT count(*) FROM generations WHERE night = ? AND medium = ?"
-                                " AND status != 'queued'", (night, medium)).fetchone()[0]
-            builder = PromptBuilder(conn, medium)
-            for _ in range(max(0, target - done)):
-                if not ignore_window and night_key(dt.datetime.now(), gen.window) != night:
-                    print("generate: window closed, stopping generation", flush=True)
-                    break
-                if _cancel_requested(conn, night):
-                    cancelled = True
-                    break
-                prompt, source = builder.build(rng)
-                seed = rng.randrange(2 ** 32)
-                with conn:
-                    gid = conn.execute(
-                        "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_bookmark, status)"
-                        " VALUES (?,?,?,?,?,?, 'queued')",
-                        (night, medium, gen.checkpoints[medium], prompt, seed, source)).lastrowid
-                try:
-                    path = comfy.txt2img(gen.checkpoints[medium], medium, prompt, seed, night, f"{medium}-{gid}")
-                except ValueError as e:   # safety.prompts refused it
-                    _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
-                    continue
-                _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)))
-                made += 1
-                _progress(conn, night, "generating", made, total, medium)
-            if cancelled:
+        for p in need_avatar:
+            for _ in range(AVATAR_TRIES):
+                make(p, "avatar", people.RATINGS["general"] + p.avatar_prompt(rng), None)
+                done += 1
+                _progress(conn, night, "generating", done, total)
+        for handle in order:
+            if not ignore_window and night_key(dt.datetime.now(), gen.window) != night:
+                print("generate: window closed, stopping generation", flush=True)
+                break
+            if _cancel_requested(conn, night):
+                cancelled = True
                 print("generate: cancelled, checking what was made so far", flush=True)
                 break
+            p = by_handle[handle]
+            post = people.pick_post(p, rng)
+            make(p, "image", p.prompt_for(post, rng), p.caption_for(post, rng))
+            done += 1
+            _progress(conn, night, "generating", done, total, p.medium)
     finally:
         comfy.stop()
 
@@ -231,13 +168,16 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
     from .vision import Vision
 
     out_dir = cfg.data_dir / "generated"
-    rows = conn.execute("SELECT id, medium, file FROM generations WHERE night = ? AND status = 'generated'"
-                        " AND kind = 'image'", (night,)).fetchall()
+    rows = conn.execute(
+        "SELECT g.id, g.medium, g.file, g.kind, g.persona, coalesce(p.strict, 1) FROM generations g"
+        " LEFT JOIN personas p ON p.handle = g.persona"
+        " WHERE g.night = ? AND g.status = 'generated' AND g.kind IN ('image', 'avatar')", (night,)).fetchall()
+    rng = random.Random()
     if rows:
         _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
-        taste, skipped = _taste_matrices(conn)
-        for n, (gid, medium, file) in enumerate(rows, 1):
+        like, skip = _taste_matrices(conn)
+        for n, (gid, medium, file, kind, handle, strict) in enumerate(rows, 1):
             if n % 5 == 0:
                 _progress(conn, night, "checking", n, len(rows))
             path = out_dir / file
@@ -247,31 +187,41 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                 _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
                 continue
             a = vision.analyze([img])
-            reason = drop_reason(a, medium, [img], cfg)
+            reason = drop_reason(a, medium, [img], cfg, strict=bool(strict))
             if reason:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
                 continue
+            if kind == "avatar":
+                _use_avatar(conn, out_dir, gid, handle, path, img)
+                continue
             emb = a.embedding.astype(np.float32)
-            score = _closest(taste.get(medium), emb)
-            if medium in skipped:
-                score -= SKIP_PENALTY * max(0.0, _closest(skipped[medium], emb) - score)
+            likes = like.get(handle) if handle in like else like.get(medium)
+            skips = skip.get(handle) if handle in skip else skip.get(medium)
+            score = _closest(likes, emb)
+            if skips is not None:
+                score -= SKIP_PENALTY * max(0.0, _closest(skips, emb) - score)
+            score += rng.random() * 1e-3   # breaks ties while nothing is liked yet
             _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes())
 
     _progress(conn, night, "ranking", 0, 0)
-    # Keep the best per medium, in proportion to what each medium produced.
-    scored = conn.execute("SELECT id, medium, file, score FROM generations WHERE night = ? AND status = 'scored'",
+    # Keep the best per persona, in proportion to how many posts each one made.
+    scored = conn.execute("SELECT id, persona, file, score FROM generations WHERE night = ? AND status = 'scored'",
                           (night,)).fetchall()
-    by_medium = defaultdict(list)
+    by_persona = defaultdict(list)
     for row in scored:
-        by_medium[row[1]].append(row)
-    total = len(scored)
-    for medium, items in by_medium.items():
-        quota = max(1, round(keep * len(items) / total))
+        by_persona[row[1]].append(row)
+    started = conn.execute("SELECT started_at FROM runs WHERE night = ?", (night,)).fetchone()
+    start = dt.datetime.fromisoformat(started[0]) if started and started[0] else _utcnow()
+    span = max(60.0, (_utcnow() - start).total_seconds())
+    for handle, items in by_persona.items():
+        quota = max(1, round(keep * len(items) / len(scored)))
         items.sort(key=lambda r: r[3], reverse=True)
         for gid, _, file, _ in items[:quota]:
             full, thumb = _to_jpeg(out_dir, file)
-            _set(conn, gid, status="feed", file=full, thumb=thumb)
+            # Posts are spread over the run so the timeline interleaves personas.
+            posted = start + dt.timedelta(seconds=rng.uniform(0, span))
+            _set(conn, gid, status="feed", file=full, thumb=thumb, posted_at=posted.strftime("%Y-%m-%d %H:%M:%S"))
         for gid, _, file, _ in items[quota:]:
             (out_dir / file).unlink(missing_ok=True)
             _set(conn, gid, status="ranked-out")
@@ -280,18 +230,45 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
                              (night,)).fetchall())
 
 
+def _use_avatar(conn, out_dir: Path, gid: int, handle: str, path: Path, img) -> None:
+    """The first passing candidate becomes the profile picture: a square around the head, which
+    SDXL puts near the top centre even when asked for a portrait."""
+    have = conn.execute("SELECT avatar FROM personas WHERE handle = ?", (handle,)).fetchone()
+    if have and have[0]:
+        path.unlink(missing_ok=True)
+        _set(conn, gid, status="ranked-out")
+        return
+    w, h = img.size
+    side = int(min(w, h) * 0.6)
+    left, top = (w - side) // 2, int(h * 0.02)
+    face = img.crop((left, top, left + side, top + side)).resize((AVATAR_SIZE, AVATAR_SIZE))
+    rel = Path("avatars") / f"{handle}-{gid}.jpg"
+    (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+    face.save(out_dir / rel, quality=88, optimize=True)
+    path.unlink(missing_ok=True)
+    _set(conn, gid, status="avatar", file=str(rel))
+    with conn:
+        conn.execute("UPDATE personas SET avatar = ? WHERE handle = ?", (str(rel), handle))
+
+
 def _taste_matrices(conn) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    """What each medium should look like (bookmarks + liked images) and what to avoid (skips)."""
+    """Liked and skipped posts, keyed both by persona handle and by medium (the fallback for a
+    persona you haven't rated yet)."""
     like, skip = defaultdict(list), defaultdict(list)
-    for medium, blob in conn.execute("SELECT medium, embedding FROM bookmarks"):
-        like[medium].append(blob)
-    for medium, blob, action in conn.execute(
-            "SELECT g.medium, g.embedding, f.action FROM feedback f JOIN generations g"
-            " ON g.id = f.generation_id WHERE g.embedding IS NOT NULL"):
-        (like if action == "like" else skip)[medium].append(blob)
-    stack = lambda d: {m: np.stack([np.frombuffer(b, dtype=np.float16).astype(np.float32) for b in v])
-                       for m, v in d.items()}
+    for handle, medium, blob, action in conn.execute(
+            "SELECT g.persona, g.medium, g.embedding, f.action FROM feedback f JOIN generations g"
+            " ON g.id = f.generation_id WHERE g.embedding IS NOT NULL AND g.persona IS NOT NULL"):
+        target = like if action == "like" else skip
+        target[handle].append(blob)
+        target[medium].append(blob)
+    stack = lambda d: {k: np.stack([np.frombuffer(b, dtype=np.float16).astype(np.float32) for b in v])
+                       for k, v in d.items()}
     return stack(like), stack(skip)
+
+
+def _utcnow() -> dt.datetime:
+    """Naive UTC, the way SQLite's datetime('now') stores times."""
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
 
 def _closest(matrix: np.ndarray | None, emb: np.ndarray) -> float:
@@ -365,7 +342,8 @@ def run_job(cfg: Config, job_id: int) -> None:
         conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
     try:
         status = run(cfg, night=night, images=int(params["images"]), keep=int(params["keep"]),
-                     ignore_window=True, mediums=params.get("mediums") or None)
+                     ignore_window=True, mediums=params.get("mediums") or None,
+                     handles=params.get("personas") or None)
         message = None
     except Exception as e:
         status, message = "failed", str(e)[:300]
@@ -379,7 +357,6 @@ def run_job(cfg: Config, job_id: int) -> None:
 
 
 MOTION = {
-    "photo": "natural realistic motion, subtle body movement, breathing, hair and fabric moving, steady camera",
     "anime": "smooth anime animation, natural motion, subtle body movement, hair and clothes moving, steady camera",
     "furry": "smooth animation, natural motion, subtle body movement, fur, hair and clothes moving, steady camera",
 }
@@ -387,22 +364,28 @@ VIDEO_CHECK_FRAMES = 8   # every generated clip is checked on at least this many
 
 
 def pick_sources(conn, count: int, night: str | None = None) -> list[int]:
-    """Images to animate: recent likes first, then the best of the given night (or of
-    everything still in the feed), skipping images that already have a clip."""
+    """Posts to animate: recent likes first, then a draw from the given night (or everything
+    still in the feed) weighted by each persona's video_share, skipping posts that already
+    have a clip."""
     have = "SELECT source_generation FROM generations WHERE kind = 'video' AND source_generation IS NOT NULL"
     liked = [r[0] for r in conn.execute(
         f"SELECT g.id FROM feedback f JOIN generations g ON g.id = f.generation_id WHERE f.action = 'like'"
-        f" AND g.kind = 'image' AND g.status = 'feed' AND g.id NOT IN ({have}) ORDER BY f.at DESC")]
+        f" AND g.kind = 'image' AND g.status = 'feed' AND g.persona IS NOT NULL AND g.id NOT IN ({have})"
+        f" ORDER BY f.at DESC")]
     where, args = ("AND g.night = ?", (night,)) if night else ("", ())
-    best = [r[0] for r in conn.execute(
-        f"SELECT g.id FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id WHERE g.kind = 'image'"
-        f" AND g.status = 'feed' AND (f.action IS NULL OR f.action = 'like') AND g.id NOT IN ({have}) {where}"
-        f" ORDER BY g.score DESC", args)]
-    out = []
-    for gid in liked + best:
-        if gid not in out:
-            out.append(gid)
-    return out[:count]
+    pool = conn.execute(
+        f"SELECT g.id, coalesce(p.video_share, 0.2) FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id"
+        f" LEFT JOIN personas p ON p.handle = g.persona WHERE g.kind = 'image' AND g.status = 'feed'"
+        f" AND g.persona IS NOT NULL AND (f.action IS NULL OR f.action = 'like') AND g.id NOT IN ({have}) {where}"
+        f" ORDER BY g.score DESC", args).fetchall()
+    out = [gid for gid in liked][:count]
+    pool = [r for r in pool if r[0] not in out]
+    rng = random.Random()
+    while pool and len(out) < count:
+        pick = rng.choices(pool, weights=[max(0.01, w) for _, w in pool])[0]
+        pool.remove(pick)
+        out.append(pick[0])
+    return out
 
 
 def animate(cfg: Config, conn, night: str, sources: list[int],
@@ -424,20 +407,22 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                 break
             if _cancel_requested(conn, night):
                 break
-            row = conn.execute("SELECT medium, prompt, file FROM generations WHERE id = ? AND kind = 'image'"
-                               " AND status = 'feed'", (src,)).fetchone()
-            if not row or not (out_dir / row[2]).is_file():
+            row = conn.execute("SELECT g.medium, g.prompt, g.file, g.persona, g.caption, coalesce(p.strict, 1)"
+                               " FROM generations g LEFT JOIN personas p ON p.handle = g.persona"
+                               " WHERE g.id = ? AND g.kind = 'image' AND g.status = 'feed'", (src,)).fetchone()
+            if not row or not (out_dir / row[2]).is_file() or row[0] not in MOTION:
                 continue
-            medium, prompt, file = row
+            medium, prompt, file, handle, caption, strict = row
             motion = ", ".join(p for p in (motion_text.strip(), prompt, MOTION[medium]) if p)
             seed = rng.randrange(2 ** 32)
             with conn:
                 gid = conn.execute(
-                    "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, kind, status)"
-                    " VALUES (?,?,?,?,?,?, 'video', 'queued')",
-                    (night, medium, "wan2.2-i2v", motion, seed, src)).lastrowid
+                    "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
+                    " caption, kind, status) VALUES (?,?,?,?,?,?,?,?, 'video', 'queued')",
+                    (night, medium, "wan2.2-i2v", motion, seed, src, handle, caption)).lastrowid
             try:
-                path = comfy.img2vid("wan", out_dir / file, medium, motion, seed, night, f"video-{gid}")
+                path = comfy.img2vid("wan", out_dir / file, medium, motion, seed, night, f"video-{gid}",
+                                     strict=bool(strict))
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue
@@ -456,13 +441,14 @@ def check_videos(cfg: Config, conn, night: str) -> dict:
     from .tagging import drop_reason
     from .vision import Vision
     out_dir = cfg.data_dir / "generated"
-    rows = conn.execute("SELECT g.id, g.medium, g.file, s.score FROM generations g"
+    rows = conn.execute("SELECT g.id, g.medium, g.file, s.score, coalesce(p.strict, 1) FROM generations g"
                         " LEFT JOIN generations s ON s.id = g.source_generation"
+                        " LEFT JOIN personas p ON p.handle = g.persona"
                         " WHERE g.night = ? AND g.kind = 'video' AND g.status = 'generated'", (night,)).fetchall()
     if rows:
         _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
-        for n, (gid, medium, file, score) in enumerate(rows, 1):
+        for n, (gid, medium, file, score, strict) in enumerate(rows, 1):
             path = out_dir / file
             try:
                 frames = media.load_frames(path, VIDEO_CHECK_FRAMES)
@@ -471,7 +457,7 @@ def check_videos(cfg: Config, conn, night: str) -> dict:
                 _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
                 continue
             a = vision.analyze(frames)
-            reason = drop_reason(a, medium, frames, cfg)
+            reason = drop_reason(a, medium, frames, cfg, strict=bool(strict))
             if reason:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
@@ -481,7 +467,7 @@ def check_videos(cfg: Config, conn, night: str) -> dict:
             first.thumbnail((THUMB_WIDTH, THUMB_WIDTH * 2))
             first.save(poster, quality=78, optimize=True)
             _set(conn, gid, status="feed", score=score or 0, thumb=str(poster.relative_to(out_dir)),
-                 embedding=a.embedding.tobytes())
+                 embedding=a.embedding.tobytes(), posted_at=_utcnow().strftime("%Y-%m-%d %H:%M:%S"))
             _progress(conn, night, "checking", n, len(rows))
     return dict(conn.execute("SELECT status, count(*) FROM generations WHERE night = ? AND kind = 'video'"
                              " GROUP BY status", (night,)).fetchall())

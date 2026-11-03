@@ -13,7 +13,8 @@ YOUTH_TAGS = {
 # that push generated characters toward looking young.
 NEVER_PROMPT_TAGS = YOUTH_TAGS | {
     "flat chest", "petite", "school uniform", "serafuku", "school swimsuit",
-    "gym uniform", "buruma", "school bag", "otoko no ko",
+    "gym uniform", "buruma", "school bag", "otoko no ko", "femboy", "trap",
+    # Aliases of the same booru tag ("otoko no ko"), which pulls toward young-looking characters.
 }
 
 # Added to every generation prompt, per medium.
@@ -30,13 +31,34 @@ YOUTH_NEGATIVE = {
 }
 
 
-def prompts(medium: str, positive: str, negative: str) -> tuple[str, str]:
+# Extra terms for characters where models drift young most often: feminine men, androgynous
+# and petite-coded characters. Personas get this automatically when their look matches.
+STRICT_POSITIVE = "adult, mature, adult proportions, tall, long legs, "
+STRICT_NEGATIVE = "young boy, young girl, boyish face, childlike face, baby face, small body, short stature, aged down"
+STRICT_MARKERS = ("crossdressing", "androgynous", "feminine", "futanari", "trans", "tomboy")
+# Drawings of strict personas are dropped at this CLIP youth share (normal: AGE_THRESHOLD).
+STRICT_AGE_THRESHOLD = 0.25
+
+
+def blocked(text: str) -> list[str]:
+    text = text.lower().replace("_", " ")
+    return sorted(t for t in NEVER_PROMPT_TAGS if re.search(rf"\b{re.escape(t)}\b", text))
+
+
+def needs_strict(text: str) -> bool:
+    text = text.lower()
+    return any(m in text for m in STRICT_MARKERS)
+
+
+def prompts(medium: str, positive: str, negative: str, strict: bool = False) -> tuple[str, str]:
     """Wrap a prompt with the medium's adult-only terms. Refuses prompts with youth tags."""
-    text = positive.lower().replace("_", " ")
-    bad = sorted(t for t in NEVER_PROMPT_TAGS if re.search(rf"\b{re.escape(t)}\b", text))
+    bad = blocked(positive)
     if bad:
         raise ValueError(f"prompt contains blocked tags: {', '.join(bad)}")
-    return ADULT_POSITIVE[medium] + positive, f"{YOUTH_NEGATIVE[medium]}, {negative}"
+    strict = strict or needs_strict(positive)
+    pos = ADULT_POSITIVE[medium] + (STRICT_POSITIVE if strict else "") + positive
+    neg = YOUTH_NEGATIVE[medium] + (", " + STRICT_NEGATIVE if strict else "") + f", {negative}"
+    return pos, neg
 
 
 FURRY_TAGS ={"furry", "furry female", "furry male", "body fur", "snout", "animal nose"}

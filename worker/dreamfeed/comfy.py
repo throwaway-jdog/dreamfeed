@@ -41,9 +41,9 @@ class Comfy:
             return json.load(resp)["name"]
 
     def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
-                subdir: str, name: str) -> Path:
+                subdir: str, name: str, strict: bool = False) -> Path:
         """Animate a (generated, already checked) image into a ~5 second clip."""
-        positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE)
+        positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start()
         source = self.upload(image)
         build = {"wan": _wan_workflow, "ltx": _ltx_workflow}[engine]
@@ -67,10 +67,10 @@ class Comfy:
         raise TimeoutError(f"ComfyUI prompt {prompt_id} did not finish in {timeout:.0f}s")
 
     def txt2img(self, checkpoint: str, medium: str, prompt: str, seed: int,
-                subdir: str, name: str, extra_negative: str = "") -> Path:
+                subdir: str, name: str, extra_negative: str = "", strict: bool = False) -> Path:
         p = presets.for_checkpoint(checkpoint)
         positive, negative = safety.prompts(medium, p.positive_prefix + prompt,
-                                            p.negative + (", " + extra_negative if extra_negative else ""))
+                                            p.negative + (", " + extra_negative if extra_negative else ""), strict)
         workflow = {
             "ckpt": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
             "clip": {"class_type": "CLIPSetLastLayer",

@@ -12,8 +12,8 @@
 <title>dreamfeed</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%23e5604a'/></svg>">
 <style>
-/* Layout: phone-first contact sheet. Sticky header + filter chips, dense 2-column grid that
-   widens with the screen, full-screen viewer with thumb-reach Like / Skip. */
+/* Layout: phone-first timeline. Sticky header + persona strip, one column of posts like a social feed,
+   centered on wide screens; full-screen viewer with thumb-reach Like / Skip. */
 :root {
   --bg: #0f0e0d; --surface: #1a1917; --raise: #262421; --fg: #efece6; --muted: #9c978e;
   --rule: #2e2b27; --accent: #e5604a; --like: #ff5d7d; --scrim: rgb(15 14 13 / .78);
@@ -54,31 +54,63 @@ svg { width: 22px; height: 22px; display: block; }
 .chip[aria-pressed="true"] { border-color: var(--fg); color: var(--fg); }
 .chip span { font-size: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
 
-/* Grid */
-main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) var(--side); }
-.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
-@media (min-width: 640px) { :root { --gap: 8px; } .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (min-width: 960px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } main { max-width: 1400px; margin: 0 auto; } }
-@media (min-width: 1280px) { .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
-.card { position: relative; margin: 0; aspect-ratio: 832 / 1216; border-radius: 6px; overflow: hidden;
-  background: var(--surface); transition: opacity .2s, transform .2s; }
-.card.gone { opacity: 0; transform: scale(.94); }
-.card .open { position: absolute; inset: 0; width: 100%; height: 100%; }
-.card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.card .acts { position: absolute; inset: auto 0 0 0; display: flex; justify-content: space-between; padding: 6px;
-  background: linear-gradient(transparent, rgb(0 0 0 / .55)); pointer-events: none; }
-.card .act { pointer-events: auto; width: var(--tap); height: var(--tap); border-radius: 50%; display: grid; place-items: center;
-  color: #fff; background: rgb(0 0 0 / .32); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+/* Persona strip */
+.people { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 4px 0 10px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+.people::-webkit-scrollbar { display: none; }
+.who { flex: none; width: 62px; display: grid; justify-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.who span { max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who[aria-pressed="true"] { color: var(--fg); }
+.who[aria-pressed="true"] .av { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+.av { width: 52px; height: 52px; border-radius: 50%; background: var(--raise); object-fit: cover; display: grid; place-items: center;
+  font-weight: 700; font-size: 18px; color: var(--fg); overflow: hidden; flex: none; }
+.av.sm { width: 42px; height: 42px; font-size: 15px; }
+.av.lg { width: 84px; height: 84px; font-size: 30px; }
+.av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Timeline */
+main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
+.timeline { max-width: 620px; margin: 0 auto; }
+@media (min-width: 640px) { .timeline { border-left: 1px solid var(--rule); border-right: 1px solid var(--rule); } }
+.post { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; border-bottom: 1px solid var(--rule);
+  padding: 12px max(14px, env(safe-area-inset-right, 0px)) 6px max(14px, env(safe-area-inset-left, 0px));
+  transition: opacity .2s, transform .2s; }
+.post.gone { opacity: 0; transform: translateX(-16px); }
+.post .head { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 15px; }
+.post .name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.post .handle, .post .time { color: var(--muted); white-space: nowrap; }
+.post .handle { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.post .who-btn { text-align: left; display: contents; }
+.post .text { margin: 2px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.post .text .tag { color: var(--accent); }
+.post .media { position: relative; display: block; width: 100%; border-radius: 16px; overflow: hidden; background: var(--surface);
+  border: 1px solid var(--rule); aspect-ratio: 832 / 1216; max-height: 78vh; }
+.post .media img, .post .media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.post .play { position: absolute; left: 10px; bottom: 10px; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700;
+  color: #fff; background: rgb(0 0 0 / .55); padding: 3px 8px 3px 6px; border-radius: 999px; pointer-events: none; }
+.post .play svg { width: 12px; height: 12px; }
+.post .acts { display: flex; justify-content: space-between; max-width: 360px; margin-top: 2px; }
+.post .act { min-width: var(--tap); height: var(--tap); display: flex; align-items: center; gap: 6px; padding: 0 6px; margin-left: -6px;
+  color: var(--muted); font-size: 13px; border-radius: 999px; }
+.post .act svg { width: 19px; height: 19px; }
 .act.like[aria-pressed="true"] { color: var(--like); }
 .act.like[aria-pressed="true"] svg path { fill: currentColor; }
-.badge { position: absolute; top: 6px; left: 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
-  text-transform: uppercase; color: #fff; background: rgb(0 0 0 / .4); padding: 3px 7px; border-radius: 999px; pointer-events: none; }
-.play { position: absolute; top: 6px; right: 6px; display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700;
-  color: #fff; background: rgb(0 0 0 / .45); padding: 3px 8px 3px 6px; border-radius: 999px; pointer-events: none; }
-.play svg { width: 12px; height: 12px; }
-.night { grid-column: 1 / -1; padding: 14px 8px 4px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
-.night:first-child { padding-top: 6px; }
-.empty { text-align: center; color: var(--muted); padding: 18vh 24px; max-width: 34ch; margin: 0 auto; }
+.post .act:hover { color: var(--fg); }
+.post .act.like:hover { color: var(--like); }
+.profile { max-width: 620px; margin: 0 auto; display: grid; gap: 10px; border-bottom: 1px solid var(--rule);
+  padding: 16px max(14px, env(safe-area-inset-right, 0px)) 14px max(14px, env(safe-area-inset-left, 0px)); }
+@media (min-width: 640px) { .profile { border-left: 1px solid var(--rule); border-right: 1px solid var(--rule); } }
+.profile .top-line { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.profile h2 { margin: 0; font-size: 21px; line-height: 1.2; }
+.profile .handle { color: var(--muted); }
+.profile .bio { margin: 0; white-space: pre-wrap; }
+.profile .nums { color: var(--muted); font-size: 14px; display: flex; gap: 14px; }
+.profile .nums b { color: var(--fg); }
+.pill-btn { min-height: 38px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--rule); font-weight: 700; font-size: 14px; }
+.pill-btn.solid { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.back { display: flex; align-items: center; gap: 4px; color: var(--muted); font-weight: 600; min-height: 32px; justify-self: start; }
+.back svg { width: 18px; height: 18px; }
+.empty { text-align: center; color: var(--muted); padding: 14vh 24px; max-width: 34ch; margin: 0 auto; }
 .empty strong { display: block; color: var(--fg); font-size: 17px; margin-bottom: 6px; }
 #sentinel { height: 1px; }
 .loading { text-align: center; color: var(--muted); padding: 20px; font-size: 13px; }
@@ -132,9 +164,9 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
   background: var(--raise); color: var(--fg); border: 1px solid var(--rule); padding: 10px 16px; border-radius: 999px;
   font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); max-width: calc(100vw - 32px); }
 @media (min-width: 960px) { .viewer .nav { width: 30%; cursor: pointer; } }
-@media (prefers-reduced-motion: reduce) { .card, .viewer .stage img, .viewer .heart { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .post, .viewer .stage img, .viewer .heart { transition: none; } }
 /* Dashboard */
-.dash { display: grid; gap: 10px; padding: 6px 2px 0; }
+.dash { display: grid; gap: 10px; padding: 8px max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px)); }
 @media (min-width: 900px) { .dash { grid-template-columns: 1fr 1fr; max-width: 1100px; margin: 0 auto; align-items: start; } }
 .panel { background: var(--surface); border-radius: 16px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
 .panel h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -145,7 +177,7 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
 .seg button, .toggle { min-height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); background: var(--bg);
   font-weight: 600; font-variant-numeric: tabular-nums; }
 .seg button[aria-pressed="true"], .toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-.toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.toggles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .toggle { font-size: 14px; }
 .stepper { display: flex; align-items: center; gap: 8px; }
 .stepper button { width: var(--tap); height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); background: var(--bg); font-size: 20px; }
@@ -204,12 +236,7 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
     </button>
   </div>
-  <nav class="chips" id="chips" aria-label="Style">
-    <button class="chip" type="button" data-medium="all" aria-pressed="true">All</button>
-    <button class="chip" type="button" data-medium="photo" aria-pressed="false">Real-life</button>
-    <button class="chip" type="button" data-medium="anime" aria-pressed="false">Anime</button>
-    <button class="chip" type="button" data-medium="furry" aria-pressed="false">Furry</button>
-  </nav>
+  <nav class="people" id="people" aria-label="Personas"></nav>
 </header>
 
 <div class="sheet" id="sheet" hidden>
@@ -243,7 +270,6 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
       <div class="field">
         <span>Styles</span>
         <div class="toggles" id="g-styles" role="group" aria-label="Styles">
-          <button class="toggle" type="button" data-m="photo" aria-pressed="true">Real-life</button>
           <button class="toggle" type="button" data-m="anime" aria-pressed="true">Anime</button>
           <button class="toggle" type="button" data-m="furry" aria-pressed="true">Furry</button>
         </div>
@@ -269,21 +295,11 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
 
     <div class="panel">
       <h2>Bookmarks</h2>
-      <div class="big-num" id="b-total">–<small>in your taste profile</small></div>
+      <div class="big-num" id="b-total">–<small>checked</small></div>
+      <p class="note">Bookmarks no longer steer what gets made; they're age-checked and kept in your bookmark copy.</p>
       <div class="split" id="b-split"></div>
       <dl class="facts" id="b-facts"></dl>
       <button class="secondary" type="button" id="b-scan">Scan bookmarks now</button>
-      <button class="linkish" type="button" id="b-reset-open" style="justify-self:start">Start over…</button>
-      <div class="confirm" id="b-reset" hidden>
-        <p><strong>Start the taste profile over?</strong></p>
-        <p>This forgets every bookmark, its tags and the drop records, then downloads and tags all your
-        bookmarks again with the current checks (about 10 minutes). Your liked images, feed and runs stay.
-        Tonight's run uses whatever has been re-tagged by then.</p>
-        <div class="confirm-actions">
-          <button class="secondary" type="button" id="b-reset-no">Keep my profile</button>
-          <button class="danger" type="button" id="b-reset-yes">Delete tags and re-download</button>
-        </div>
-      </div>
     </div>
 
     <div class="panel">
@@ -292,7 +308,8 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
       <ul class="runs" id="r-list"></ul>
     </div>
   </section>
-  <div class="grid" id="grid"></div>
+  <section class="profile" id="profile" hidden></section>
+  <div class="timeline" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
   <div class="loading" id="loading" hidden>Loading…</div>
   <div id="sentinel"></div>
@@ -339,25 +356,32 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
 <div class="toast" id="toast" role="status" hidden></div>
 
 <template id="card-tpl">
-  <figure class="card">
-    <button class="open" type="button" aria-label="Open image"><img loading="lazy" decoding="async" width="480" height="701" alt=""></button>
-    <span class="badge"></span>
-    <div class="acts">
-      <button class="act skip" type="button" aria-label="Skip">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-      <button class="act like" type="button" aria-label="Like" aria-pressed="false">
-        <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20s-7-4.3-8.9-8.6C1.7 8.2 3.6 5 6.9 5c1.9 0 3.3 1.1 4 2.3h2.2c.7-1.2 2.1-2.3 4-2.3 3.3 0 5.2 3.2 3.8 6.4C19 15.7 12 20 12 20z"/></svg>
-      </button>
+  <article class="post">
+    <button class="who-btn" type="button"><span class="av sm"></span></button>
+    <div>
+      <div class="head"><span class="name"></span><span class="handle"></span><span class="time"></span></div>
+      <p class="text"></p>
+      <button class="media open" type="button" aria-label="Open"></button>
+      <div class="acts">
+        <button class="act like" type="button" aria-label="Like" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20s-7-4.3-8.9-8.6C1.7 8.2 3.6 5 6.9 5c1.9 0 3.3 1.1 4 2.3h2.2c.7-1.2 2.1-2.3 4-2.3 3.3 0 5.2 3.2 3.8 6.4C19 15.7 12 20 12 20z"/></svg><span>Like</span>
+        </button>
+        <button class="act anim" type="button" aria-label="Animate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg><span>Animate</span>
+        </button>
+        <button class="act skip" type="button" aria-label="Not interested">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Not for me</span>
+        </button>
+      </div>
     </div>
-  </figure>
+  </article>
 </template>
 
 <script>
-const LABEL = { photo: "Real-life", anime: "Anime", furry: "Furry" };
+const LABEL = { anime: "Anime", furry: "Furry", photo: "Real-life" };
 const $ = id => document.getElementById(id);
 const grid = $("grid"), tpl = $("card-tpl");
-const state = { view: "feed", medium: "all", items: [], offset: 0, more: true, loading: false, idx: -1, gen: 0 };
+const state = { view: "feed", medium: "all", persona: "", people: [], items: [], offset: 0, more: true, loading: false, idx: -1, gen: 0 };
 
 async function api(url, body) {
   const opts = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
@@ -390,10 +414,32 @@ function nightLabel(n) {
   return isNaN(d) ? n : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function relTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  const sec = (Date.now() - d) / 1000;
+  if (isNaN(sec)) return "";
+  if (sec < 60) return "now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+  if (sec < 7 * 86400) return `${Math.floor(sec / 86400)}d`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+const personaOf = h => state.people.find(p => p.handle === h);
+function avatarEl(cls, who) {
+  const a = document.createElement("span"); a.className = "av" + (cls ? " " + cls : "");
+  fillAvatar(a, who); return a;
+}
+function fillAvatar(a, who) {
+  a.replaceChildren();
+  if (who && who.avatar) { const i = new Image(); i.alt = ""; i.loading = "lazy"; i.src = `avatar/${who.handle}`; a.append(i); }
+  else a.textContent = (who?.name || "?").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 1).toUpperCase() || "·";
+}
+
 /* ---------- loading ---------- */
 async function reset() {
   state.gen++; state.items = []; state.offset = 0; state.more = true; grid.replaceChildren();
-  $("empty").hidden = true; await loadMore();
+  $("empty").hidden = true; renderProfile(); await loadMore();
 }
 
 async function loadMore() {
@@ -402,6 +448,7 @@ async function loadMore() {
   const gen = state.gen;
   try {
     const q = new URLSearchParams({ view: state.view, medium: state.medium, offset: state.offset });
+    if (state.persona && state.view === "feed") q.set("persona", state.persona);
     const data = await api(`api/feed?${q}`);
     if (gen !== state.gen) return;
     state.offset += data.items.length; state.more = data.more;
@@ -411,26 +458,53 @@ async function loadMore() {
   finally { state.loading = false; $("loading").hidden = true; }
 }
 
-function addCard(it) {
-  const last = state.items[state.items.length - 1];
-  if (state.view === "feed" && (!last || last.night !== it.night)) {
-    const h = document.createElement("div"); h.className = "night"; h.textContent = nightLabel(it.night);
-    grid.append(h);
+const playObs = new IntersectionObserver(es => {
+  for (const e of es) { const v = e.target; if (e.isIntersecting && e.intersectionRatio > .5) v.play().catch(() => {}); else v.pause(); }
+}, { threshold: [0, .5, 1] });
+
+function captionNodes(text) {
+  const out = [];
+  for (const part of text.split(/(#[\p{L}\p{N}_]+)/u)) {
+    if (!part) continue;
+    if (part.startsWith("#")) { const t = document.createElement("span"); t.className = "tag"; t.textContent = part; out.push(t); }
+    else out.push(document.createTextNode(part));
   }
+  return out;
+}
+
+function addCard(it) {
   state.items.push(it);
   const card = tpl.content.firstElementChild.cloneNode(true);
   card.dataset.id = it.id; it.el = card;
-  card.querySelector("img").src = `thumb/${it.id}`;
-  card.querySelector(".badge").textContent = LABEL[it.medium] || it.medium;
-  card.querySelector(".badge").hidden = state.medium !== "all";
+  const who = it.persona ? (personaOf(it.persona.handle) || it.persona) : { name: "dreamfeed v1" };
+  fillAvatar(card.querySelector(".av"), who);
+  card.querySelector(".name").textContent = who.name;
+  card.querySelector(".handle").textContent = it.persona ? "@" + it.persona.handle : LABEL[it.medium] || "";
+  card.querySelector(".time").textContent = "· " + relTime(it.posted);
+  const text = card.querySelector(".text");
+  if (it.caption) text.append(...captionNodes(it.caption)); else text.hidden = true;
+  const wb = card.querySelector(".who-btn");
+  if (it.persona) wb.onclick = () => openProfile(it.persona.handle); else wb.disabled = true;
+  const media = card.querySelector(".media");
   if (it.kind === "video") {
+    const v = document.createElement("video");
+    v.muted = true; v.loop = true; v.playsInline = true; v.preload = "none"; v.poster = `thumb/${it.id}`; v.src = `img/${it.id}`;
+    media.append(v); playObs.observe(v);
     const b = document.createElement("span"); b.className = "play";
     b.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>5s';
-    card.append(b);
+    media.append(b);
+  } else {
+    const img = new Image(); img.alt = it.caption || ""; img.loading = "lazy"; img.decoding = "async"; img.src = `img/${it.id}`;
+    media.append(img);
   }
-  card.querySelector(".open").onclick = () => openViewer(state.items.indexOf(it));
+  media.onclick = () => openViewer(state.items.indexOf(it));
+  const anim = card.querySelector(".act.anim");
+  anim.hidden = it.kind === "video" || !it.persona;
+  anim.querySelector("span").textContent = it.animated ? "Again" : "Animate";
+  anim.onclick = () => { openViewer(state.items.indexOf(it)); openMotion(); };
+  card.querySelector(".act.skip").hidden = state.view === "liked";
   card.querySelector(".act.skip").onclick = () => skip(it);
-  const likeBtn = card.querySelector(".act.like"); likeBtn.onclick = () => toggleLike(it);
+  card.querySelector(".act.like").onclick = () => toggleLike(it);
   setLiked(it, it.liked);
   grid.append(card);
 }
@@ -440,14 +514,67 @@ function showEmpty() {
   if (state.items.length) { e.hidden = true; return; }
   e.hidden = false;
   e.innerHTML = state.view === "liked"
-    ? "<strong>No likes yet</strong>Tap the heart on images you like. They're kept here and steer what gets made next."
-    : "<strong>Nothing new</strong>New images arrive after each night's run.";
+    ? "<strong>No likes yet</strong>Tap the heart on posts you like. They're kept here and make that persona post more like it."
+    : state.persona ? "<strong>No posts yet</strong>Their first posts arrive with the next run, or tap Post now."
+    : "<strong>Nothing new</strong>New posts arrive after each night's run. You can also start one from the Dashboard.";
+}
+
+/* ---------- personas ---------- */
+async function loadPeople() {
+  try { state.people = (await api("api/personas")).personas; } catch { state.people = []; }
+  renderPeople(); renderProfile();
+}
+function renderPeople() {
+  const row = $("people"); row.replaceChildren();
+  const all = document.createElement("button"); all.type = "button"; all.className = "who";
+  all.setAttribute("aria-pressed", String(!state.persona));
+  const dot = document.createElement("span"); dot.className = "av"; dot.textContent = "✦";
+  const l = document.createElement("span"); l.textContent = "Everyone";
+  all.append(dot, l); all.onclick = () => openProfile(""); row.append(all);
+  for (const p of state.people) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "who";
+    b.setAttribute("aria-pressed", String(state.persona === p.handle));
+    const n = document.createElement("span"); n.textContent = p.name;
+    b.append(avatarEl("", p), n); b.onclick = () => openProfile(p.handle); row.append(b);
+  }
+  row.hidden = state.view === "dash" || !state.people.length;
+}
+function openProfile(handle) {
+  if (state.view !== "feed") { state.persona = handle; setView("feed"); return; }
+  if (state.persona === handle) return;
+  state.persona = handle; renderPeople(); scrollTo({ top: 0 }); reset();
+}
+function renderProfile() {
+  const box = $("profile"), p = state.persona && personaOf(state.persona);
+  box.hidden = !(state.view === "feed" && p); if (box.hidden) return;
+  box.replaceChildren();
+  const back = document.createElement("button"); back.type = "button"; back.className = "back";
+  back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Everyone';
+  back.onclick = () => openProfile("");
+  const top = document.createElement("div"); top.className = "top-line";
+  const post = document.createElement("button"); post.type = "button"; post.className = "pill-btn solid"; post.textContent = "Post now";
+  post.onclick = async () => {
+    post.disabled = true;
+    try { await api("api/generate", { images: 8, keep: 3, personas: [p.handle] }); toast(`${p.name} is posting. About 2 minutes.`); }
+    catch (e) { toast(e.message); }
+    post.disabled = false;
+  };
+  top.append(avatarEl("lg", p), post);
+  const name = document.createElement("div");
+  const h = document.createElement("h2"); h.textContent = p.name;
+  const hd = document.createElement("div"); hd.className = "handle"; hd.textContent = "@" + p.handle;
+  name.append(h, hd);
+  const bio = document.createElement("p"); bio.className = "bio"; bio.textContent = p.bio;
+  const nums = document.createElement("div"); nums.className = "nums";
+  nums.innerHTML = `<span><b>${p.posts}</b> posts</span><span><b>${p.likes}</b> liked</span><span>${LABEL[p.medium] || p.medium}</span>`;
+  box.append(back, top, name, bio, nums);
 }
 
 /* ---------- like / skip ---------- */
 function setLiked(it, liked) {
   it.liked = liked;
-  it.el?.querySelector(".act.like").setAttribute("aria-pressed", String(liked));
+  const lb = it.el?.querySelector(".act.like");
+  if (lb) { lb.setAttribute("aria-pressed", String(liked)); lb.querySelector("span").textContent = liked ? "Liked" : "Like"; }
   if (state.idx >= 0 && state.items[state.idx] === it) $("v-like").setAttribute("aria-pressed", String(liked));
 }
 
@@ -470,11 +597,7 @@ function removeItem(it) {
   const i = state.items.indexOf(it); if (i < 0) return;
   state.items.splice(i, 1); state.offset = Math.max(0, state.offset - 1);
   const el = it.el; el.classList.add("gone");
-  setTimeout(() => {
-    const prev = el.previousElementSibling, next = el.nextElementSibling;
-    el.remove();
-    if (prev?.classList.contains("night") && (!next || next.classList.contains("night"))) prev.remove();
-  }, 200);
+  setTimeout(() => el.remove(), 200);
   showEmpty();
   if (state.items.length < 8) loadMore();
 }
@@ -501,9 +624,9 @@ function showAt(i) {
   else { vvid.pause(); vvid.removeAttribute("src"); vvid.load(); vimg.src = `img/${it.id}`; }
   const shown = isVid ? vvid : vimg; shown.style.transform = ""; shown.style.opacity = "";
   const ab = $("v-animate");
-  ab.hidden = isVid; ab.disabled = false;
+  ab.hidden = isVid || !it.persona; ab.disabled = false;
   ab.querySelector("span").textContent = it.animated ? "Animate again" : "Animate";
-  $("v-count").textContent = `${LABEL[it.medium] || ""} · ${i + 1} of ${state.items.length}${state.more ? "+" : ""}`;
+  $("v-count").textContent = `${it.persona ? it.persona.name : LABEL[it.medium] || ""} · ${i + 1} of ${state.items.length}${state.more ? "+" : ""}`;
   $("v-like").setAttribute("aria-pressed", String(it.liked));
   $("v-skip").hidden = state.view === "liked";
   for (const j of [i + 1, i - 1]) if (state.items[j] && state.items[j].kind !== "video") new Image().src = `img/${state.items[j].id}`;
@@ -526,11 +649,12 @@ const onTap = () => {
 };
 vimg.addEventListener("click", onTap); vvid.addEventListener("click", onTap);
 function closeMotion() { $("motion").hidden = true; }
-$("v-animate").onclick = () => {
+function openMotion() {
   const it = state.items[state.idx]; if (!it) return;
   $("motion").hidden = false; $("motion-text").value = "";
   setTimeout(() => $("motion-text").focus(), 50);
-};
+}
+$("v-animate").onclick = openMotion;
 $("motion-no").onclick = closeMotion;
 $("motion").onsubmit = async e => {
   e.preventDefault();
@@ -540,6 +664,7 @@ $("motion").onsubmit = async e => {
     await api("api/animate", { id: it.id, prompt: $("motion-text").value.trim() }); it.animated = true;
     closeMotion();
     $("v-animate").querySelector("span").textContent = "Animate again";
+    const ab = it.el?.querySelector(".act.anim span"); if (ab) ab.textContent = "Again";
     toast("Animating. The clip shows up in the feed in a few minutes.");
   } catch (err) { toast(err.message); }
   go.disabled = false;
@@ -582,18 +707,13 @@ function setView(v) {
   state.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
   const dash = v === "dash";
-  $("dash").hidden = !dash; $("grid").hidden = dash; $("chips").hidden = dash; $("sentinel").hidden = dash;
+  $("dash").hidden = !dash; $("grid").hidden = dash; $("sentinel").hidden = dash;
+  if (v !== "feed") state.persona = "";
+  renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
-  if (dash) { grid.replaceChildren(); $("empty").hidden = true; state.gen++; refreshDash(); }
+  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); }
   else reset();
 }
-for (const b of document.querySelectorAll("[data-medium]")) b.onclick = () => {
-  if (state.medium === b.dataset.medium) return;
-  state.medium = b.dataset.medium;
-  document.querySelectorAll("[data-medium]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-  b.scrollIntoView({ inline: "nearest", block: "nearest" });
-  reset();
-};
 $("menu-btn").onclick = e => {
   e.stopPropagation(); const s = $("sheet"); s.hidden = !s.hidden;
   $("menu-btn").setAttribute("aria-expanded", String(!s.hidden));
@@ -618,7 +738,7 @@ async function refreshSummary() {
 
 /* ---------- dashboard ---------- */
 const SEC_PER_IMAGE = 10.5;
-const gen = { n: 12, keep: 6, styles: new Set(["photo", "anime", "furry"]) };
+const gen = { n: 12, keep: 6, styles: new Set(["anime", "furry"]) };
 const defaultKeep = n => Math.max(1, Math.round(n <= 12 ? n / 2 : n * 0.2));
 function renderGenForm() {
   document.querySelectorAll("#g-count button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.n === gen.n)));
@@ -646,19 +766,6 @@ $("g-go").onclick = async () => {
 $("b-scan").onclick = async () => {
   $("b-scan").disabled = true;
   try { await api("api/scan", {}); toast("Scan requested"); } catch (e) { toast(e.message); }
-  refreshDash();
-};
-
-$("b-reset-open").onclick = () => { $("b-reset").hidden = false; $("b-reset-open").hidden = true; $("b-reset").scrollIntoView({ block: "nearest", behavior: "smooth" }); };
-$("b-reset-no").onclick = () => { $("b-reset").hidden = true; $("b-reset-open").hidden = false; };
-$("b-reset-yes").onclick = async () => {
-  $("b-reset-yes").disabled = true;
-  try {
-    await api("api/reset", { confirm: "start over" });
-    toast("Starting over. Bookmarks are being downloaded and tagged again.");
-    $("b-reset").hidden = true; $("b-reset-open").hidden = false;
-  } catch (e) { toast(e.message); }
-  $("b-reset-yes").disabled = false;
   refreshDash();
 };
 
@@ -701,7 +808,7 @@ function renderLive(d) {
     box.append(head, meter, el("div", "sub", `${label}${p.medium ? " · " + (LABEL[p.medium] || p.medium) : ""}`));
     live.append(box);
   }
-  for (const j of d.jobs.filter(j => j.params.kind === "reset")) {
+  for (const j of d.jobs.filter(j => j.params.kind === "reset")) {   // still possible from the CLI
     const box = el("div", "live");
     box.append(el("div", "head", j.status === "running" ? "Starting over…" : "Start over is waiting for the current scan or run"));
     live.append(box);
@@ -710,7 +817,7 @@ function renderLive(d) {
     const box = el("div", "live"), head = el("div", "head");
     const what = j.params.kind === "animate"
       ? (j.params.ids ? "animate 1 image" : `animate the best ${j.params.count}`)
-      : `${j.params.images} images, keep ${j.params.keep}`;
+      : `${j.params.images} images, keep ${j.params.keep}${j.params.personas ? " · " + j.params.personas.map(h => personaOf(h)?.name || h).join(", ") : ""}`;
     head.append(el("span", null, `Waiting: ${what}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";
     stop.onclick = async () => { try { await api("api/cancel", { job: j.id }); } catch (e) { toast(e.message); } refreshDash(); };
@@ -722,7 +829,7 @@ function renderBookmarks(d) {
   const total = Object.values(d.bookmarks).reduce((a, b) => a + b, 0);
   $("b-total").firstChild.textContent = total;
   const split = $("b-split"); split.replaceChildren();
-  for (const m of ["photo", "anime", "furry"]) {
+  for (const m of Object.keys(d.bookmarks)) {
     const n = d.bookmarks[m] || 0, row = el("div", "row"), meter = el("div", "meter"), bar = el("i");
     bar.style.width = `${total ? Math.round(100 * n / total) : 0}%`; meter.append(bar);
     row.append(el("span", null, LABEL[m]), meter, el("b", null, n)); split.append(row);
@@ -776,6 +883,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) refr
 
 new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { rootMargin: "800px" }).observe($("sentinel"));
 refreshSummary();
+loadPeople().then(() => { for (const it of state.items) if (it.persona) fillAvatar(it.el.querySelector(".av"), personaOf(it.persona.handle) || it.persona); });
 let startView = "feed";
 try { startView = localStorage.getItem("dreamfeed-view") || "feed"; } catch {}
 if (location.hash === "#dashboard") startView = "dash";

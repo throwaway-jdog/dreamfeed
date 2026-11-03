@@ -1,6 +1,6 @@
 """
-python -m dreamfeed run       Scheduler (container default). Every SCAN_SECONDS: tags new
-                              bookmarks, and inside GENERATE_WINDOW runs tonight's generation
+python -m dreamfeed run       Scheduler (container default). Every SCAN_SECONDS: age-checks new
+                              bookmarks, and inside GENERATE_WINDOW runs tonight's persona posts
                               if it hasn't finished. Each job runs in a child process, so the
                               GPU is only held while there is work (the miner's gpu-yield
                               pauses mining whenever any process holds it).
@@ -8,6 +8,7 @@ python -m dreamfeed tag       Tag whatever is waiting, then exit.
 python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
     --now                     Run a test batch right away instead (night "test-<time>").
     --images N --keep K       Override IMAGES_PER_NIGHT / FEED_KEEP_TOP for this run.
+    --persona HANDLE          Only these personas (repeatable).
 python -m dreamfeed job ID    Run a request queued from the dashboard (generation or reset).
 python -m dreamfeed reset     Forget all bookmarks and tags and re-download everything.
                               Prefer the dashboard's "Start over"; it waits for running work.
@@ -55,10 +56,11 @@ def main() -> None:
         ap.add_argument("--now", action="store_true")
         ap.add_argument("--images", type=int)
         ap.add_argument("--keep", type=int)
+        ap.add_argument("--persona", action="append")
         args = ap.parse_args(rest)
         from .generate import run
         night = f"test-{dt.datetime.now():%Y%m%d-%H%M}" if args.now else None
-        run(Config(), night=night, images=args.images, keep=args.keep, ignore_window=args.now)
+        run(Config(), night=night, images=args.images, keep=args.keep, ignore_window=args.now, handles=args.persona)
     elif cmd == "job":
         from .generate import run_job
         run_job(Config(), int(rest[0]))

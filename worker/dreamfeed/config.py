@@ -24,6 +24,8 @@ class Config:
         self.models_dir = Path(need("MODELS_DIR"))
         self.bookmarks_dir = self.data_dir / "bookmarks"
         self.db_path = self.data_dir / "feed.db"
+        # The fictional posters (private: describes who you follow, so it lives in data/, not git).
+        self.personas_path = self.data_dir / "personas.json"
         # Tagger confidence needed to keep a descriptive tag in the profile.
         self.tag_threshold = opt_float("TAG_THRESHOLD", 0.35)
         # Tagger confidence at which a youth tag drops the bookmark (deliberately low).
@@ -60,7 +62,7 @@ class GenConfig:
         self.comfy_url = need("COMFYUI_URL")
         self.supervisor_url = need("COMFYUI_SUPERVISOR_URL")
         self.checkpoints = {m: os.environ.get(f"CHECKPOINT_{m.upper()}", "").strip()
-                            for m in ("photo", "anime", "furry")}
+                            for m in ("anime", "furry")}
         self.window = _window(need("GENERATE_WINDOW"))     # minutes after midnight
         self.images_per_night = int(opt_float("IMAGES_PER_NIGHT", 0)) or sys.exit(
             "dreamfeed: IMAGES_PER_NIGHT must be set")

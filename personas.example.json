@@ -1,0 +1,38 @@
+{
+  "_note": "Copy to data/personas.json and edit. Every persona is fictional and adult. Prompts are booru tags; placeholders {outfit} {cosplay} {setting} {character} are filled in per post. Blocked tags (see worker/dreamfeed/safety.py) make the whole file fail to load. Looks that read as feminine men, androgynous, trans or tomboy characters get the stricter adult prompts and age check automatically.",
+  "personas": [
+    {
+      "handle": "example_artist",
+      "name": "Example Artist",
+      "medium": "furry",
+      "bio": "furry artist · original characters · adults only",
+      "look": "",
+      "avatar": "portrait, upper body, looking at viewer, smile, simple background",
+      "characters": [
+        "anthro, female, red fox, orange fur, fluffy tail, green eyes",
+        "anthro, male, wolf, grey fur, muscular, yellow eyes"
+      ],
+      "emoji": ["🎨"],
+      "hashtags": ["furryart"],
+      "video_share": 0.5,
+      "weight": 1.0,
+      "posts": [
+        {"kind": "pinup", "weight": 2, "rating": "questionable",
+         "prompt": "solo, {character}, {outfit}, pinup, looking at viewer, detailed background",
+         "captions": ["new pinup", "commission finished"]}
+      ]
+    },
+    {
+      "handle": "example_cosplayer",
+      "name": "Example Cosplayer",
+      "medium": "anime",
+      "bio": "cosplay · 27",
+      "look": "1girl, adult, mature female, long red hair, green eyes",
+      "posts": [
+        {"kind": "cosplay", "weight": 1, "rating": "questionable",
+         "prompt": "solo, cosplay, {cosplay}, posing, looking at viewer, {setting}",
+         "captions": ["new costume!", "con this weekend"]}
+      ]
+    }
+  ]
+}

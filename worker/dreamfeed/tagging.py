@@ -33,7 +33,8 @@ def face_ages(frames, cfg: Config) -> list[float]:
     return ages
 
 
-def drop_reason(a, medium: str, frames, cfg: Config) -> tuple[str, str] | None:
+def drop_reason(a, medium: str, frames, cfg: Config, strict: bool = False) -> tuple[str, str] | None:
+    """strict: use the lower STRICT_AGE_THRESHOLD (characters that models tend to draw young)."""
     hits = safety.youth_tag_hits(a.general, cfg.youth_tag_threshold)
     if hits:
         return "youth-tag", ", ".join(f"{h} {a.general[h]:.2f}" for h in hits)
@@ -43,7 +44,8 @@ def drop_reason(a, medium: str, frames, cfg: Config) -> tuple[str, str] | None:
             youngest = min(ages)
             return ("age-estimate", f"{youngest:.0f}") if youngest < cfg.photo_min_age else None
     # Drawings, or photos with no face clear enough to estimate.
-    if a.youth_prob >= cfg.age_threshold:
+    threshold = min(cfg.age_threshold, safety.STRICT_AGE_THRESHOLD) if strict else cfg.age_threshold
+    if a.youth_prob >= threshold:
         return "age-check", f"{a.youth_prob:.2f}"
     return None
 

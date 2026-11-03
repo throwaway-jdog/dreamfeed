@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS jobs (           -- generation requests from the dash
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS personas (      -- fictional posters, mirrored from data/personas.json
+    handle      TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    medium      TEXT NOT NULL,               -- anime | furry
+    bio         TEXT NOT NULL DEFAULT '',
+    strict      INTEGER NOT NULL DEFAULT 0,  -- stricter adult prompts and age check
+    video_share REAL NOT NULL DEFAULT 0.2,   -- share of nightly clips that should be theirs
+    avatar      TEXT,                        -- relative to data/generated
+    active      INTEGER NOT NULL DEFAULT 1,  -- 0 once removed from the file
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS feedback (
     generation_id INTEGER PRIMARY KEY REFERENCES generations(id),
     action        TEXT NOT NULL,             -- like | skip
@@ -89,4 +100,10 @@ def connect(path: Path) -> sqlite3.Connection:
     if "progress" not in cols:    # added with the dashboard
         conn.execute("ALTER TABLE runs ADD COLUMN progress TEXT")
         conn.execute("ALTER TABLE runs ADD COLUMN cancel INTEGER NOT NULL DEFAULT 0")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(generations)")}
+    if "persona" not in cols:     # added with v2 personas
+        conn.execute("ALTER TABLE generations ADD COLUMN persona TEXT")      # personas.handle
+        conn.execute("ALTER TABLE generations ADD COLUMN caption TEXT")
+        conn.execute("ALTER TABLE generations ADD COLUMN posted_at TEXT")    # when it appears in the timeline
+        conn.execute("CREATE INDEX IF NOT EXISTS generations_persona ON generations(persona, status)")
     return conn

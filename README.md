@@ -1,84 +1,50 @@
 # dreamfeed
 
-A private feed of generated images that learns your taste from your X bookmarks and from
-your likes and skips. It learns *what kind of content* you like (tags), never *who* is in
-it: no bookmarked image is ever shown to the generator or used for training.
+A private, Twitter-style timeline of generated anime and furry posts from **fictional
+personas**. Each persona has a name, a profile picture, a bio, a fixed look and a few
+kinds of post, with captions. Every night they "post": the worker generates their images
+(and some 5-second Wan 2.2 clips), checks them, keeps the best and spreads them over the
+timeline. Likes make a persona post more, and more like what you liked; skips do the opposite.
 
-Status: everything works: sync, tagging, age checks, nightly generation and the feed page at
-`https://<your domain>/dreamfeed/` (public, behind formlogin; phone-first). Likes and skips
-steer the next night: liked images' source bookmarks are picked more, ranking favours images
-like your likes and away from your skips, and a medium's share grows with its likes.
+The page is at `https://<your domain>/dreamfeed/` (behind formlogin, phone-first): the
+timeline, a strip of personas at the top, a profile page per persona with **Post now**,
+Liked, and a Dashboard.
 
-Chosen models (in `.env`): LUSTIFY V9 for photo, WAI-Illustrious v17 for anime,
-FurryVision XL v2 for furry. Civitai downloads that need an account use `CIVITAI_API_KEY`.
+Models (in `.env`): WAI-Illustrious v17 for anime, FurryVision XL v2 for furry, Wan 2.2
+I2V for clips. Civitai downloads that need an account use `CIVITAI_API_KEY`.
 
-## Getting started (tagging only, for now)
+## Personas
 
-1. Export your X cookies from a logged-in browser as a Netscape `cookies.txt` file, e.g.
-   with the "Get cookies.txt LOCALLY" extension. Save it outside this folder, readable by
-   your user, and set `X_COOKIES_FILE` to its path.
-2. `cp .env.example .env` and fill in `PUID`, `PGID`, `TZ`, `X_COOKIES_FILE`, `AGECHECK_THREADS`.
-3. `docker compose up -d --build sync agecheck comfyui worker`
-4. Follow along: `docker compose logs -f sync worker`. The first sync fetches every
-   bookmark, and each file is tagged and deleted within a minute or so of arriving.
-5. Look at the result:
+They live in `data/personas.json`, which is private (it describes whose posting styles
+inspired them) and is not in git. Start from `personas.example.json`:
 
-       docker compose exec worker python -m dreamfeed report            # mediums, top tags
-       docker compose exec worker python -m dreamfeed report --dropped  # what was dropped and why
+- `handle`, `name`, `bio`, `medium` (`anime` or `furry`), `look` (tags that keep the
+  persona recognisable), `avatar` (extra tags for the profile picture), `emoji`,
+  `hashtags`, `video_share` (how much of the nightly video budget favours them), `weight`.
+- `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
+  `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
+  costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
+  who draw different people).
 
-   Thresholds (`TAG_THRESHOLD`, `YOUTH_TAG_THRESHOLD`, `AGE_THRESHOLD`, `PHOTO_MIN_AGE`,
-   `MIN_FACE_PX`, `FURRY_THRESHOLD`) can be set in the worker's environment. Defaults are in
-   `worker/dreamfeed/config.py`. The age check errs toward dropping, so a few adult
-   bookmarks being dropped is expected.
+The file is re-read every run. A persona with no profile picture gets one on its next run.
+Invalid entries or blocked tags stop the run with a clear error instead of being skipped.
 
-Generation runs on its own every night inside `GENERATE_WINDOW`. The page's **Dashboard** tab
-(`/dreamfeed/#dashboard`) can scan bookmarks now, queue a generation run (how many, how many to
-keep, which styles) with live progress and Cancel, shows the profile and recent runs, and has
-**Start over**: forget every bookmark, tag and drop record, then download and re-tag everything
-with the current checks (liked images, feed and runs stay). From
-the shell:
+## Running
+
+1. Export your X cookies (Netscape `cookies.txt`) and set `X_COOKIES_FILE`; bookmarks are
+   still synced into `BOOKMARK_COPY_DIR` and age-checked, but no longer steer generation.
+2. `cp .env.example .env`, fill it in, and `cp personas.example.json data/personas.json`.
+3. `docker compose up -d --build`
+
+Generation runs every night inside `GENERATE_WINDOW`. The Dashboard can queue a run, animate
+the best posts, scan bookmarks and shows recent runs. From the shell:
 
        docker compose exec worker python -m dreamfeed generate --now --images 12 --keep 6
+       docker compose exec worker python -m dreamfeed generate --now --images 8 --keep 3 --persona some_handle
 
-The worker only holds the GPU while it is tagging or generating: each batch runs in a child process
-that exits when done, so the miner resumes in between.
-
-## How it works
-
-1. **sync** pulls new bookmarks with gallery-dl (cookies from `X_COOKIES_FILE`).
-2. **worker, tag phase** (any time, low VRAM):
-   - Sorts each bookmark into a **medium**: `photo`, `anime` or `furry`. This uses CLIP
-     zero-shot, with the tagger's furry/anthro tags as a tiebreaker.
-   - Tags it with the WD v3 tagger and keeps only its *general* tags (setting, lighting,
-     framing, body type, clothing, acts). Character/name tags are discarded.
-   - Computes a CLIP embedding for ranking.
-   - Deletes the downloaded file. Only medium, tags and embedding stay, in `data/feed.db`.
-3. **worker, generate phase** (inside `GENERATE_WINDOW`):
-   - Splits `IMAGES_PER_NIGHT` between mediums in proportion to your bookmarks and likes.
-     Each medium always gets a small minimum share, so a medium can come back.
-   - Builds prompts per medium from that medium's own tag weights, in the prompt style its
-     model expects: plain descriptions for photo, booru tags for anime and furry.
-   - Has ComfyUI generate one medium at a time with that medium's checkpoint, so only one
-     model is loaded.
-4. **worker, rank phase**: scores each image against the taste model *for its medium*
-   and keeps the top `FEED_KEEP_TOP` overall. The rest are deleted.
-5. **web** shows the feed, filterable by medium. Like/skip updates that medium's tag
-   weights and taste model, and the medium split for the next night.
-
-## Models (one SDXL checkpoint per medium, ~7 GB each)
-
-| Medium | Kind of model | Prompt style |
-|---|---|---|
-| photo | photoreal SDXL fine-tune | natural-language description |
-| anime | Illustrious- or Pony-based SDXL | booru tags |
-| furry | Pony- or furry-trained SDXL | e621-style tags |
-
-A medium whose `CHECKPOINT_*` is empty is skipped. Its bookmarks are still tagged, so
-turning it on later starts with a full profile.
-
-GPU: SDXL in ComfyUI needs about 8-10 GB of the 12 GB, so the worker runs phases one at a
-time and tells ComfyUI to unload models before tagging. Jellyfin transcodes (~0.4 GB each)
-fit alongside. The miner's gpu-yield pauses mining automatically.
+The worker only holds the GPU while it is working: each batch runs in a child process that
+exits when done, so the miner resumes in between. SDXL in ComfyUI needs about 8-10 GB of
+the 12 GB; Wan 2.2 needs a fresh ComfyUI per clip (capped by `COMFY_MEM_LIMIT`).
 
 ## Safety rules (built into the worker, not optional settings)
 
@@ -95,6 +61,12 @@ fit alongside. The miner's gpu-yield pauses mining automatically.
   `MIN_FACE_PX`) is estimated under `PHOTO_MIN_AGE` (default 21, never below 18), the
   bookmark is dropped. Body-only estimates are ignored as too unreliable. Photos with
   no clear face fall back to the CLIP check (`AGE_THRESHOLD`), as drawings do.
+- **Stricter for characters models draw young.** Personas whose look reads as a feminine
+  man, androgynous, trans or tomboy are marked strict automatically (a file can turn it on,
+  never off). Their prompts get extra adult terms and youth negatives, and their images
+  and clips are dropped at a lower youth score (`STRICT_AGE_THRESHOLD`). `otoko no ko`
+  and its aliases are never used in prompts.
+- **No feral content.** Personas are human or anthro; no sexual content with animals.
 - **Output check.** Each generated image is tagged again before ranking. Anything with
   youth-related tags is deleted and never reaches the feed. Anime and furry get the
   strictest threshold, since youthful-looking output is most common there.

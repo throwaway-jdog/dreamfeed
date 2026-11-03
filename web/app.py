@@ -1,14 +1,16 @@
 """dreamfeed feed page. Everything except the sign-in page needs a signed-in session (formlogin).
 
 GET  /                  the page
-GET  /api/feed          ?view=feed|liked&medium=all|photo|anime|furry&offset=N
+GET  /api/feed          ?view=feed|liked&medium=all|anime|furry&persona=HANDLE&offset=N
+GET  /api/personas      the fictional posters, with post and like counts
+GET  /avatar/<handle>   profile picture
 GET  /api/summary       counts and the last run, for the header
 GET  /thumb/<id>        small JPEG for the grid
 GET  /img/<id>          full image for the viewer
 GET  /api/dashboard     scan state, profile, queue, recent runs
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/scan          ask the sync container to fetch bookmarks now
-POST /api/generate      {"images": N, "keep": K, "mediums": [...]} queue a generation run
+POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images
 POST /api/reset         {"confirm": "start over"} forget all bookmarks/tags, re-download and re-tag
@@ -47,7 +49,8 @@ GENERATE_WINDOW = required("GENERATE_WINDOW")
 MAX_IMAGES = 400
 PORT = 8000
 PAGE_SIZE = 30
-MEDIUMS = ("photo", "anime", "furry")
+MEDIUMS = ("anime", "furry")
+HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 CSP = ("default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; "
        "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -71,25 +74,32 @@ def db() -> sqlite3.Connection:
 def item(row) -> dict:
     return {"id": row["id"], "night": row["night"], "medium": row["medium"], "kind": row["kind"],
             "score": round(row["score"] or 0, 3), "liked": row["action"] == "like",
-            "animated": bool(row["animated"])}
+            "animated": bool(row["animated"]), "caption": row["caption"] or "",
+            "posted": row["posted_at"] or row["created_at"],
+            "persona": {"handle": row["persona"], "name": row["name"] or row["persona"],
+                        "avatar": bool(row["avatar"])} if row["persona"] else None}
 
 
-def feed(view: str, medium: str, offset: int) -> dict:
+def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
     where, args = [], []
     if medium in MEDIUMS:
         where.append("g.medium = ?")
         args.append(medium)
+    if persona:
+        where.append("g.persona = ?")
+        args.append(persona)
     if view == "liked":
         where.append("f.action = 'like'")
         order = "f.at DESC"
-    else:
-        where.append("g.status = 'feed' AND (f.action IS NULL OR f.action = 'like')")
-        order = "g.night DESC, g.score DESC"
-    sql = (f"SELECT g.id, g.night, g.medium, g.score, g.kind, f.action,"
+    else:   # the timeline: persona posts only (v1 images stay reachable from Liked)
+        where.append("g.status = 'feed' AND g.persona IS NOT NULL AND (f.action IS NULL OR f.action = 'like')")
+        order = "coalesce(g.posted_at, g.created_at) DESC, g.id DESC"
+    sql = (f"SELECT g.id, g.night, g.medium, g.score, g.kind, g.caption, g.persona, g.posted_at, g.created_at,"
+           f" f.action, p.name, p.avatar,"
            f" EXISTS(SELECT 1 FROM generations v WHERE v.source_generation = g.id AND v.kind = 'video'"
            f"        AND v.status IN ('queued', 'generated', 'feed')) AS animated FROM generations g"
-           f" LEFT JOIN feedback f ON f.generation_id = g.id WHERE {' AND '.join(where)}"
-           f" ORDER BY {order} LIMIT ? OFFSET ?")
+           f" LEFT JOIN feedback f ON f.generation_id = g.id LEFT JOIN personas p ON p.handle = g.persona"
+           f" WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ? OFFSET ?")
     try:
         with db() as conn:
             rows = conn.execute(sql, (*args, PAGE_SIZE + 1, offset)).fetchall()
@@ -98,13 +108,38 @@ def feed(view: str, medium: str, offset: int) -> dict:
     return {"items": [item(r) for r in rows[:PAGE_SIZE]], "more": len(rows) > PAGE_SIZE}
 
 
+def personas() -> dict:
+    try:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT p.handle, p.name, p.medium, p.bio, p.avatar IS NOT NULL AS avatar,"
+                " (SELECT count(*) FROM generations g WHERE g.persona = p.handle AND g.status = 'feed') AS posts,"
+                " (SELECT count(*) FROM generations g JOIN feedback f ON f.generation_id = g.id"
+                "  WHERE g.persona = p.handle AND f.action = 'like') AS likes"
+                " FROM personas p WHERE p.active = 1 ORDER BY p.name").fetchall()
+    except sqlite3.OperationalError:   # worker hasn't created its tables yet
+        return {"personas": []}
+    return {"personas": [dict(r) | {"avatar": bool(r["avatar"])} for r in rows]}
+
+
+def avatar_path(handle: str) -> Path | None:
+    if not HANDLE.match(handle):
+        return None
+    with db() as conn:
+        row = conn.execute("SELECT avatar FROM personas WHERE handle = ?", (handle,)).fetchone()
+    if not row or not row["avatar"]:
+        return None
+    path = (GENERATED / row["avatar"]).resolve()
+    return path if path.is_relative_to(GENERATED.resolve()) and path.is_file() else None
+
+
 def summary() -> dict:
     out = {"unrated": 0, "liked": 0, "bookmarks": {}, "last_run": None}
     try:
         with db() as conn:
             out["unrated"] = conn.execute(
                 "SELECT count(*) FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id"
-                " WHERE g.status = 'feed' AND f.action IS NULL").fetchone()[0]
+                " WHERE g.status = 'feed' AND g.persona IS NOT NULL AND f.action IS NULL").fetchone()[0]
             out["liked"] = conn.execute("SELECT count(*) FROM feedback WHERE action = 'like'").fetchone()[0]
             out["bookmarks"] = dict(conn.execute(
                 "SELECT medium, count(*) FROM bookmarks GROUP BY medium").fetchall())
@@ -135,7 +170,7 @@ def image_path(gid: int, thumb: bool) -> Path | None:
 
 def set_feedback(gid: int, action: str) -> dict:
     with db() as conn:
-        row = conn.execute("SELECT g.id, g.night, g.medium, g.score, g.file, g.status, f.action, f.liked_file"
+        row = conn.execute("SELECT g.id, g.night, g.medium, g.score, g.file, g.status, g.persona, f.action, f.liked_file"
                            " FROM generations g LEFT JOIN feedback f ON f.generation_id = g.id"
                            " WHERE g.id = ?", (gid,)).fetchone()
         if not row or row["status"] not in ("feed", "expired"):
@@ -147,7 +182,7 @@ def set_feedback(gid: int, action: str) -> dict:
                 src = GENERATED / row["file"]
                 if not src.is_file():
                     raise LookupError("this image has expired")
-                copy =f"{row['night']}-{row['medium']}-{gid}{src.suffix}"
+                copy = f"{row['night']}-{row['persona'] or row['medium']}-{gid}{src.suffix}"
                 LIKED.mkdir(exist_ok=True)
                 shutil.copy2(src, LIKED / copy)
             conn.execute("INSERT INTO feedback(generation_id, action, liked_file) VALUES (?, 'like', ?)"
@@ -208,6 +243,7 @@ def request_scan() -> dict:
 def queue_generation(req: dict) -> dict:
     images, keep = int(req.get("images", 0)), int(req.get("keep", 0))
     mediums = [m for m in req.get("mediums") or [] if m in MEDIUMS]
+    handles = [str(h) for h in req.get("personas") or [] if HANDLE.match(str(h))]
     if not 1 <= images <= MAX_IMAGES:
         raise ValueError(f"images must be between 1 and {MAX_IMAGES}")
     if not 1 <= keep <= images:
@@ -215,11 +251,18 @@ def queue_generation(req: dict) -> dict:
     if req.get("mediums") and not mediums:
         raise ValueError("pick at least one style")
     with db() as conn:
+        if handles:
+            known = {r[0] for r in conn.execute("SELECT handle FROM personas WHERE active = 1")}
+            if not set(handles) <= known:
+                raise ValueError("unknown persona")
         busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
         if busy >= 3:
             raise ValueError("three requests are already waiting; let one finish first")
+        params = {"images": images, "keep": keep, "mediums": mediums}
+        if handles:
+            params["personas"] = handles
         gid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
-                           (json.dumps({"images": images, "keep": keep, "mediums": mediums}),)).lastrowid
+                           (json.dumps(params),)).lastrowid
     return {"job": gid}
 
 
@@ -359,7 +402,17 @@ class Handler(BaseHTTPRequestHandler):
                 offset = max(0, int(q.get("offset", "0")))
             except ValueError:
                 return self.send(400, {"error": "offset must be a number"})
-            return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset))
+            persona = q.get("persona", "")
+            if persona and not HANDLE.match(persona):
+                return self.send(400, {"error": "bad persona"})
+            return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset, persona))
+        if path == "/api/personas":
+            return self.send(200, personas())
+        if path.startswith("/avatar/"):
+            file = avatar_path(path[len("/avatar/"):])
+            if not file:
+                return self.send(404, {"error": "no profile picture yet"})
+            return self.send_file(file)
         if path == "/api/summary":
             return self.send(200, summary())
         if path == "/api/dashboard":

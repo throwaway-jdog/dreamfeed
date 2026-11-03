@@ -40,7 +40,6 @@ services:
       COMFYUI_URL: http://dreamfeed-comfyui:8188
       COMFYUI_SUPERVISOR_URL: http://dreamfeed-comfyui:8189
       # One model per medium, file names in ./models/checkpoints. Leave one empty to skip that medium.
-      CHECKPOINT_PHOTO: ${CHECKPOINT_PHOTO-}
       CHECKPOINT_ANIME: ${CHECKPOINT_ANIME-}
       CHECKPOINT_FURRY: ${CHECKPOINT_FURRY-}
       GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env} # e.g. 01:00-07:00
