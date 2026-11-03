@@ -406,8 +406,10 @@ def pick_sources(conn, count: int, night: str | None = None) -> list[int]:
 
 
 def animate(cfg: Config, conn, night: str, sources: list[int],
-            until_window_closes: tuple[int, int] | None = None) -> dict:
-    """Turn feed images into ~5 s Wan 2.2 clips, check every clip, put the passing ones in the feed."""
+            until_window_closes: tuple[int, int] | None = None, motion_text: str = "") -> dict:
+    """Turn feed images into ~5 s Wan 2.2 clips, check every clip, put the passing ones in the feed.
+    motion_text, when given, leads the prompt; the image's own tags follow to keep the clip
+    consistent with the picture."""
     from .comfy import Comfy
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
@@ -427,7 +429,7 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
             if not row or not (out_dir / row[2]).is_file():
                 continue
             medium, prompt, file = row
-            motion = f"{prompt}, {MOTION[medium]}"
+            motion = ", ".join(p for p in (motion_text.strip(), prompt, MOTION[medium]) if p)
             seed = rng.randrange(2 ** 32)
             with conn:
                 gid = conn.execute(
@@ -495,7 +497,7 @@ def animate_job(cfg: Config, conn, job_id: int, params: dict) -> None:
     status, message = "done", None
     try:
         sources = [int(i) for i in params.get("ids") or []] or pick_sources(conn, int(params.get("count", 0)))
-        stats = animate(cfg, conn, night, sources)
+        stats = animate(cfg, conn, night, sources, motion_text=str(params.get("prompt") or ""))
         if _cancel_requested(conn, night):
             status = "cancelled"
         _finish(conn, night, status, stats)

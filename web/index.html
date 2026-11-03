@@ -100,6 +100,18 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
 .viewer .animate { min-height: 36px; padding: 0 14px; border-radius: 999px; background: rgb(255 255 255 / .16); color: #fff;
   font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .viewer .animate:disabled { opacity: .55; }
+.motion { position: absolute; z-index: 4; left: 0; right: 0; bottom: 0; background: #151413; color: #fff;
+  border-radius: 18px 18px 0 0; display: grid; gap: 10px;
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.motion label { font-weight: 600; font-size: 15px; }
+.motion small { color: #a29d94; font-size: 13px; }
+.motion textarea { font: 16px/1.4 var(--font); color: #fff; background: #23211f; border: 1px solid #3a3733; border-radius: 12px;
+  padding: 10px 12px; min-height: 84px; resize: vertical; width: 100%; }
+.motion textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.motion .row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+.motion .row button { min-height: 48px; border-radius: 12px; font-weight: 700; }
+.motion .go { background: var(--accent); color: #fff; }
+.motion .no { background: #23211f; color: #fff; }
 .viewer .top-row { position: absolute; z-index: 2; top: env(safe-area-inset-top, 0px); left: 0; right: 0; display: flex;
   justify-content: space-between; align-items: center; padding: 8px max(8px, env(safe-area-inset-right, 0px)) 8px max(8px, env(safe-area-inset-left, 0px));
   background: linear-gradient(rgb(0 0 0 / .5), transparent); color: #fff; }
@@ -303,6 +315,15 @@ main { padding: var(--gap) max(var(--gap), env(safe-area-inset-right, 0px)) calc
     <button class="nav next" id="v-next" type="button" aria-label="Next image"></button>
     <div class="heart" id="v-heart"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.5h2c.7-1.3 2.2-2.5 4.3-2.5 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg></div>
   </div>
+  <form class="motion" id="motion" hidden>
+    <label for="motion-text">Describe the motion <small>(optional)</small></label>
+    <textarea id="motion-text" maxlength="500" placeholder="e.g. she turns toward the camera and smiles, hair blowing in the wind"></textarea>
+    <small>Leave it empty and the clip uses the image's own tags. Takes about 3 minutes.</small>
+    <div class="row">
+      <button class="no" type="button" id="motion-no">Cancel</button>
+      <button class="go" type="submit">Animate</button>
+    </div>
+  </form>
   <div class="actions">
     <button class="big skip" id="v-skip" type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -473,6 +494,7 @@ function closeViewer(fromPop) {
 function showAt(i) {
   if (i < 0 || i >= state.items.length) return;
   state.idx = i; const it = state.items[i];
+  closeMotion();
   const isVid = it.kind === "video";
   vimg.hidden = isVid; vvid.hidden = !isVid;
   if (isVid) { vimg.removeAttribute("src"); vvid.poster = `thumb/${it.id}`; vvid.src = `img/${it.id}`; vvid.play().catch(() => {}); }
@@ -503,19 +525,29 @@ const onTap = () => {
   lastTap = now;
 };
 vimg.addEventListener("click", onTap); vvid.addEventListener("click", onTap);
-$("v-animate").onclick = async () => {
+function closeMotion() { $("motion").hidden = true; }
+$("v-animate").onclick = () => {
   const it = state.items[state.idx]; if (!it || it.animated) return;
-  $("v-animate").disabled = true;
+  $("motion").hidden = false; $("motion-text").value = "";
+  setTimeout(() => $("motion-text").focus(), 50);
+};
+$("motion-no").onclick = closeMotion;
+$("motion").onsubmit = async e => {
+  e.preventDefault();
+  const it = state.items[state.idx]; if (!it) return;
+  const go = $("motion").querySelector(".go"); go.disabled = true;
   try {
-    await api("api/animate", { id: it.id }); it.animated = true;
-    $("v-animate").querySelector("span").textContent = "Animating";
+    await api("api/animate", { id: it.id, prompt: $("motion-text").value.trim() }); it.animated = true;
+    closeMotion();
+    $("v-animate").disabled = true; $("v-animate").querySelector("span").textContent = "Animating";
     toast("Animating. The clip shows up in the feed in a few minutes.");
-  } catch (e) { $("v-animate").disabled = false; toast(e.message); }
+  } catch (err) { toast(err.message); }
+  go.disabled = false;
 };
 
 let touch = null;
 $("stage").addEventListener("touchstart", e => {
-  if (e.touches.length !== 1) { touch = null; return; }
+  if (e.touches.length !== 1 || !$("motion").hidden) { touch = null; return; }
   touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
 }, { passive: true });
 $("stage").addEventListener("touchmove", e => {
@@ -534,6 +566,7 @@ $("stage").addEventListener("touchend", e => {
 });
 addEventListener("keydown", e => {
   if (viewer.hidden) return;
+  if (!$("motion").hidden) { if (e.key === "Escape") closeMotion(); return; }
   const it = state.items[state.idx];
   if (e.key === "Escape") closeViewer();
   else if (e.key === "ArrowRight") step(1);

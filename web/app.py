@@ -10,12 +10,13 @@ POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/scan          ask the sync container to fetch bookmarks now
 POST /api/generate      {"images": N, "keep": K, "mediums": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
-POST /api/animate       {"id": N} or {"count": N} make Wan 2.2 clips from feed images
+POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images
 POST /api/reset         {"confirm": "start over"} forget all bookmarks/tags, re-download and re-tag
 (POSTs are JSON only.)
 """
 import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -235,6 +236,14 @@ def request_reset(req: dict) -> dict:
     return {"job": jid}
 
 
+MAX_PROMPT = 500
+# Quick check so a refused prompt fails here, visibly. The worker enforces the full list
+# (worker/dreamfeed/safety.py) on every prompt regardless.
+BLOCKED_WORDS = re.compile(r"\b(child|children|kid|kids|toddler|baby|babies|loli|lolicon|shota|shotacon|teen|"
+                           r"teens|teenage|teenager|underage|minor|minors|young|cub|preteen|schoolgirl|"
+                           r"schoolboy|school uniform|petite|flat chest)\b", re.I)
+
+
 def request_animation(req: dict) -> dict:
     with db() as conn:
         busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
@@ -249,7 +258,15 @@ def request_animation(req: dict) -> dict:
                                " AND params LIKE ?", (f'%"ids": [{gid}]%',)).fetchone()[0]
             if dup:
                 raise ValueError("this image is already being animated")
+            text = " ".join(str(req.get("prompt") or "").split())
+            if len(text) > MAX_PROMPT:
+                raise ValueError(f"keep the description under {MAX_PROMPT} characters")
+            bad = sorted({m.group(0).lower() for m in BLOCKED_WORDS.finditer(text)})
+            if bad:
+                raise ValueError(f"the description can't include: {', '.join(bad)}")
             params = {"kind": "animate", "ids": [gid]}
+            if text:
+                params["prompt"] = text
         else:
             count = int(req.get("count", 0))
             if not 1 <= count <= 50:
