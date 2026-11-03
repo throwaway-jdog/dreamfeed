@@ -4,8 +4,11 @@ A private feed of generated images that learns your taste from your X bookmarks 
 your likes and skips. It learns *what kind of content* you like (tags), never *who* is in
 it: no bookmarked image is ever shown to the generator or used for training.
 
-Status: **sync** and the worker's **tag phase** work. Generation (`comfyui/`), ranking and
-the feed page (`web/`) are not built yet.
+Status: **sync**, **tagging**, **age checks** and **nightly generation** work. The feed page
+(`web/`) is not built yet; until then the night's picks are in `data/generated/<night>/`.
+
+Chosen models (in `.env`): LUSTIFY V9 for photo, WAI-Illustrious v17 for anime,
+FurryVision XL v2 for furry. Civitai downloads that need an account use `CIVITAI_API_KEY`.
 
 ## Getting started (tagging only, for now)
 
@@ -13,7 +16,7 @@ the feed page (`web/`) are not built yet.
    with the "Get cookies.txt LOCALLY" extension. Save it outside this folder, readable by
    your user, and set `X_COOKIES_FILE` to its path.
 2. `cp .env.example .env` and fill in `PUID`, `PGID`, `TZ`, `X_COOKIES_FILE`, `AGECHECK_THREADS`.
-3. `docker compose up -d --build sync agecheck worker`
+3. `docker compose up -d --build sync agecheck comfyui worker`
 4. Follow along: `docker compose logs -f sync worker`. The first sync fetches every
    bookmark, and each file is tagged and deleted within a minute or so of arriving.
 5. Look at the result:
@@ -26,7 +29,11 @@ the feed page (`web/`) are not built yet.
    `worker/dreamfeed/config.py`. The age check errs toward dropping, so a few adult
    bookmarks being dropped is expected.
 
-The worker only holds the GPU while it is tagging: each batch runs in a child process
+Generation runs on its own every night inside `GENERATE_WINDOW`. To try it now:
+
+       docker compose exec worker python -m dreamfeed generate --now --images 12 --keep 6
+
+The worker only holds the GPU while it is tagging or generating: each batch runs in a child process
 that exits when done, so the miner resumes in between.
 
 ## How it works
