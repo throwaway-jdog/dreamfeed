@@ -13,7 +13,7 @@ YOUTH_TAGS = {
 # that push generated characters toward looking young.
 NEVER_PROMPT_TAGS = YOUTH_TAGS | {
     "flat chest", "petite", "school uniform", "serafuku", "school swimsuit",
-    "gym uniform", "buruma", "school bag",
+    "gym uniform", "buruma", "school bag", "otoko no ko",
 }
 
 # Added to every generation prompt, per medium.

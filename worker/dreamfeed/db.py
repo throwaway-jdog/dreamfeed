@@ -28,6 +28,29 @@ CREATE TABLE IF NOT EXISTS dropped (
     medium   TEXT,
     at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS runs (
+    night       TEXT PRIMARY KEY,            -- local date the window started
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    status      TEXT NOT NULL,               -- running | done | failed
+    stats       TEXT,                        -- JSON
+    started_at  TEXT,
+    finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS generations (
+    id          INTEGER PRIMARY KEY,
+    night       TEXT NOT NULL,
+    medium      TEXT NOT NULL,
+    checkpoint  TEXT NOT NULL,
+    prompt      TEXT NOT NULL,
+    seed        INTEGER NOT NULL,
+    source_bookmark INTEGER,                 -- bookmark whose tags seeded the prompt
+    file        TEXT,                        -- relative to data/generated
+    status      TEXT NOT NULL,               -- queued | generated | dropped | ranked-out | feed
+    reason      TEXT,                        -- why it was dropped
+    score       REAL,                        -- taste score, higher is better
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS generations_night ON generations(night, status);
 """
 
 

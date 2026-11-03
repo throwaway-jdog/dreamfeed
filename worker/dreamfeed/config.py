@@ -40,3 +40,30 @@ class Config:
         # Furry-tag confidence that moves a drawing from anime to furry.
         self.furry_threshold = opt_float("FURRY_THRESHOLD", 0.5)
         self.scan_seconds = opt_float("SCAN_SECONDS", 60)
+
+    def generation(self) -> "GenConfig":
+        return GenConfig()
+
+
+def _window(value: str) -> tuple[int, int]:
+    try:
+        start, end = (int(h) * 60 + int(m) for h, m in (p.split(":") for p in value.split("-")))
+    except ValueError:
+        sys.exit(f"dreamfeed: GENERATE_WINDOW={value!r} must look like 01:00-07:00")
+    return start, end
+
+
+class GenConfig:
+    """Settings only the nightly run needs."""
+    def __init__(self):
+        self.comfy_url = need("COMFYUI_URL")
+        self.supervisor_url = need("COMFYUI_SUPERVISOR_URL")
+        self.checkpoints = {m: os.environ.get(f"CHECKPOINT_{m.upper()}", "").strip()
+                            for m in ("photo", "anime", "furry")}
+        self.window = _window(need("GENERATE_WINDOW"))     # minutes after midnight
+        self.images_per_night = int(opt_float("IMAGES_PER_NIGHT", 0)) or sys.exit(
+            "dreamfeed: IMAGES_PER_NIGHT must be set")
+        self.keep_top = int(opt_float("FEED_KEEP_TOP", 0)) or sys.exit(
+            "dreamfeed: FEED_KEEP_TOP must be set")
+        # Every enabled medium gets at least this share of the night, so it can come back.
+        self.min_share = opt_float("MIN_MEDIUM_SHARE", 0.1)

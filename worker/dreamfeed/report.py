@@ -30,6 +30,12 @@ def main(argv: list[str]) -> None:
             "SELECT reason, coalesce(medium, '?'), count(*) FROM dropped GROUP BY 1, 2 ORDER BY 3 DESC"):
         print(f"  {reason:12} {medium:6} {n}")
 
+    runs = conn.execute("SELECT night, status, stats FROM runs ORDER BY started_at DESC LIMIT 5").fetchall()
+    if runs:
+        print("\nRecent generation runs:")
+        for night, status, stats in runs:
+            print(f"  {night:20} {status:8} {stats or ''}")
+
     for medium, n in mediums:
         print(f"\nTop tags, {medium} (share of its {n} bookmarks):")
         rows = conn.execute(
