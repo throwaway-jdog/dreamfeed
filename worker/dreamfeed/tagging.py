@@ -3,9 +3,12 @@ import io
 import json
 import time
 import urllib.request
+from pathlib import Path
 
 from . import db, media, safety
 from .config import Config
+
+COPY_DIR = Path("/copy")   # permanent bookmark copy (BOOKMARK_COPY_DIR)
 
 
 def pick_medium(a, cfg: Config) -> str:
@@ -46,6 +49,7 @@ def drop_reason(a, medium: str, frames, cfg: Config) -> tuple[str, str] | None:
 
 
 def run_once(cfg: Config) -> None:
+    sweep_copy(cfg)
     files = media.ready_files(cfg.bookmarks_dir)
     if not files:
         return
@@ -79,6 +83,21 @@ def run_once(cfg: Config) -> None:
 
     conn.close()
     print(f"tag: {counts['kept']} kept, {counts['dropped']} dropped in {time.time() - start:.0f}s", flush=True)
+
+
+def sweep_copy(cfg: Config) -> None:
+    """Posts rejected by the age checks don't stay in the permanent bookmark copy either.
+    Runs on every check because the copy can be downloaded after the post was rejected."""
+    if not COPY_DIR.is_dir():
+        return
+    conn = db.connect(cfg.db_path)
+    tids = [r[0] for r in conn.execute("SELECT DISTINCT tweet_id FROM dropped WHERE reason != 'unreadable'"
+                                       " AND tweet_id IS NOT NULL")]
+    conn.close()
+    for tid in tids:
+        for f in COPY_DIR.glob(f"{tid}_*"):
+            f.unlink(missing_ok=True)
+            print(f"tag: removed {f.name} from the bookmark copy", flush=True)
 
 
 def _drop(conn, name, tid, reason, detail, medium):

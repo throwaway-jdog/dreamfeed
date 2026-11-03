@@ -21,6 +21,7 @@ services:
       - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/cookies.txt:ro
       - ./data/bookmarks:/data/bookmarks      # raw downloads, deleted once tagged
       - ./data/sync:/data/sync                # gallery-dl archive: what was already fetched
+      - ${BOOKMARK_COPY_DIR:?set BOOKMARK_COPY_DIR in .env}:/copy   # permanent copy of every bookmark
     logging:
       options: { max-size: 10m, max-file: "3" }
 
@@ -51,6 +52,7 @@ services:
     volumes:
       - ./data:/data
       - ./models:/models                      # writable: downloads the tagger and CLIP on first run
+      - ${BOOKMARK_COPY_DIR:?set BOOKMARK_COPY_DIR in .env}:/copy   # rejected posts are removed from the copy
     deploy:
       resources:
         reservations:

@@ -1,7 +1,10 @@
 """Downloads new X bookmarks every SYNC_INTERVAL_HOURS, or right away when the dashboard
 asks (it creates /data/sync/scan-now). Progress goes to /data/sync/status.json.
 The archive remembers what was already fetched, so files the worker deletes after tagging
-aren't downloaded again."""
+aren't downloaded again.
+
+After each fetch, a second pass keeps a permanent copy of every bookmark (plus its post text
+as JSON) in /copy, with its own archive. The worker removes posts it rejects from there."""
 import datetime as dt
 import json
 import os
@@ -16,6 +19,9 @@ STATUS = SYNC / "status.json"
 COOKIES = Path("/config/cookies.txt")
 CMD = ["gallery-dl", "--config", "/app/gallery-dl.conf", "--cookies", str(COOKIES),
        "https://x.com/i/bookmarks"]
+COPY = Path("/copy")
+COPY_CMD = CMD[:-1] + ["-o", f"base-directory={COPY}", "-o", f"archive={COPY / '.archive.sqlite3'}",
+                       "-o", f"downloader.part-directory={COPY / '.part'}", "--write-metadata", CMD[-1]]
 
 hours = os.environ.get("SYNC_INTERVAL_HOURS", "").strip()
 try:
@@ -24,6 +30,8 @@ except ValueError:
     sys.exit("sync: SYNC_INTERVAL_HOURS must be set to a number")
 if not os.access(COOKIES, os.R_OK):
     sys.exit("sync: /config/cookies.txt missing or unreadable (X_COOKIES_FILE)")
+if not os.access(COPY, os.W_OK):
+    sys.exit("sync: /copy missing or not writable (BOOKMARK_COPY_DIR)")
 
 
 def now() -> str:
@@ -61,6 +69,20 @@ def scan(reason: str) -> None:
                  error=" | ".join(errors[-3:])[:500] if errors or code else None)
     print(f"sync: {now()} done: {new} new files, {result}"
           + ("" if code == 0 else " (expired cookies or X changed? try updating GALLERY_DL_VERSION)"), flush=True)
+    copy()
+
+
+def copy() -> None:
+    copied = 0
+    proc = subprocess.Popen(COPY_CMD, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in proc.stdout:
+        if line.startswith(f"{COPY}/") and not line.rstrip().endswith(".json"):
+            copied += 1
+        elif "[error]" in line:
+            print(line, end="", flush=True)
+    code = proc.wait()
+    write_status(copy_files=copied, copy_finished=now(), copy_result="ok" if code == 0 else "failed")
+    print(f"sync: {now()} copy: {copied} new files" + ("" if code == 0 else f", gallery-dl exit {code}"), flush=True)
 
 
 SYNC.mkdir(parents=True, exist_ok=True)
