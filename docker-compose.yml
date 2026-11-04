@@ -41,6 +41,7 @@ services:
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data
+      - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora   # style training: downloads, datasets, voices
       - ./models:/models                      # writable: downloads the tagger and CLIP on first run
       # X cookies (Netscape cookies.txt) for downloading artists' images from x.com to train styles.
       - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/cookies.txt:ro
@@ -114,7 +115,7 @@ services:
       HF_HOME: /models/hf                     # SDXL tokenizers, downloaded once
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
-      - ./data/lora:/data/lora
+      - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora
       - ./models:/models                      # reads checkpoints, writes loras/style-*.safetensors
     deploy:
       resources:
@@ -150,6 +151,7 @@ services:
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
     volumes:
       - ./data:/data        # feed.db (likes/skips), generated images, liked copies, personas.json
+      - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora
       - ./models/loras:/loras:ro
       - ./state:/state      # login.json, session.key
     networks: [default, apps]

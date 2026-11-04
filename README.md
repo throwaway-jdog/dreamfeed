@@ -184,7 +184,8 @@ dreamfeed/
              personas.json                         (private persona definitions)
              drafts/                               (personas drafted from a description)
              lora/NAME/                            (style training images, captions, the artist's
-                                                    post texts (voice.json), progress)
+                                                    post texts (voice.json), progress; mounted
+                                                    from LORA_DATA_DIR, which can be a slower disk)
              generated/                            (tonight's output and the feed)
              liked/                                (images you liked, copied out)
   state/     login.json, session.key
@@ -196,7 +197,9 @@ dreamfeed/
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,
   `data/liked/`, `state/`, `.env`, and the source folders.
 - **Excluded** in `backup/excludes.txt`: `models/` (re-downloadable; trained styles can be
-  retrained from `data/lora/`), `data/generated/`, and `logs/`.
+  retrained from `data/lora/`), `data/generated/`, and `logs/`. `LORA_DATA_DIR` is
+  only backed up if it's inside a backed-up folder; outside one, losing it means
+  downloading a style's images again before retraining it, and its voice is rebuilt then.
 
 ## Caddy
 
