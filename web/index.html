@@ -147,7 +147,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .motion textarea { font: 16px/1.4 var(--font); color: #fff; background: #23211f; border: 1px solid #3a3733; border-radius: 12px;
   padding: 10px 12px; min-height: 84px; resize: vertical; width: 100%; }
 .motion textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-.motion .lengths { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.motion .lengths { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .motion .lengths legend { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
 .motion .lengths input { position: absolute; opacity: 0; }
 .motion .lengths span { display: grid; place-items: center; min-height: 40px; border-radius: 10px; background: #23211f;
@@ -347,7 +347,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 
     <div class="panel">
       <h2>Video</h2>
-      <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, up to a minute long.</p>
+      <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, or make a minute-long scene from it.</p>
       <div class="field">
         <span>How many clips</span>
         <div class="seg" id="a-count" role="group" aria-label="How many clips">
@@ -451,11 +451,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <textarea id="motion-text" maxlength="500" placeholder="e.g. she turns toward the camera and smiles, hair blowing in the wind"></textarea>
     <small>Leave it empty and the clip uses the image's own tags.</small>
     <fieldset class="lengths" id="motion-len">
-      <legend>Length</legend>
-      <label><input type="radio" name="len" value="5" checked><span>5 s</span></label>
-      <label><input type="radio" name="len" value="15"><span>15 s</span></label>
-      <label><input type="radio" name="len" value="30"><span>30 s</span></label>
-      <label><input type="radio" name="len" value="60"><span>1 min</span></label>
+      <legend>Make</legend>
+      <label><input type="radio" name="len" value="clip" checked><span>Clip · 5 s</span></label>
+      <label><input type="radio" name="len" value="scene"><span>Scene · ~1 min</span></label>
     </fieldset>
     <small id="motion-time">Takes about 5 minutes.</small>
     <div class="row">
@@ -925,14 +923,16 @@ function closeMotion() { $("motion").hidden = true; }
 function openMotion() {
   const it = state.items[state.idx]; if (!it) return;
   $("motion").hidden = false; $("motion-text").value = "";
-  $("motion").querySelector('input[name="len"][value="5"]').checked = true; showMotionTime();
+  $("motion").querySelector('input[name="len"][value="clip"]').checked = true; showMotionTime();
   setTimeout(() => $("motion-text").focus(), 50);
 }
-const motionLen = () => Number($("motion").querySelector('input[name="len"]:checked').value);
-function showMotionTime() {   // about 5 minutes per 5-second piece
-  const min = motionLen();
-  $("motion-time").textContent = min <= 5 ? "Takes about 5 minutes."
-    : `Made as ${min / 5} pieces of 5 seconds: about ${min >= 60 ? "an hour" : `${min} minutes`}.`;
+const wantScene = () => $("motion").querySelector('input[name="len"]:checked').value === "scene";
+function showMotionTime() {
+  const scene = wantScene();
+  $("motion-text").disabled = scene;
+  $("motion-time").textContent = scene
+    ? "A scene of about a minute: 6 new drawings of these characters, each a looping shot, building to a climax. Needs a post with two characters. About 35 minutes."
+    : "Takes about 5 minutes.";
 }
 $("motion-len").onchange = showMotionTime;
 $("v-animate").onclick = openMotion;
@@ -942,12 +942,13 @@ $("motion").onsubmit = async e => {
   const it = state.items[state.idx]; if (!it) return;
   const go = $("motion").querySelector(".go"); go.disabled = true;
   try {
-    const seconds = motionLen();
-    await api("api/animate", { id: it.id, prompt: $("motion-text").value.trim(), seconds }); it.animated = true;
+    const scene = wantScene();
+    await api("api/animate", scene ? { id: it.id, scene: true } : { id: it.id, prompt: $("motion-text").value.trim() });
+    it.animated = true;
     closeMotion();
     $("v-animate").querySelector("span").textContent = "Animate again";
     const ab = it.el?.querySelector(".act.anim span"); if (ab) ab.textContent = "Again";
-    toast(seconds > 5 ? "Animating. A long clip takes a while; it shows up in the feed when it's done."
+    toast(scene ? "Making a scene. It takes about 35 minutes and shows up in the feed when it's done."
       : "Animating. The clip shows up in the feed in a few minutes.");
   } catch (err) { toast(err.message); }
   go.disabled = false;
@@ -1056,7 +1057,7 @@ function clock(iso) {
   return d.toLocaleString(undefined, today ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 const PHASE = { generating: "Generating", animating: "Animating", checking: "Checking ages", ranking: "Picking the best",
-  captioning: "Writing captions", planning: "Planning motion", posing: "Drawing key poses" };
+  captioning: "Writing captions", planning: "Planning motion", drawing: "Drawing shots" };
 let animN = 3;
 document.querySelectorAll("#a-count button").forEach(b => b.onclick = () => {
   animN = +b.dataset.n;
@@ -1091,7 +1092,8 @@ function renderLive(d) {
     const box = el("div", "live"), head = el("div", "head");
     const what = j.params.kind === "style" ? `train the ${j.params.name} style`
       : j.params.kind === "animate"
-      ? (j.params.ids ? `animate 1 image${j.params.seconds ? `, ${j.params.seconds} s` : ""}` : `animate the best ${j.params.count}`)
+      ? (j.params.ids ? "animate 1 image" : `animate the best ${j.params.count}`)
+      : j.params.kind === "scene" ? "make a scene"
       : `${j.params.images} images, keep ${j.params.keep}${j.params.personas ? " · " + j.params.personas.map(h => personaOf(h)?.name || h).join(", ") : ""}`;
     head.append(el("span", null, `Waiting: ${what}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";

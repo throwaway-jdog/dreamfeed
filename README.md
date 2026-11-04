@@ -120,17 +120,29 @@ image-to-video clip:
 
 Every clip is checked on at least 8 frames, like images, before it reaches the feed.
 
-From an image in the viewer, Animate also offers long clips of 15 seconds, 30 seconds or a minute
-(`worker/dreamfeed/longclip.py`), made the way an animator works: key poses first, then the
-motion between them. Wan makes about 5 seconds at a time, so there's one key pose per 5 seconds:
-the post's picture redrawn by the persona's own model and style LoRA (img2img, half strength) with
-the expression and pose for that point in the clip (slow start, building, peak, easing off). Key
-poses go through the image checks and must still show the same act. Wan then animates each piece
-from one key to the next, carrying the last frames of the piece before so the motion runs on, with
-its own motion description. The clip ends on the original picture, so it loops cleanly. Since
-every piece starts and ends on a clean picture, details and colours don't drift. Every piece is
-checked too; a failing piece is made again (3 tries) before the whole clip is dropped. About 5
-minutes per piece: an hour for a minute.
+From a post with two characters, the viewer's Animate can also make a **scene** of about a
+minute (`worker/dreamfeed/scene.py`), cut together the way animators do it: a few looping shots,
+each a new drawing, building to a climax. Wan makes ~5 seconds at a time and drifts when clips are
+chained, so each shot is its own clip:
+
+1. Plan: opening (missionary or blowjob), a position, the same from the side, another position,
+   the climax in it, aftermath. The post gives the cast and setting (its tags minus act, position
+   and cum); the partner is a faceless male with one look for the whole scene. Cum is kept out of
+   every shot before the climax.
+2. Draw: one picture per shot with the persona's own model and style LoRA, checked like posts; of
+   3 candidates, the one showing the intended act and looking most like the post wins. Comic-panel
+   layouts are rejected, and the top and bottom 4% are cropped (style LoRAs learn signatures).
+3. Animate: each picture becomes a 5-second clip that ends on its own first frame (Wan's
+   first-and-last-frame mode), a seamless loop played twice, then a hard cut. The climax stacks the
+   position's motion LoRA with a climax LoRA and plays once. Every clip is checked; one that fails
+   3 times is left out.
+
+About 35 minutes a scene. To judge a plan before any video: `python -m dreamfeed scene-preview
+POST_ID` draws the shots and a contact sheet, `scene-render POST_ID [--shots 4,5]` animates them.
+
+Acts can have their own motion LoRA (`motion.ACTS` / `motion.CLIMAXES`, files
+`models/loras/NAME-high/-low.safetensors`): reverse cowgirl, and the climaxes creampie, facial
+and cumshot, all from Civitai.
 
 ## Style LoRAs
 

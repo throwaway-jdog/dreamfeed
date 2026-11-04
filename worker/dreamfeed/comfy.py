@@ -43,18 +43,15 @@ class Comfy:
 
     def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, strict: bool = False,
-                loras: list[tuple[str, str, float]] = (), end: Path | None = None,
-                start_frames: list[Path] = ()) -> Path:
+                loras: list[tuple[str, str, float]] = (), end: Path | None = None) -> Path:
         """Animate a (generated, already checked) image into a ~5 second clip. loras: Wan video
         LoRAs as (high-noise file, low-noise file, strength), e.g. a sex act's motion LoRA and
         the persona's style video LoRA, applied in order. Wan only: end makes the clip finish on
-        that image; start_frames (1 + 4k of them) replace image as the clip's first frames, so it
-        carries on the motion of the clip they came from."""
+        that image (the same image as the start makes a seamless loop)."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start("video")
         if engine == "wan":
-            sources = [self.upload(f) for f in (start_frames or [image])]
-            workflow = _wan_workflow(sources, positive, negative, seed, f"{subdir}/{name}", loras,
+            workflow = _wan_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
                                      end=self.upload(end) if end else None)
         else:
             workflow = _ltx_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}")
@@ -154,9 +151,9 @@ def _save_video(images: list, fps: float, prefix: str) -> dict:
     }
 
 
-def _wan_workflow(sources: list[str], positive: str, negative: str, seed: int, prefix: str,
+def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: str,
                   loras: list[tuple[str, str, float]] = (), end: str | None = None) -> dict:
-    """sources: the uploaded first frame(s); end: an uploaded last frame (first-last-frame mode)."""
+    """source: the uploaded first frame; end: an uploaded last frame (first-last-frame mode)."""
     w = WAN
     nodes = {
         "text": {"class_type": "CLIPLoader", "inputs": {"clip_name": w["text"], "type": "wan"}},
@@ -164,15 +161,8 @@ def _wan_workflow(sources: list[str], positive: str, negative: str, seed: int, p
         "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": positive}},
         "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": negative}},
     }
-    start = None
-    for k, src in enumerate(sources):
-        nodes[f"image{k}"] = {"class_type": "LoadImage", "inputs": {"image": src}}
-        if start is None:
-            start = [f"image{k}", 0]
-        else:
-            nodes[f"batch{k}"] = {"class_type": "ImageBatch", "inputs": {"image1": start, "image2": [f"image{k}", 0]}}
-            start = [f"batch{k}", 0]
-    common = {"positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "start_image": start,
+    nodes["image"] = {"class_type": "LoadImage", "inputs": {"image": source}}
+    common = {"positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "start_image": ["image", 0],
               "width": w["width"], "height": w["height"], "length": w["frames"], "batch_size": 1}
     if end:
         nodes["end"] = {"class_type": "LoadImage", "inputs": {"image": end}}

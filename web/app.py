@@ -20,8 +20,8 @@ POST /api/styles/cancel {"name": N} stop a style job
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
-POST /api/animate       {"id": N, "prompt": "...", "seconds": 5|15|30|60} or {"count": N} make Wan 2.2
-                        clips from feed images (over 5 seconds: a chain of 5-second pieces)
+POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
+                        {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
 (POSTs are JSON only.)
 """
 import json
@@ -83,7 +83,7 @@ def db() -> sqlite3.Connection:
 
 
 def clip_seconds(checkpoint: str | None) -> int:
-    """A clip's length: long clips carry it in their label ("... 60s"), the rest are 5 seconds."""
+    """A clip's length: scenes carry it in their label ("... 55s"), the rest are 5 seconds."""
     m = re.search(r" (\d+)s$", checkpoint or "")
     return int(m.group(1)) if m else 5
 
@@ -271,7 +271,6 @@ def queue_generation(req: dict) -> dict:
 
 
 MAX_PROMPT = 500
-CLIP_SECONDS = (5, 15, 30, 60)   # matches the worker's longclip.LENGTHS
 # Quick check so a refused prompt fails here, visibly. The worker enforces the full list
 # (worker/dreamfeed/safety.py) on every prompt regardless.
 BLOCKED_WORDS = re.compile(r"\b(child|children|kid|kids|toddler|baby|babies|loli|lolicon|shota|shotacon|teen|"
@@ -289,20 +288,26 @@ def request_animation(req: dict) -> dict:
             row = conn.execute("SELECT kind, status FROM generations WHERE id = ?", (gid,)).fetchone()
             if not row or row["kind"] != "image" or row["status"] != "feed":
                 raise LookupError("only images in the feed can be animated")
+            if req.get("scene"):
+                tags = conn.execute("SELECT coalesce(tags, prompt) FROM generations WHERE id = ?", (gid,)).fetchone()[0]
+                if "duo" not in {t.strip() for t in (tags or "").split(",")}:
+                    raise ValueError("scenes need a post with two characters")
+                params = {"kind": "scene", "ids": [gid]}
+                if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
+                                (json.dumps(params),)).fetchone()[0]:
+                    raise ValueError("a scene from this post is already waiting")
+                jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
+                                   (json.dumps(params),)).lastrowid
+                return {"job": jid}
             text = " ".join(str(req.get("prompt") or "").split())
             if len(text) > MAX_PROMPT:
                 raise ValueError(f"keep the description under {MAX_PROMPT} characters")
             bad = sorted({m.group(0).lower() for m in BLOCKED_WORDS.finditer(text)})
             if bad:
                 raise ValueError(f"the description can't include: {', '.join(bad)}")
-            seconds = int(req.get("seconds") or 5)
-            if seconds not in CLIP_SECONDS:
-                raise ValueError(f"length must be one of {', '.join(map(str, CLIP_SECONDS))} seconds")
             params = {"kind": "animate", "ids": [gid]}
             if text:
                 params["prompt"] = text
-            if seconds > 5:
-                params["seconds"] = seconds
             # Same image with a new description is fine; the identical request twice is a double tap.
             dup = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
                                (json.dumps(params),)).fetchone()[0]

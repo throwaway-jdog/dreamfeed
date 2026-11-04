@@ -1,17 +1,21 @@
 """Scenes: a short edited sex scene of about a minute, made the way animators do it: a few
 looping shots, each a new drawing, cut together and building to a climax.
 
-    python -m dreamfeed scene-preview POST_ID [--seed N]
+From the viewer ("Make a scene", a job of kind "scene"), or by hand:
+    python -m dreamfeed scene-preview POST_ID [--seed N]   plan and draw the shots, contact sheet
+    python -m dreamfeed scene-render POST_ID [--shots 4,5]  animate what scene-preview drew
 
 A scene starts from a feed post with two characters. The post gives the cast and setting
 (its tags minus the act, position and cum); each shot adds its own position, framing and
 intensity. Only the climax and aftermath shots may show cum, and the others ask the model
 not to draw it, so the scene can build up.
 
-This first part plans the shots and draws one picture per shot (the persona's own model and
-style LoRA, the same image checks as posts; of SHOT_CANDIDATES, the one that shows the
-intended act and looks most like the post wins). scene-preview saves them with a contact
-sheet so the plan can be judged before any video is made.
+1. draw: one picture per shot (the persona's own model and style LoRA, the same image checks
+   as posts; of SHOT_CANDIDATES, the one that shows the intended act and looks most like the
+   post wins).
+2. render: each picture becomes a 5-second Wan clip that ends on its own first frame, a
+   seamless loop played shot.loops times before a hard cut. The climax plays once and builds.
+   Every clip is checked before it's used; one that keeps failing is left out.
 """
 import argparse
 import json
@@ -27,6 +31,7 @@ from PIL import Image, ImageDraw
 from . import motion
 
 SHOT_CANDIDATES = 3
+SHOT_TRIES = 3         # a shot whose clip fails a check is made again, then left out
 
 # What a position looks like in a picture (booru tags for the image model), and the act
 # the tagger should then find in it (motion.ACTS names; None when no act LoRA covers it).
@@ -68,6 +73,23 @@ class Shot:
     loops: int = 2     # times the 5-second clip plays before the cut
     climax: str = ""   # motion.CLIMAXES name: the clip adds that LoRA to the position's, and plays
                        # once without looping (a climax builds; it doesn't reset)
+
+
+def _frames(path: Path) -> np.ndarray:
+    """Every frame of a video, as one RGB array."""
+    import subprocess
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                            "stream=width,height", "-of", "csv=p=0", str(path)],
+                           capture_output=True, text=True, timeout=60).stdout.strip().split(",")
+    w, h = int(probe[0]), int(probe[1])
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         capture_output=True, timeout=300, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, h, w, 3)
+
+
+def _sample(frames: np.ndarray, count: int) -> list[Image.Image]:
+    idx = [int(len(frames) * (i + 0.5) / count) for i in range(count)]
+    return [Image.fromarray(frames[i]) for i in idx]
 
 
 def cast_tags(prompt: str, partner: str = "") -> str:
@@ -242,7 +264,6 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
     from . import personas as people, videolora
     from .comfy import WAN
     from .generate import MOTION, VIDEO_CHECK_FRAMES, _check_frames
-    from .longclip import PIECE_TRIES, _frames, _sample
     gen = cfg.generation()
     persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
     own = persona and persona.lora and videolora.for_style(cfg, persona.lora[0])
@@ -279,7 +300,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
                                            body, MOTION[post["medium"]]) if p)
             frames = None
-            for attempt in range(PIECE_TRIES):
+            for attempt in range(SHOT_TRIES):
                 try:
                     path = comfy.img2vid("wan", pic, post["medium"], prompt, rng.randrange(2 ** 32), out.parent.name,
                                          f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
@@ -294,7 +315,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                 print(f"scene: shot {i + 1} try {attempt + 1} dropped ({reason[0]}: {reason[1]})", flush=True)
                 frames = None
             if frames is None:
-                notes.append(f"dropped after {PIECE_TRIES} tries")
+                notes.append(f"dropped after {SHOT_TRIES} tries")
                 continue
             if writer is None:
                 h, w = frames.shape[1:3]
@@ -350,3 +371,64 @@ def render_preview(args: list[str]) -> None:
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
     path, notes = render(cfg, comfy, post, shots, pics, subdir / "scene.mp4", random.Random())
     print(f"scene-render: {path} {notes}", flush=True)
+
+
+def run_job(cfg, conn, job_id: int, params: dict) -> None:
+    """A "Make a scene" request from the viewer: params {"kind": "scene", "ids": [post]}."""
+    import datetime as dt
+    from . import personas as people
+    from .comfy import Comfy
+    from .generate import _cancel_requested, _finish, _progress, _set, check_videos
+    night = f"scene-{dt.datetime.now():%Y%m%d-%H%M%S}"
+    with conn:
+        conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
+        conn.execute("INSERT INTO runs(night, status, attempts, started_at) VALUES (?, 'running', 1, datetime('now'))",
+                     (night,))
+    status, message, pictures = "done", None, []
+    gen = cfg.generation()
+    out_dir = cfg.data_dir / "generated"
+    comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
+    try:
+        src = int(params["ids"][0])
+        post = load_post(cfg, conn, src)
+        persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
+        rng = random.Random()
+        shots = plan(rng)
+        with conn:
+            gid = conn.execute(
+                "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
+                " caption, kind, status) SELECT ?, medium, 'wan2.2-i2v scene', ?, 0, id, persona, caption,"
+                " 'video', 'queued' FROM generations WHERE id = ?",
+                (night, " | ".join(s.name for s in shots), src)).lastrowid
+        _progress(conn, night, "drawing", 0, len(shots))
+        drawn = draw(cfg, comfy, persona, post, shots, night, f"scene-{gid}", rng)
+        pictures = [p for p, _ in drawn if p]
+        _progress(conn, night, "animating", 0, len(shots))
+        path, notes = render(cfg, comfy, post, shots, [p for p, _ in drawn], out_dir / night / f"video-{gid}.mp4",
+                             rng, progress=lambda d, t: _progress(conn, night, "animating", d, t),
+                             cancelled=lambda: _cancel_requested(conn, night))
+        print(f"scene: {night} {notes}", flush=True)
+        if path:
+            from .comfy import WAN
+            seconds = round(len(_frames(path)) / WAN["fps"])
+            _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)),
+                 checkpoint=f"wan2.2-i2v scene {seconds}s")
+        else:
+            _set(conn, gid, status="dropped", reason="no shot passed: " + "; ".join(notes)[:180])
+        stats = check_videos(cfg, conn, night)
+        if _cancel_requested(conn, night):
+            status = "cancelled"
+        _finish(conn, night, status, stats)
+    except Exception as e:
+        status, message = "failed", str(e)[:300]
+        with conn:
+            conn.execute("UPDATE runs SET status = 'failed', progress = NULL, finished_at = datetime('now')"
+                         " WHERE night = ?", (night,))
+        raise
+    finally:
+        comfy.stop()
+        for p in pictures:
+            p.unlink(missing_ok=True)
+        with conn:
+            conn.execute("UPDATE jobs SET status = ?, message = ?, finished_at = datetime('now') WHERE id = ?",
+                         (status, message, job_id))

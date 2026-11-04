@@ -10,7 +10,6 @@
 import datetime as dt
 import json
 import random
-import subprocess
 from collections import defaultdict
 from pathlib import Path
 
@@ -361,6 +360,9 @@ def run_job(cfg: Config, job_id: int) -> None:
     params = json.loads(row[0])
     if params.get("kind") == "animate":
         return animate_job(cfg, conn, job_id, params)
+    if params.get("kind") == "scene":
+        from . import scene
+        return scene.run_job(cfg, conn, job_id, params)
     if params.get("kind") == "persona_draft":
         from . import builder
         return builder.run(cfg, conn, job_id, params)
@@ -419,14 +421,11 @@ def pick_sources(conn, count: int, night: str | None = None) -> list[int]:
 
 
 def animate(cfg: Config, conn, night: str, sources: list[int],
-            until_window_closes: tuple[int, int] | None = None, motion_text: str = "",
-            seconds: int = 5) -> dict:
-    """Turn feed images into Wan 2.2 clips, check every clip, put the passing ones in the feed.
+            until_window_closes: tuple[int, int] | None = None, motion_text: str = "") -> dict:
+    """Turn feed images into ~5 s Wan 2.2 clips, check every clip, put the passing ones in the feed.
     motion_text, when given, leads the prompt; the image's own tags follow to keep the clip
-    consistent with the picture. seconds over 5 makes a long clip: a chain of 5-second pieces
-    (see longclip), each with its own motion description."""
-    from . import longclip, motion
-    pieces = longclip.pieces_for(seconds)
+    consistent with the picture."""
+    from . import motion
     from .comfy import Comfy
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
@@ -440,15 +439,10 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
         row = conn.execute("SELECT tags, prompt FROM generations WHERE id = ?", (src,)).fetchone()
         if row:   # posts from before tags were saved: their prompt's tags instead
             picture[src] = [t.strip() for t in (row[0] or row[1]).split(",") if t.strip()]
-    if pieces > 1:
-        plans = motion.plan_beats(cfg, list(picture.items()), pieces, motion_text.strip())
-    else:
-        plans = {g: (act, [text]) for g, (act, text) in
-                 motion.plan(cfg, list(picture.items()), motion_text.strip()).items()}
+    plans = motion.plan(cfg, list(picture.items()), motion_text.strip())
     from . import personas as people, videolora
     style = {}   # persona handle -> its style's video LoRA, if trained
-    personas = {p.handle: p for p in people.load(cfg.personas_path)}
-    for p in personas.values():
+    for p in people.load(cfg.personas_path):
         v = p.lora and videolora.for_style(cfg, p.lora[0])
         if v:
             style[p.handle] = v
@@ -461,59 +455,36 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                 break
             if _cancel_requested(conn, night):
                 break
-            row = conn.execute("SELECT g.medium, g.prompt, g.file, g.persona, g.caption, coalesce(p.strict, 1),"
-                               " g.checkpoint"
+            row = conn.execute("SELECT g.medium, g.prompt, g.file, g.persona, g.caption, coalesce(p.strict, 1)"
                                " FROM generations g LEFT JOIN personas p ON p.handle = g.persona"
                                " WHERE g.id = ? AND g.kind = 'image' AND g.status = 'feed'", (src,)).fetchone()
             if not row or not (out_dir / row[2]).is_file() or row[0] not in MOTION:
                 continue
-            medium, prompt, file, handle, caption, strict, ckpt = row
-            act, written = plans.get(src, (None, [None] * pieces))
+            medium, prompt, file, handle, caption, strict = row
+            act, written = plans.get(src, (None, None))
             use_lora = motion.lora_for(act, gen.act_lora, cfg.models_dir) if act else None
             own = style.get(handle)
             loras = ([use_lora] if use_lora else []) + ([(own[0], own[1], gen.video_style_strength)] if own else [])
             # Wan follows sentences; without a written one, the act's fixed description and the
             # picture's tags keep the clip consistent with the image.
-            fallback = ", ".join(p for p in (act.motion if act else "", prompt) if p)
-            prompts = [", ".join(p for p in (own[2] if own else "", act.trigger if use_lora else "",
-                                             motion_text.strip(), body or fallback, MOTION[medium]) if p)
-                       for body in (written if pieces == 1 else   # unwritten pieces still follow the arc
-                                    [b or f"{fallback}, {motion._arc(i, pieces)}" for i, b in enumerate(written)])]
-            seeds = [rng.randrange(2 ** 32) for _ in prompts]
-            label = ("wan2.2-i2v" + (f" +{act.name}" if use_lora else "") + (" +style" if own else "")
-                     + (f" {seconds}s" if pieces > 1 else ""))
+            body = written or ", ".join(p for p in (act.motion if act else "", prompt) if p)
+            motion_prompt = ", ".join(p for p in (own[2] if own else "", act.trigger if use_lora else "",
+                                                  motion_text.strip(), body, MOTION[medium]) if p)
+            seed = rng.randrange(2 ** 32)
             with conn:
                 gid = conn.execute(
                     "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
                     " caption, kind, status) VALUES (?,?,?,?,?,?,?,?, 'video', 'queued')",
-                    (night, medium, label, "\n".join(prompts), seeds[0], src, handle, caption)).lastrowid
+                    (night, medium, "wan2.2-i2v" + (f" +{act.name}" if use_lora else "") + (" +style" if own else ""),
+                     motion_prompt, seed,
+                     src, handle, caption)).lastrowid
             try:
-                if pieces == 1:
-                    path = comfy.img2vid("wan", out_dir / file, medium, prompts[0], seeds[0], night,
-                                         f"video-{gid}", strict=bool(strict), loras=loras)
-                else:
-                    (out_dir / night).mkdir(parents=True, exist_ok=True)
-                    _progress(conn, night, "posing", 0, pieces)
-                    made_keys: list[Path] = []
-                    try:
-                        keys = _key_poses(cfg, comfy, personas.get(handle), out_dir / file, ckpt, medium, prompt,
-                                          bool(strict), pieces, night, f"video-{gid}", rng, made_keys)
-                        path = longclip.make(
-                            comfy, lambda frames: _check_frames(cfg, frames, medium, bool(strict)),
-                            keys, medium, prompts, seeds, night, f"video-{gid}",
-                            out_dir / night / f"video-{gid}.mp4", bool(strict), loras, VIDEO_CHECK_FRAMES,
-                            progress=lambda d, t: _progress(conn, night, "animating", d, t),   # pieces done
-                            cancelled=lambda: _cancel_requested(conn, night))
-                    finally:
-                        for k in made_keys:
-                            k.unlink(missing_ok=True)
+                path = comfy.img2vid("wan", out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
+                                     strict=bool(strict), loras=loras)
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue
-            except longclip.Dropped as e:
-                _set(conn, gid, status="dropped", reason=f"{e.args[0]}: {e.args[1]}"[:200])
-                continue
-            except (OSError, RuntimeError, subprocess.SubprocessError) as e:   # ComfyUI died, e.g. low memory
+            except (OSError, RuntimeError) as e:   # ComfyUI died, e.g. killed for low memory
                 _set(conn, gid, status="dropped", reason=f"ComfyUI failed: {e}"[:200])
                 print(f"animate: ComfyUI failed ({e}); stopping clips for this run", flush=True)
                 break
@@ -527,55 +498,8 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
     return check_videos(cfg, conn, night)
 
 
-def _key_poses(cfg: Config, comfy, persona, source: Path, ckpt: str, medium: str, prompt: str, strict: bool,
-               pieces: int, night: str, name: str, rng: random.Random, made: list[Path]) -> list[Path]:
-    """A long clip's key poses (see longclip): the picture redrawn with each point's expression
-    and pose tags by the same model and style LoRA, checked like images, and kept only if the
-    act in it is the same. made collects every file written, for the caller to delete."""
-    from . import captions, longclip, motion
-    from PIL import Image
-    from .checks import drop_reason
-    from .vision import Vision
-    lora = persona.lora_for(prompt) if persona else None
-    negative = persona.negative if persona else ""
-
-    def variant(i: int, seed: int) -> Path:
-        path = comfy.txt2img(ckpt, medium, f"{prompt}, {motion.key_tags(i, pieces)}", seed, night,
-                             f"{name}-key{i:02d}-{len(made)}", extra_negative=negative, strict=strict,
-                             lora=lora, init=source, denoise=longclip.KEY_DENOISE)
-        made.append(path)
-        return path
-
-    def judge(paths: list[Path]) -> dict[Path, float | None]:
-        comfy.stop()   # the image model off the GPU before the checks load
-        vision = Vision(cfg.models_dir)
-        try:
-            with Image.open(source) as im:
-                base = vision.analyze([im.convert("RGB")])
-            act = motion.act_for(captions.picture(base.general))
-            emb = base.embedding.astype(np.float32)
-            out = {}
-            for p in paths:
-                with Image.open(p) as im:
-                    img = im.convert("RGB")
-                a = vision.analyze([img])
-                bad = drop_reason(a, medium, [img], cfg, strict=strict) or _feral(a) \
-                    or motion.act_for(captions.picture(a.general)) != act
-                out[p] = None if bad else float(a.embedding.astype(np.float32) @ emb)
-            return out
-        finally:
-            vision.close()
-
-    try:
-        keys = longclip.keyframes(variant, judge, source, pieces, rng)
-    finally:
-        comfy.stop()
-    print(f"animate: {name} key poses: {sum(k != source for k in keys)} new of {pieces - 1}", flush=True)
-    return keys
-
-
 def _check_frames(cfg: Config, frames: list, medium: str, strict: bool) -> tuple[str, str] | None:
-    """The clip checks on some frames, for one piece of a long clip."""
+    """The clip checks on some frames, for one shot of a scene before it's used."""
     from .checks import drop_reason
     from .vision import Vision
     vision = Vision(cfg.models_dir)
@@ -633,8 +557,7 @@ def animate_job(cfg: Config, conn, job_id: int, params: dict) -> None:
     status, message = "done", None
     try:
         sources = [int(i) for i in params.get("ids") or []] or pick_sources(conn, int(params.get("count", 0)))
-        stats = animate(cfg, conn, night, sources, motion_text=str(params.get("prompt") or ""),
-                        seconds=int(params.get("seconds") or 5))
+        stats = animate(cfg, conn, night, sources, motion_text=str(params.get("prompt") or ""))
         if _cancel_requested(conn, night):
             status = "cancelled"
         _finish(conn, night, status, stats)
