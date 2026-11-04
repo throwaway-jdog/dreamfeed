@@ -447,7 +447,8 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                  motion.plan(cfg, list(picture.items()), motion_text.strip()).items()}
     from . import personas as people, videolora
     style = {}   # persona handle -> its style's video LoRA, if trained
-    for p in people.load(cfg.personas_path):
+    personas = {p.handle: p for p in people.load(cfg.personas_path)}
+    for p in personas.values():
         v = p.lora and videolora.for_style(cfg, p.lora[0])
         if v:
             style[p.handle] = v
@@ -460,12 +461,13 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                 break
             if _cancel_requested(conn, night):
                 break
-            row = conn.execute("SELECT g.medium, g.prompt, g.file, g.persona, g.caption, coalesce(p.strict, 1)"
+            row = conn.execute("SELECT g.medium, g.prompt, g.file, g.persona, g.caption, coalesce(p.strict, 1),"
+                               " g.checkpoint"
                                " FROM generations g LEFT JOIN personas p ON p.handle = g.persona"
                                " WHERE g.id = ? AND g.kind = 'image' AND g.status = 'feed'", (src,)).fetchone()
             if not row or not (out_dir / row[2]).is_file() or row[0] not in MOTION:
                 continue
-            medium, prompt, file, handle, caption, strict = row
+            medium, prompt, file, handle, caption, strict, ckpt = row
             act, written = plans.get(src, (None, [None] * pieces))
             use_lora = gen.act_lora if act else None
             own = style.get(handle)
@@ -491,12 +493,20 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                                          f"video-{gid}", strict=bool(strict), loras=loras)
                 else:
                     (out_dir / night).mkdir(parents=True, exist_ok=True)
-                    path = longclip.make(
-                        comfy, lambda frames: _check_frames(cfg, frames, medium, bool(strict)),
-                        out_dir / file, medium, prompts, seeds, night, f"video-{gid}",
-                        out_dir / night / f"video-{gid}.mp4", bool(strict), loras, VIDEO_CHECK_FRAMES,
-                        progress=lambda d, t: _progress(conn, night, "animating", d, t),   # pieces done
-                        cancelled=lambda: _cancel_requested(conn, night))
+                    _progress(conn, night, "posing", 0, pieces)
+                    made_keys: list[Path] = []
+                    try:
+                        keys = _key_poses(cfg, comfy, personas.get(handle), out_dir / file, ckpt, medium, prompt,
+                                          bool(strict), pieces, night, f"video-{gid}", rng, made_keys)
+                        path = longclip.make(
+                            comfy, lambda frames: _check_frames(cfg, frames, medium, bool(strict)),
+                            keys, medium, prompts, seeds, night, f"video-{gid}",
+                            out_dir / night / f"video-{gid}.mp4", bool(strict), loras, VIDEO_CHECK_FRAMES,
+                            progress=lambda d, t: _progress(conn, night, "animating", d, t),   # pieces done
+                            cancelled=lambda: _cancel_requested(conn, night))
+                    finally:
+                        for k in made_keys:
+                            k.unlink(missing_ok=True)
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue
@@ -515,6 +525,53 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
     finally:
         comfy.stop()
     return check_videos(cfg, conn, night)
+
+
+def _key_poses(cfg: Config, comfy, persona, source: Path, ckpt: str, medium: str, prompt: str, strict: bool,
+               pieces: int, night: str, name: str, rng: random.Random, made: list[Path]) -> list[Path]:
+    """A long clip's key poses (see longclip): the picture redrawn with each point's expression
+    and pose tags by the same model and style LoRA, checked like images, and kept only if the
+    act in it is the same. made collects every file written, for the caller to delete."""
+    from . import captions, longclip, motion
+    from PIL import Image
+    from .checks import drop_reason
+    from .vision import Vision
+    lora = persona.lora_for(prompt) if persona else None
+    negative = persona.negative if persona else ""
+
+    def variant(i: int, seed: int) -> Path:
+        path = comfy.txt2img(ckpt, medium, f"{prompt}, {motion.key_tags(i, pieces)}", seed, night,
+                             f"{name}-key{i:02d}-{len(made)}", extra_negative=negative, strict=strict,
+                             lora=lora, init=source, denoise=longclip.KEY_DENOISE)
+        made.append(path)
+        return path
+
+    def judge(paths: list[Path]) -> dict[Path, float | None]:
+        comfy.stop()   # the image model off the GPU before the checks load
+        vision = Vision(cfg.models_dir)
+        try:
+            with Image.open(source) as im:
+                base = vision.analyze([im.convert("RGB")])
+            act = motion.act_for(captions.picture(base.general))
+            emb = base.embedding.astype(np.float32)
+            out = {}
+            for p in paths:
+                with Image.open(p) as im:
+                    img = im.convert("RGB")
+                a = vision.analyze([img])
+                bad = drop_reason(a, medium, [img], cfg, strict=strict) or _feral(a) \
+                    or motion.act_for(captions.picture(a.general)) != act
+                out[p] = None if bad else float(a.embedding.astype(np.float32) @ emb)
+            return out
+        finally:
+            vision.close()
+
+    try:
+        keys = longclip.keyframes(variant, judge, source, pieces, rng)
+    finally:
+        comfy.stop()
+    print(f"animate: {name} key poses: {sum(k != source for k in keys)} new of {pieces - 1}", flush=True)
+    return keys
 
 
 def _check_frames(cfg: Config, frames: list, medium: str, strict: bool) -> tuple[str, str] | None:

@@ -1056,7 +1056,7 @@ function clock(iso) {
   return d.toLocaleString(undefined, today ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 const PHASE = { generating: "Generating", animating: "Animating", checking: "Checking ages", ranking: "Picking the best",
-  captioning: "Writing captions", planning: "Planning motion" };
+  captioning: "Writing captions", planning: "Planning motion", posing: "Drawing key poses" };
 let animN = 3;
 document.querySelectorAll("#a-count button").forEach(b => b.onclick = () => {
   animN = +b.dataset.n;

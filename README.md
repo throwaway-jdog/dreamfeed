@@ -121,13 +121,16 @@ image-to-video clip:
 Every clip is checked on at least 8 frames, like images, before it reaches the feed.
 
 From an image in the viewer, Animate also offers long clips of 15 seconds, 30 seconds or a minute
-(`worker/dreamfeed/longclip.py`). Wan makes about 5 seconds at a time, so a long clip is a chain of
-5-second pieces, each starting from the last frame of the one before, with its own motion
-description from the text model so the clip moves on instead of looping. Every piece is checked
-before its last frame is used; a failing piece is thrown away and made again from the same
-start (3 tries), and only then is the whole clip dropped. Each piece's colours
-are matched to the source picture so drift doesn't add up, but faces and details still wander a
-little over a minute. About 5 minutes per piece: an hour for a minute.
+(`worker/dreamfeed/longclip.py`), made the way an animator works: key poses first, then the
+motion between them. Wan makes about 5 seconds at a time, so there's one key pose per 5 seconds:
+the post's picture redrawn by the persona's own model and style LoRA (img2img, half strength) with
+the expression and pose for that point in the clip (slow start, building, peak, easing off). Key
+poses go through the image checks and must still show the same act. Wan then animates each piece
+from one key to the next, carrying the last frames of the piece before so the motion runs on, with
+its own motion description. The clip ends on the original picture, so it loops cleanly. Since
+every piece starts and ends on a clean picture, details and colours don't drift. Every piece is
+checked too; a failing piece is made again (3 tries) before the whole clip is dropped. About 5
+minutes per piece: an hour for a minute.
 
 ## Style LoRAs
 

@@ -113,8 +113,28 @@ ARC = ("it starts slowly and gently, settling in",
        "it slows to a calm, relaxed ending")
 
 
+# The key pose at the start of each part (longclip): expression and body tags in the same
+# order as ARC, added to the picture's own prompt.
+KEY_TAGS = ("half-closed eyes, light blush",
+            "blush, parted lips",
+            "looking back, blush",
+            "open mouth, blush, sweat",
+            "open mouth, arched back, sweat, heavy breathing",
+            "eyes closed, open mouth, arched back, sweat, heavy breathing",
+            "half-closed eyes, smile, sweat",
+            "half-closed eyes, smile")
+
+
+def _arc_index(i: int, n: int) -> int:
+    return round(i * (len(ARC) - 1) / max(1, n - 1)) if n > 1 else 0
+
+
 def _arc(i: int, n: int) -> str:
-    return ARC[round(i * (len(ARC) - 1) / max(1, n - 1))] if n > 1 else ARC[0]
+    return ARC[_arc_index(i, n)]
+
+
+def key_tags(i: int, n: int) -> str:
+    return KEY_TAGS[_arc_index(i, n)]
 
 
 def describe_beats(writer, tags: list[str], act: Act | None, n: int, extra: str = "") -> list[str | None]:

@@ -1,12 +1,20 @@
-"""Long clips: Wan makes ~5 seconds at a time, so a longer clip is a chain of pieces, each
-starting from the last frame of the one before, with its own motion description.
+"""Long clips, made the way an animator works: key poses first, then the motion between them.
 
-Every piece is checked (the same checks as clips) before its last frame is used for the next
-one. A piece that fails is thrown away and made again from the same start frame with a new
-seed; after PIECE_TRIES failures the whole clip is dropped. Each piece's colours are matched to the source
-picture's, so small shifts don't add up over the chain. The pieces are joined into one file,
-without the repeated first frame of each.
+1. Key poses: the post's own picture, then one new pose per 5 seconds: the same picture
+   redrawn by the persona's own model and style (img2img, so the character, outfit and
+   scene stay) with the expression and pose of that point in the clip. Each key goes
+   through the image checks and must still show the same act; of the candidates that pass,
+   the one closest to the original picture is used. The clip ends on the original picture,
+   so it loops cleanly in the feed.
+2. Motion: Wan animates each 5-second piece from one key to the next (first and last frame
+   both fixed), with its own motion description. Each piece also starts from the last few
+   frames of the piece before, so motion carries on across the join.
+
+Every piece starts and ends on a clean, checked picture, so details and colours can't drift
+over the clip. Every piece is also checked itself; a failing piece is made again (with a new
+seed), and after PIECE_TRIES failures the whole clip is dropped.
 """
+import random
 import subprocess
 from pathlib import Path
 
@@ -17,8 +25,10 @@ from .comfy import WAN
 
 PIECE_SECONDS = 5
 LENGTHS = (5, 15, 30, 60)       # what the viewer can ask for
-STD_RANGE = (0.8, 1.25)        # how far the colour match may stretch contrast
-PIECE_TRIES = 3                # a piece that fails a check is made again, from the same start
+PIECE_TRIES = 3                # a piece that fails a check is made again
+CONTEXT = 5                    # frames carried into the next piece (1 + 4k, Wan's latent steps)
+KEY_CANDIDATES = 2             # img2img tries per key pose
+KEY_DENOISE = 0.5              # how much of the picture a key pose redraws
 
 
 class Dropped(Exception):
@@ -27,6 +37,20 @@ class Dropped(Exception):
 
 def pieces_for(seconds: int) -> int:
     return max(1, -(-int(seconds) // PIECE_SECONDS))
+
+
+def keyframes(variant, judge, source: Path, n: int, rng: random.Random) -> list[Path]:
+    """n + 1 key poses for n pieces: the source, n - 1 new ones, the source again.
+    variant(i, seed) makes a candidate for key i; judge(paths) returns, per path, its
+    similarity to the source, or None if it failed a check. A key with no passing
+    candidate is the source picture again."""
+    cands = {i: [variant(i, rng.randrange(2 ** 32)) for _ in range(KEY_CANDIDATES)] for i in range(1, n)}
+    verdict = judge([p for ps in cands.values() for p in ps])
+    keys = [source]
+    for i in range(1, n):
+        ok = [(verdict[p], str(p)) for p in cands[i] if verdict.get(p) is not None]
+        keys.append(Path(max(ok)[1]) if ok else source)
+    return keys + [source]
 
 
 def _size(path: Path) -> tuple[int, int]:
@@ -43,45 +67,33 @@ def _frames(path: Path) -> np.ndarray:
     return np.frombuffer(raw, np.uint8).reshape(-1, h, w, 3)
 
 
-def _match_colors(frames: np.ndarray, ref: np.ndarray) -> np.ndarray:
-    """Per-channel mean and contrast of the whole piece, moved to the source picture's."""
-    f = frames.astype(np.float32)
-    m, s = f.mean(axis=(0, 1, 2)), f.std(axis=(0, 1, 2)) + 1e-3
-    rm, rs = ref.mean(axis=(0, 1)), ref.std(axis=(0, 1)) + 1e-3
-    scale = np.clip(rs / s, *STD_RANGE)
-    return np.clip((f - m) * scale + rm, 0, 255).astype(np.uint8)
-
-
 def _sample(frames: np.ndarray, count: int) -> list[Image.Image]:
     idx = [int(len(frames) * (i + 0.5) / count) for i in range(count)]
     return [Image.fromarray(frames[i]) for i in idx]
 
 
-def make(comfy, check, image: Path, medium: str, prompts: list[str], seeds: list[int], subdir: str,
+def make(comfy, check, keys: list[Path], medium: str, prompts: list[str], seeds: list[int], subdir: str,
          name: str, out: Path, strict: bool, loras, check_frames: int, progress=None,
          cancelled=lambda: False) -> Path:
-    """Make len(prompts) pieces and join them into out. check(frames) returns a drop reason or
-    None. Raises Dropped when a piece fails or the request is cancelled."""
-    start = image
-    first_frame = out.with_suffix(".start.png")
-    writer = ref = None
+    """Animate len(prompts) pieces, piece i from keys[i] to keys[i + 1], and join them into out.
+    check(frames) returns a drop reason or None. Raises Dropped when a piece fails every try
+    or the request is cancelled."""
+    ctx = [out.with_name(f"{out.stem}-ctx{k}.png") for k in range(CONTEXT)]
+    starts = [keys[0]]
+    writer = None
     try:
         for i, (prompt, seed) in enumerate(zip(prompts, seeds)):
             if cancelled():
                 raise Dropped("cancelled", f"after {i} of {len(prompts)} pieces")
             for attempt in range(PIECE_TRIES):   # a failing piece is thrown away and made again
                 try:
-                    path = comfy.img2vid("wan", start, medium, prompt, (seed + attempt * 7919) % 2 ** 32, subdir,
-                                         f"{name}-p{i:02d}", strict=strict, loras=loras)
+                    path = comfy.img2vid("wan", keys[i], medium, prompt, (seed + attempt * 7919) % 2 ** 32,
+                                         subdir, f"{name}-p{i:02d}", strict=strict, loras=loras,
+                                         end=keys[i + 1], start_frames=starts)
                 finally:
                     comfy.stop()   # fresh ComfyUI per piece, so Wan's models don't pile up in RAM
                 frames = _frames(path)
                 path.unlink(missing_ok=True)
-                h, w = frames.shape[1:3]
-                if ref is None:
-                    with Image.open(image) as src:
-                        ref = np.asarray(src.convert("RGB").resize((w, h), Image.LANCZOS))
-                frames = _match_colors(frames, ref)
                 reason = check(_sample(frames, check_frames))
                 if not reason:
                     break
@@ -89,13 +101,16 @@ def make(comfy, check, image: Path, medium: str, prompts: list[str], seeds: list
             else:
                 raise Dropped(reason[0], f"piece {i + 1}, {PIECE_TRIES} tries: {reason[1]}")
             if writer is None:
+                h, w = frames.shape[1:3]
                 writer = subprocess.Popen(
                     ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
                      "-r", str(WAN["fps"]), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
                      "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
-            writer.stdin.write((frames if i == 0 else frames[1:]).tobytes())   # frame 0 repeats the last one
-            Image.fromarray(frames[-1]).save(first_frame)
-            start = first_frame
+            # The first frames repeat the ones carried over from the piece before.
+            writer.stdin.write(frames[len(starts) if i else 0:].tobytes())
+            for k, f in enumerate(frames[-CONTEXT:]):
+                Image.fromarray(f).save(ctx[k])
+            starts = ctx
             if progress:
                 progress(i + 1, len(prompts))
         writer.stdin.close()
@@ -110,4 +125,5 @@ def make(comfy, check, image: Path, medium: str, prompts: list[str], seeds: list
         out.unlink(missing_ok=True)
         raise
     finally:
-        first_frame.unlink(missing_ok=True)
+        for f in ctx:
+            f.unlink(missing_ok=True)

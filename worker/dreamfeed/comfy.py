@@ -43,17 +43,21 @@ class Comfy:
 
     def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, strict: bool = False,
-                loras: list[tuple[str, str, float]] = ()) -> Path:
+                loras: list[tuple[str, str, float]] = (), end: Path | None = None,
+                start_frames: list[Path] = ()) -> Path:
         """Animate a (generated, already checked) image into a ~5 second clip. loras: Wan video
         LoRAs as (high-noise file, low-noise file, strength), e.g. a sex act's motion LoRA and
-        the persona's style video LoRA, applied in order."""
+        the persona's style video LoRA, applied in order. Wan only: end makes the clip finish on
+        that image; start_frames (1 + 4k of them) replace image as the clip's first frames, so it
+        carries on the motion of the clip they came from."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start("video")
-        source = self.upload(image)
         if engine == "wan":
-            workflow = _wan_workflow(source, positive, negative, seed, f"{subdir}/{name}", loras)
+            sources = [self.upload(f) for f in (start_frames or [image])]
+            workflow = _wan_workflow(sources, positive, negative, seed, f"{subdir}/{name}", loras,
+                                     end=self.upload(end) if end else None)
         else:
-            workflow = _ltx_workflow(source, positive, negative, seed, f"{subdir}/{name}")
+            workflow = _ltx_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}")
         return self._run(workflow, timeout=1800)
 
     def _run(self, workflow: dict, timeout: float = 600) -> Path:
@@ -75,8 +79,9 @@ class Comfy:
 
     def txt2img(self, checkpoint: str, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, extra_negative: str = "", strict: bool = False,
-                lora: tuple[str, float] | None = None) -> Path:
-        """lora: (file in models/loras, strength), applied to the model and text encoder."""
+                lora: tuple[str, float] | None = None, init: Path | None = None, denoise: float = 1.0) -> Path:
+        """lora: (file in models/loras, strength), applied to the model and text encoder.
+        init: start from this picture instead of noise (img2img), keeping 1 - denoise of it."""
         p = presets.for_checkpoint(checkpoint)
         positive, negative = safety.prompts(medium, p.positive_prefix + prompt,
                                             p.negative + (", " + extra_negative if extra_negative else ""), strict)
@@ -91,7 +96,7 @@ class Comfy:
             "sample": {"class_type": "KSampler", "inputs": {
                 "model": ["lora", 0] if lora else ["ckpt", 0], "positive": ["pos", 0], "negative": ["neg", 0],
                 "latent_image": ["latent", 0], "seed": seed, "steps": p.steps, "cfg": p.cfg,
-                "sampler_name": p.sampler, "scheduler": p.scheduler, "denoise": 1.0}},
+                "sampler_name": p.sampler, "scheduler": p.scheduler, "denoise": denoise if init else 1.0}},
             "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["ckpt", 2]}},
             "save": {"class_type": "SaveImage",
                      "inputs": {"images": ["decode", 0], "filename_prefix": f"{subdir}/{name}"}},
@@ -101,6 +106,9 @@ class Comfy:
                 "model": ["ckpt", 0], "clip": ["ckpt", 1], "lora_name": lora[0],
                 "strength_model": lora[1], "strength_clip": lora[1]}}
         self.start()
+        if init:
+            workflow["init"] = {"class_type": "LoadImage", "inputs": {"image": self.upload(init)}}
+            workflow["latent"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["init", 0], "vae": ["ckpt", 2]}}
         prompt_id = self._post(f"{self.api}/prompt",
                                {"prompt": workflow, "client_id": uuid.uuid4().hex})["prompt_id"]
         deadline = time.time() + 600
@@ -146,19 +154,31 @@ def _save_video(images: list, fps: float, prefix: str) -> dict:
     }
 
 
-def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: str,
-                  loras: list[tuple[str, str, float]] = ()) -> dict:
+def _wan_workflow(sources: list[str], positive: str, negative: str, seed: int, prefix: str,
+                  loras: list[tuple[str, str, float]] = (), end: str | None = None) -> dict:
+    """sources: the uploaded first frame(s); end: an uploaded last frame (first-last-frame mode)."""
     w = WAN
     nodes = {
         "text": {"class_type": "CLIPLoader", "inputs": {"clip_name": w["text"], "type": "wan"}},
         "vae": {"class_type": "VAELoader", "inputs": {"vae_name": w["vae"]}},
         "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": positive}},
         "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": negative}},
-        "image": {"class_type": "LoadImage", "inputs": {"image": source}},
-        "i2v": {"class_type": "WanImageToVideo", "inputs": {
-            "positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "start_image": ["image", 0],
-            "width": w["width"], "height": w["height"], "length": w["frames"], "batch_size": 1}},
     }
+    start = None
+    for k, src in enumerate(sources):
+        nodes[f"image{k}"] = {"class_type": "LoadImage", "inputs": {"image": src}}
+        if start is None:
+            start = [f"image{k}", 0]
+        else:
+            nodes[f"batch{k}"] = {"class_type": "ImageBatch", "inputs": {"image1": start, "image2": [f"image{k}", 0]}}
+            start = [f"batch{k}", 0]
+    common = {"positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "start_image": start,
+              "width": w["width"], "height": w["height"], "length": w["frames"], "batch_size": 1}
+    if end:
+        nodes["end"] = {"class_type": "LoadImage", "inputs": {"image": end}}
+        nodes["i2v"] = {"class_type": "WanFirstLastFrameToVideo", "inputs": common | {"end_image": ["end", 0]}}
+    else:
+        nodes["i2v"] = {"class_type": "WanImageToVideo", "inputs": common}
     for i, tag in enumerate(("high", "low")):
         nodes[f"unet_{tag}"] = {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": w[tag]}}
         base = [f"unet_{tag}", 0]
