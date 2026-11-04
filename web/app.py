@@ -82,10 +82,17 @@ def db() -> sqlite3.Connection:
     return conn
 
 
+def clip_seconds(checkpoint: str | None) -> int:
+    """A clip's length: long clips carry it in their label ("... 60s"), the rest are 5 seconds."""
+    m = re.search(r" (\d+)s$", checkpoint or "")
+    return int(m.group(1)) if m else 5
+
+
 def item(row) -> dict:
     return {"id": row["id"], "night": row["night"], "medium": row["medium"], "kind": row["kind"],
             "score": round(row["score"] or 0, 3), "liked": row["action"] == "like",
             "animated": bool(row["animated"]), "caption": row["caption"] or "",
+            "seconds": clip_seconds(row["checkpoint"]) if row["kind"] == "video" else None,
             "posted": row["posted_at"] or row["created_at"],
             "persona": {"handle": row["persona"], "name": row["name"] or row["persona"],
                         "avatar": bool(row["avatar"])} if row["persona"] else None}
@@ -106,6 +113,7 @@ def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
         where.append("g.status = 'feed' AND p.active = 1 AND (f.action IS NULL OR f.action = 'like')")
         order = "coalesce(g.posted_at, g.created_at) DESC, g.id DESC"
     sql = (f"SELECT g.id, g.night, g.medium, g.score, g.kind, g.caption, g.persona, g.posted_at, g.created_at,"
+           f" g.checkpoint,"
            f" f.action, p.name, p.avatar,"
            f" EXISTS(SELECT 1 FROM generations v WHERE v.source_generation = g.id AND v.kind = 'video'"
            f"        AND v.status IN ('queued', 'generated', 'feed')) AS animated FROM generations g"
