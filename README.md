@@ -166,7 +166,7 @@ Then, for a style that's already trained (it uses the style's source page and me
 16 frames of each with the same checks as style images (one flagged frame drops the whole
 clip, and it's deleted), then converts the rest to 16 fps with a written motion caption.
 Training takes about 3 hours per half at the default 1500 steps on a 12 GB GPU, and holds
-nightly posts while it runs. It needs about 15 GB of RAM; `VIDEO_TRAIN_MEM_LIMIT` caps it
+nightly posts while it runs. It needs about 16 GB of RAM while loading, 13 GB after; `VIDEO_TRAIN_MEM_LIMIT` caps it
 with no swap, so if it doesn't fit only the trainer is stopped.
 
 ## Safety rules (built into the worker, not optional settings)

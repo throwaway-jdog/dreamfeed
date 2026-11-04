@@ -143,6 +143,7 @@ services:
     environment:
       HF_HOME: /models/hf
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      MALLOC_ARENA_MAX: "2"     # fewer malloc pools: less fragmentation while the 14B model loads
       VIDEO_TRAIN_RES: ${VIDEO_TRAIN_RES:?set VIDEO_TRAIN_RES in .env}
       VIDEO_TRAIN_FRAMES: ${VIDEO_TRAIN_FRAMES:?set VIDEO_TRAIN_FRAMES in .env}
       VIDEO_TRAIN_BLOCKS_TO_SWAP: ${VIDEO_TRAIN_BLOCKS_TO_SWAP:?set VIDEO_TRAIN_BLOCKS_TO_SWAP in .env}
