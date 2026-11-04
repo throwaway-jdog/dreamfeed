@@ -37,6 +37,7 @@ services:
       VIDEO_ACT_LORA_HIGH: ${VIDEO_ACT_LORA_HIGH-}
       VIDEO_ACT_LORA_LOW: ${VIDEO_ACT_LORA_LOW-}
       VIDEO_ACT_LORA_STRENGTH: ${VIDEO_ACT_LORA_STRENGTH:-0.8}
+      VIDEO_STYLE_LORA_STRENGTH: ${VIDEO_STYLE_LORA_STRENGTH:-0.7}   # a style's own video LoRA (README: Video LoRAs)
       CAPTION_MODEL: ${CAPTION_MODEL-}       # text model that writes each post's caption; empty: example captions
       TZ: ${TZ:?set TZ in .env}
     volumes:
@@ -117,6 +118,39 @@ services:
     volumes:
       - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora
       - ./models:/models                      # reads checkpoints, writes loras/style-*.safetensors
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    logging:
+      options: { max-size: 10m, max-file: "3" }
+
+  # Video-LoRA training (Wan 2.2 I2V), from clips prepared by `dreamfeed video-prep NAME`.
+  # Not started with the stack; run by hand, one half of Wan at a time:
+  #   docker compose run --rm video-trainer NAME high|low [STEPS]
+  video-trainer:
+    build: ./video-trainer
+    image: dreamfeed-video-trainer:local
+    profiles: [video-training]
+    user: "${PUID}:${PGID}"
+    shm_size: 4g
+    # RAM cap with no swap: if training doesn't fit, only it is killed, never other services.
+    mem_limit: ${VIDEO_TRAIN_MEM_LIMIT:?set VIDEO_TRAIN_MEM_LIMIT in .env}
+    memswap_limit: ${VIDEO_TRAIN_MEM_LIMIT}
+    environment:
+      HF_HOME: /models/hf
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      VIDEO_TRAIN_RES: ${VIDEO_TRAIN_RES:?set VIDEO_TRAIN_RES in .env}
+      VIDEO_TRAIN_FRAMES: ${VIDEO_TRAIN_FRAMES:?set VIDEO_TRAIN_FRAMES in .env}
+      VIDEO_TRAIN_BLOCKS_TO_SWAP: ${VIDEO_TRAIN_BLOCKS_TO_SWAP:?set VIDEO_TRAIN_BLOCKS_TO_SWAP in .env}
+    volumes:
+      - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora
+      # Full-precision Wan 2.2 I2V halves, its T5 and VAE (about 69 GB; a slow disk is fine)
+      - ${VIDEO_TRAIN_MODELS:?set VIDEO_TRAIN_MODELS in .env}:/train-models:ro
+      - ./models:/models                      # writes loras/video-*.safetensors
     deploy:
       resources:
         reservations:

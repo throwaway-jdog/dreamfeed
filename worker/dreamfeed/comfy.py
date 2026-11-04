@@ -43,14 +43,15 @@ class Comfy:
 
     def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, strict: bool = False,
-                act_lora: tuple[str, str, float] | None = None) -> Path:
-        """Animate a (generated, already checked) image into a ~5 second clip. act_lora: a Wan
-        motion LoRA (high-noise file, low-noise file, strength) for clips of a sex act."""
+                loras: list[tuple[str, str, float]] = ()) -> Path:
+        """Animate a (generated, already checked) image into a ~5 second clip. loras: Wan video
+        LoRAs as (high-noise file, low-noise file, strength), e.g. a sex act's motion LoRA and
+        the persona's style video LoRA, applied in order."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start("video")
         source = self.upload(image)
         if engine == "wan":
-            workflow = _wan_workflow(source, positive, negative, seed, f"{subdir}/{name}", act_lora)
+            workflow = _wan_workflow(source, positive, negative, seed, f"{subdir}/{name}", loras)
         else:
             workflow = _ltx_workflow(source, positive, negative, seed, f"{subdir}/{name}")
         return self._run(workflow, timeout=1800)
@@ -146,7 +147,7 @@ def _save_video(images: list, fps: float, prefix: str) -> dict:
 
 
 def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: str,
-                  act_lora: tuple[str, str, float] | None = None) -> dict:
+                  loras: list[tuple[str, str, float]] = ()) -> dict:
     w = WAN
     nodes = {
         "text": {"class_type": "CLIPLoader", "inputs": {"clip_name": w["text"], "type": "wan"}},
@@ -158,13 +159,13 @@ def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: 
             "positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "start_image": ["image", 0],
             "width": w["width"], "height": w["height"], "length": w["frames"], "batch_size": 1}},
     }
-    for tag, act_file in (("high", act_lora and act_lora[0]), ("low", act_lora and act_lora[1])):
+    for i, tag in enumerate(("high", "low")):
         nodes[f"unet_{tag}"] = {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": w[tag]}}
         base = [f"unet_{tag}", 0]
-        if act_file:
-            nodes[f"act_{tag}"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
-                "model": base, "lora_name": act_file, "strength_model": act_lora[2]}}
-            base = [f"act_{tag}", 0]
+        for n, lora in enumerate(loras):
+            nodes[f"lora{n}_{tag}"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
+                "model": base, "lora_name": lora[i], "strength_model": lora[2]}}
+            base = [f"lora{n}_{tag}", 0]
         nodes[f"raw_{tag}"] = {"class_type": "ModelSamplingSD3", "inputs": {"model": base, "shift": w["shift"]}}
         nodes[f"fast_lora_{tag}"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
             "model": base, "lora_name": w[f"lora_{tag}"], "strength_model": 1.0}}

@@ -76,5 +76,7 @@ class GenConfig:
         if bool(high) != bool(low):
             sys.exit("dreamfeed: set both VIDEO_ACT_LORA_HIGH and VIDEO_ACT_LORA_LOW, or neither")
         self.act_lora = (high, low, opt_float("VIDEO_ACT_LORA_STRENGTH", 0.8)) if high else None
+        # Strength of a style's own video LoRA (videolora.py), for personas posting in that style.
+        self.video_style_strength = opt_float("VIDEO_STYLE_LORA_STRENGTH", 0.7)
         # Feed images you haven't liked are deleted after this many days.
         self.feed_keep_days = opt_float("FEED_KEEP_DAYS", 14)

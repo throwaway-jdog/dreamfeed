@@ -39,7 +39,9 @@ CHATTER = re.compile(  # artist posts about business, not the picture
     r"poll|vote|price|\$\d+|war|army|country|election|president|politic\w*)\b", re.I)
 # Only posts in English (Latin letters) are used: names and blocked words can't be checked in others.
 FOREIGN = re.compile(r"[^\W\da-zA-Z_À-ɏ]")
-REFUSAL = re.compile(r"\b(i can'?t|i cannot|i'm sorry|as an ai|i won'?t)\b", re.I)
+REFUSAL = re.compile(r"\b(i can'?t|i cannot|i'm sorry|as an ai|i won'?t|i'?m (unable|not able)|i am (unable|not able)|"
+                     r"unable to (generate|create|write|help|provide|assist)|i (must|have to) decline|"
+                     r"not (appropriate|something i can))\b", re.I)
 WORD = re.compile(r"[A-Za-z][A-Za-z']*")
 
 SYSTEM = (

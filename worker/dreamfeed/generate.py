@@ -437,6 +437,12 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
         if row:   # posts from before tags were saved: their prompt's tags instead
             picture[src] = [t.strip() for t in (row[0] or row[1]).split(",") if t.strip()]
     plans = motion.plan(cfg, list(picture.items()), motion_text.strip())
+    from . import personas as people, videolora
+    style = {}   # persona handle -> its style's video LoRA, if trained
+    for p in people.load(cfg.personas_path):
+        v = p.lora and videolora.for_style(cfg, p.lora[0])
+        if v:
+            style[p.handle] = v
     _progress(conn, night, "animating", 0, len(sources))
     made = 0
     try:
@@ -454,21 +460,24 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
             medium, prompt, file, handle, caption, strict = row
             act, written = plans.get(src, (None, None))
             use_lora = gen.act_lora if act else None
+            own = style.get(handle)
+            loras = ([use_lora] if use_lora else []) + ([(own[0], own[1], gen.video_style_strength)] if own else [])
             # Wan follows sentences; without a written one, the act's fixed description and the
             # picture's tags keep the clip consistent with the image.
             body = written or ", ".join(p for p in (act.motion if act else "", prompt) if p)
-            motion_prompt = ", ".join(p for p in (act.trigger if use_lora else "", motion_text.strip(), body,
-                                                  MOTION[medium]) if p)
+            motion_prompt = ", ".join(p for p in (own[2] if own else "", act.trigger if use_lora else "",
+                                                  motion_text.strip(), body, MOTION[medium]) if p)
             seed = rng.randrange(2 ** 32)
             with conn:
                 gid = conn.execute(
                     "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
                     " caption, kind, status) VALUES (?,?,?,?,?,?,?,?, 'video', 'queued')",
-                    (night, medium, "wan2.2-i2v" + (f" +{act.name}" if use_lora else ""), motion_prompt, seed,
+                    (night, medium, "wan2.2-i2v" + (f" +{act.name}" if use_lora else "") + (" +style" if own else ""),
+                     motion_prompt, seed,
                      src, handle, caption)).lastrowid
             try:
                 path = comfy.img2vid("wan", out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
-                                     strict=bool(strict), act_lora=use_lora)
+                                     strict=bool(strict), loras=loras)
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue

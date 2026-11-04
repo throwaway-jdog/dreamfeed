@@ -11,6 +11,8 @@ python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
 python -m dreamfeed job ID    Run a request queued from the dashboard (posts or clips).
 python -m dreamfeed lora-prep NAME --medium M --trigger W
                               Check and caption data/lora/NAME/raw for style-LoRA training.
+python -m dreamfeed video-prep NAME [--limit N] [--no-download]
+                              Download, check and caption a style's videos for a video LoRA.
 python -m dreamfeed report    Per-persona posts, likes and drops, and recent runs.
 """
 import argparse
@@ -72,6 +74,9 @@ def main() -> None:
     elif cmd == "lora-prep":
         from .lora import main as lora_prep
         lora_prep(rest)
+    elif cmd == "video-prep":
+        from .videolora import main as video_prep
+        video_prep(rest)
     elif cmd == "report":
         from .report import main as report
         report(rest)

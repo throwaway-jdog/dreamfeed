@@ -141,10 +141,38 @@ By hand: put images in `data/lora/NAME/raw/`, then
        docker compose exec worker python -m dreamfeed lora-prep NAME --medium furry --trigger namestyle
        docker compose run --rm trainer NAME BASE_CHECKPOINT
 
+### Video LoRAs
+
+A style can also have a video LoRA, trained on the artist's own animations, so clips of
+personas in that style move the way the artist animates. Wan 2.2 has two halves, so it's two
+files: `models/loras/video-NAME-high.safetensors` (motion) and `-low` (detail), about 300 MB
+each. Clips use them automatically, with the trigger word `NAMEanim` (underscores removed)
+at `VIDEO_STYLE_LORA_STRENGTH`, on top of the sex-act LoRA when the picture has one.
+
+Training needs the full-precision Wan 2.2 I2V weights (about 69 GB, read once per run, so a
+slow disk is fine) in `VIDEO_TRAIN_MODELS`:
+
+    wan2.2_i2v_high_noise_14B_fp16.safetensors, wan2.2_i2v_low_noise_14B_fp16.safetensors
+        from Comfy-Org/Wan_2.2_ComfyUI_Repackaged (split_files/diffusion_models)
+    umt5-xxl-enc-bf16.pth (models_t5_umt5-xxl-enc-bf16.pth) and wan2.1_vae.pth (Wan2.1_VAE.pth)
+        from Wan-AI/Wan2.1-I2V-14B-720P
+
+Then, for a style that's already trained (it uses the style's source page and medium):
+
+    docker compose exec worker python -m dreamfeed video-prep NAME
+    docker compose --profile video-training run --rm video-trainer NAME both
+
+`video-prep` downloads the artist's videos into `data/lora/NAME/video_raw/`, checks at least
+16 frames of each with the same checks as style images (one flagged frame drops the whole
+clip, and it's deleted), then converts the rest to 16 fps with a written motion caption.
+Training takes about 3 hours per half at the default 1500 steps on a 12 GB GPU, and holds
+nightly posts while it runs. It needs about 15 GB of RAM; `VIDEO_TRAIN_MEM_LIMIT` caps it
+with no swap, so if it doesn't fit only the trainer is stopped.
+
 ## Safety rules (built into the worker, not optional settings)
 
-- **Style LoRAs only learn drawings, never real people.** Training images that look like
-  photographs are dropped, and every other one goes through the checks below at the strict
+- **Style and video LoRAs only learn drawings, never real people.** Training images and
+  clips that look like photographs are dropped, and every other one goes through the checks below at the strict
   threshold first; flagged images are deleted.
 - **Adults only, in every medium.** Every prompt includes an explicit adult descriptor in
   that medium's style (e.g. `mature female, adult` for anime, `adult, anthro` for
