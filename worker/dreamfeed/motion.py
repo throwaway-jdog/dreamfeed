@@ -9,7 +9,6 @@ Wan reads plain sentences better than booru tags, so with CAPTION_MODEL set the 
 describes the motion for each clip from the picture's tags; otherwise a fixed description of
 the act is used. Descriptions go through the same checks as captions.
 """
-import re
 from dataclasses import dataclass
 
 from . import safety
@@ -61,11 +60,12 @@ SYSTEM = (
 TRIES = 3
 
 
-def describe(writer, tags: list[str], act: Act | None, extra: str = "") -> str | None:
+def describe(writer, tags: list[str], act: Act | None, extra: str = "", context: str = "") -> str | None:
     """A checked motion description, or None (the caller uses the act's fixed one)."""
     user = (f"The picture: {', '.join(tags)}"
             + (f"\nThe act: {act.name} ({act.motion})" if act else "")
             + (f"\nThe viewer asked for: {extra}" if extra else "")
+            + (f"\n{context}" if context else "")
             + "\nWrite the motion description.")
     for _ in range(TRIES):
         text = " ".join(writer.ask(SYSTEM, user, max_new_tokens=120).split())
@@ -100,53 +100,36 @@ def plan(cfg, items: list[tuple[int, list[str]]], extra: str = "") -> dict[int, 
 
 
 # ---- long clips: one description per 5-second piece -----------------------------------------
+# One request per piece (the text model refuses a whole numbered list but writes single
+# descriptions fine), each told where it is in the clip and what the piece before showed.
 
-BEATS_SYSTEM = (
-    "You write the motion prompts for a {seconds}-second animated clip made from one adult "
-    "illustration. The clip is made as {n} consecutive 5-second parts, each starting where the last "
-    "one ended. Write exactly {n} numbered lines, one per part, each one or two plain sentences "
-    "about what moves and how: body movement, rhythm, speed, hair, clothes and expressions. Make the "
-    "motion develop over the clip (shifts in position, pace building and easing, changes of "
-    "expression) while the characters, clothes and setting stay the same. Be explicit and concrete "
-    "about sexual motion when the picture is sexual. Every character is an adult. Never name "
-    "characters or series, never mention ages or anything young. Don't describe the camera unless "
-    "it moves. Reply with the numbered lines only.")
-BEAT_LINE = re.compile(r"^\s*\d+\s*[.):-]\s*(.+?)\s*$")
+ARC = ("it starts slowly and gently, settling in",
+       "the pace picks up a little",
+       "a small change: a shift in pose, a look back, a new expression",
+       "a steady, stronger rhythm",
+       "it builds toward the most intense moment",
+       "the most intense moment",
+       "it eases off, slower and softer",
+       "it slows to a calm, relaxed ending")
 
 
-def _passes(text: str) -> bool:
-    from .captions import REFUSAL, _names_in
-    return bool(text) and len(text) < 600 and not REFUSAL.search(text) and \
-        not safety.caption_blocked(text) and "[" not in text and not _names_in(text, set())
+def _arc(i: int, n: int) -> str:
+    return ARC[round(i * (len(ARC) - 1) / max(1, n - 1))] if n > 1 else ARC[0]
 
 
 def describe_beats(writer, tags: list[str], act: Act | None, n: int, extra: str = "") -> list[str | None]:
     """n checked descriptions, one per piece; None where nothing passed (the caller falls back)."""
-    user = (f"The picture: {', '.join(tags)}"
-            + (f"\nThe act: {act.name} ({act.motion})" if act else "")
-            + (f"\nThe viewer asked for: {extra}" if extra else "")
-            + f"\nWrite the {n} numbered lines.")
-    system = BEATS_SYSTEM.format(seconds=n * 5, n=n)
-    best: list[str] = []
-    for _ in range(TRIES):
-        raw = writer.ask(system, user, max_new_tokens=80 * n)
-        if _refused(raw):   # one refusal line poisons the rest
-            continue
-        lines = [m.group(1) for m in map(BEAT_LINE.match, raw.splitlines()) if m]
-        good = [" ".join(t.split()) for t in lines if _passes(" ".join(t.split()))]
-        if len(good) > len(best):
-            best = good
-        if len(best) >= n:
-            break
-    if not best:
-        return [None] * n
-    # Too few lines: stretch the ones there are over the clip, in order.
-    return [best[i * len(best) // n] for i in range(n)]
-
-
-def _refused(text: str) -> bool:
-    from .captions import REFUSAL
-    return bool(REFUSAL.search(text))
+    out, prev = [], ""
+    for i in range(n):
+        where = (f"This is part {i + 1} of {n} of a {n * 5}-second clip, made of 5-second parts that "
+                 f"follow each other. In this part: {_arc(i, n)}."
+                 + (f" The part before showed: {prev} Continue from there without repeating it." if prev else ""))
+        text = describe(writer, tags, act, extra, context=where)
+        if text and not text.endswith(".") and "." in text:   # cut off mid-sentence
+            text = text[:text.rfind(".") + 1]
+        out.append(text)
+        prev = text or prev
+    return out
 
 
 def plan_beats(cfg, items: list[tuple[int, list[str]]], n: int,

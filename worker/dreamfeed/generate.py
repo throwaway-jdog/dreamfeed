@@ -475,7 +475,8 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
             fallback = ", ".join(p for p in (act.motion if act else "", prompt) if p)
             prompts = [", ".join(p for p in (own[2] if own else "", act.trigger if use_lora else "",
                                              motion_text.strip(), body or fallback, MOTION[medium]) if p)
-                       for body in written]
+                       for body in (written if pieces == 1 else   # unwritten pieces still follow the arc
+                                    [b or f"{fallback}, {motion._arc(i, pieces)}" for i, b in enumerate(written)])]
             seeds = [rng.randrange(2 ** 32) for _ in prompts]
             label = ("wan2.2-i2v" + (f" +{act.name}" if use_lora else "") + (" +style" if own else "")
                      + (f" {seconds}s" if pieces > 1 else ""))
