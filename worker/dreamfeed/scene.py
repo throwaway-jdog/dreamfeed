@@ -34,15 +34,20 @@ POSITIONS = {
     "missionary": ("missionary, on back, spread legs, sex, vaginal, penis", "missionary"),
     "doggy": ("doggystyle, sex from behind, all fours, sex, vaginal, penis", "doggy"),
     "cowgirl": ("cowgirl position, girl on top, straddling, sex, vaginal, penis", "cowgirl"),
+    "reverse cowgirl": ("reverse cowgirl position, girl on top, from behind, sex, vaginal, penis", "reverse cowgirl"),
     "blowjob": ("fellatio, oral, penis, kneeling, looking up", "blowjob"),
 }
 OPENERS = ("missionary", "blowjob")
-MIDDLE = ("doggy", "cowgirl", "missionary")
+MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl")
 
 NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejaculation, cum string"
 # Every shot: the partner mustn't turn into a second copy of her, and no artist text.
-SCENE_NEGATIVE = "2girls, multiple girls, twins, watermark, signature, text, logo, patreon username"
+SCENE_NEGATIVE = ("2girls, multiple girls, twins, watermark, signature, text, logo, patreon username, "
+                  "comic, multiple views, panels, split screen, inset")
+PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", "panel"}   # a shot is one picture
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
+PARTNER_LOOKS = ("dark-skinned male", "grey skin", "tan skin", "muscular male, dark skin")   # one per scene
+CROP = 0.04   # off the top and bottom of each shot: style LoRAs learn the artist's signature strip
 
 # Tags that belong to what's happening, not to who and where: dropped from the post's own
 # tags to get the cast and setting.
@@ -60,16 +65,20 @@ class Shot:
     act: str | None    # the act the picture must show (and the motion LoRA for the clip)
     cum: bool          # may show cum
     pace: str          # for the motion description: how fast and intense
+    loops: int = 2     # times the 5-second clip plays before the cut
+    climax: str = ""   # motion.CLIMAXES name: the clip adds that LoRA to the position's, and plays
+                       # once without looping (a climax builds; it doesn't reset)
 
 
-def cast_tags(prompt: str) -> str:
-    """The post's prompt minus everything that belongs to the act: who and where."""
+def cast_tags(prompt: str, partner: str = "") -> str:
+    """The post's prompt minus everything that belongs to the act: who and where. partner: his
+    look, the same in every shot of a scene."""
     keep = [t.strip() for t in prompt.split(",") if t.strip() and not SCENE_ONLY.search(t)]
     keep = [t for t in keep if t not in ("duo", "male", "1boy", PARTNER)]
     # Rating first, then the pair, then her.
     rating = [t for t in keep if t in ("nsfw", "explicit", "questionable")]
     rest = [t for t in keep if t not in rating]
-    return ", ".join(rating + ["duo", PARTNER] + rest)
+    return ", ".join(rating + ["duo", PARTNER] + ([partner] if partner else []) + rest)
 
 
 def plan(rng: random.Random) -> list[Shot]:
@@ -83,25 +92,37 @@ def plan(rng: random.Random) -> list[Shot]:
         Shot(f"opening: {opener}", f"{pos(opener)}, blush, half-closed eyes", act(opener), False,
              "slow and gentle, just starting"),
         Shot(f"{a}", f"{pos(a)}, blush, open mouth", act(a), False, "a steady rhythm"),
-        Shot(f"{a}, close-up", f"{pos(a)}, close-up, upper body, face focus, blush, open mouth, sweat, "
-             "heavy breathing", act(a), False, "faster, she's lost in it"),
+        # No "close-up" here: in this kind of art it draws inset panels.
+        Shot(f"{a}, from the side", f"(from side:1.3), {pos(a)}, blush, open mouth, sweat, heavy breathing",
+             act(a), False, "faster, she's lost in it"),
         Shot(f"{b}", f"{pos(b)}, open mouth, sweat, heavy breathing, motion lines", act(b), False,
              "fast and intense, building toward climax"),
         Shot(f"climax: {b}", f"{pos(b)}, orgasm, cum in pussy, creampie, cum overflow, trembling, open mouth, "
-             "sweat", act(b), True, "the climax: he cums inside her, both shuddering"),
+             "sweat", act(b), True, "the climax: he cums inside her, both shuddering", loops=1, climax="creampie"),
         Shot("aftermath", "after sex, lying, on back, cum in pussy, cum on body, sweat, heavy breathing, "
-             "half-closed eyes, smile", None, True, "slow, catching their breath"),
+             "half-closed eyes, smile", None, True, "slow, catching their breath", loops=1),
     ]
+
+
+def _crop(path: Path) -> None:
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        w, h = im.size
+        cut = round(h * CROP)
+        im = im.crop((0, cut, w, h - cut))
+    im.save(path)
 
 
 def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
          rng: random.Random) -> list[tuple[Path | None, str]]:
-    """One checked picture per shot: (path or None, note). Candidates that lose are deleted."""
+    """One checked picture per shot: (path or None, note). Candidates that lose are deleted;
+    winners are cropped (CROP)."""
     from . import captions
     from .checks import drop_reason
     from .generate import _feral
     from .vision import Vision
-    cast = cast_tags(post["prompt"])
+    cast = cast_tags(post["prompt"], rng.choice(PARTNER_LOOKS))
+    print(f"scene: cast and setting: {cast}", flush=True)
     lora = persona.lora_for(post["prompt"]) if persona else None
     negative = persona.negative if persona else ""
     cands: list[list[Path]] = []
@@ -127,6 +148,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 a = vision.analyze([img])
                 if drop_reason(a, post["medium"], [img], cfg, strict=post["strict"]) or _feral(a):
                     continue
+                if PANELS & set(captions.picture(a.general)):
+                    continue
                 act = motion.act_for(captions.picture(a.general))
                 # Showing the intended act matters more than looking like the post.
                 fits = (act.name if act else None) == shot.act
@@ -135,6 +158,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             for p in paths:
                 if not best or p != best[2]:
                     p.unlink(missing_ok=True)
+            if best:
+                _crop(best[2])
             out.append((best[2], f"{'' if best[0] else 'act not seen, '}look {best[1]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
@@ -193,10 +218,135 @@ def preview(args: list[str]) -> None:
     out_dir = cfg.data_dir / "generated"
     subdir = f"scene-preview-{a.post}"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
-    print(f"scene-preview: cast and setting: {cast_tags(post['prompt'])}", flush=True)
     pictures = draw(cfg, comfy, persona, post, shots, subdir, f"post{a.post}", rng)
     sheet = contact_sheet(post["file"], shots, pictures, out_dir / subdir / "contact-sheet.jpg")
+    from dataclasses import asdict
     (out_dir / subdir / "plan.json").write_text(json.dumps(
-        [{"shot": s.name, "tags": s.tags, "picture": str(p) if p else None, "note": n}
-         for s, (p, n) in zip(shots, pictures)], indent=1))
+        [asdict(s) | {"picture": str(p) if p else None, "note": n} for s, (p, n) in zip(shots, pictures)], indent=1))
     print(f"scene-preview: {sheet}", flush=True)
+
+
+def _shot_prompt(writer, cast: str, shot: Shot, act) -> str | None:
+    """A written, checked description of the shot's motion for its point in the scene."""
+    where = (f"This is one shot of a longer scene: {shot.pace}. The clip loops, so the motion is a "
+             f"repeating cycle that ends where it started.")
+    return motion.describe(writer, [t.strip() for t in f"{cast}, {shot.tags}".split(",")], act, context=where)
+
+
+def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None], out: Path,
+           rng: random.Random, progress=None, cancelled=lambda: False) -> tuple[Path | None, list[str]]:
+    """Animate each shot's picture into a 5-second loop (Wan, first and last frame the same
+    picture), check it, play it shot.loops times, and cut to the next. Returns the scene file
+    (None if no shot passed) and a note per shot."""
+    import subprocess
+    from . import personas as people, videolora
+    from .comfy import WAN
+    from .generate import MOTION, VIDEO_CHECK_FRAMES, _check_frames
+    from .longclip import PIECE_TRIES, _frames, _sample
+    gen = cfg.generation()
+    persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
+    own = persona and persona.lora and videolora.for_style(cfg, persona.lora[0])
+    acts = {a.name: a for a in motion.ACTS}
+    cast = cast_tags(post["prompt"])
+    # Descriptions first: the text model and Wan don't share the GPU.
+    comfy.stop()
+    texts = [None] * len(shots)
+    if cfg.caption_model:
+        from .captions import Writer
+        writer = Writer(cfg.caption_model)
+        try:
+            for i, shot in enumerate(shots):
+                clip_act = motion.CLIMAXES.get(shot.climax) or acts.get(shot.act)
+                texts[i] = _shot_prompt(writer, cast, shot, clip_act)
+        finally:
+            writer.close()
+    notes, writer = [], None
+    try:
+        for i, (shot, pic) in enumerate(zip(shots, pictures)):
+            if cancelled():
+                notes.append("cancelled")
+                break
+            if pic is None:
+                notes.append("no picture")
+                continue
+            # The position's motion LoRA, plus the climax's on a climax shot.
+            used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
+            with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
+            with_lora = [(a, l) for a, l in with_lora if l]
+            loras = [l for _, l in with_lora] + ([(own[0], own[1], gen.video_style_strength)] if own else [])
+            clip_act = used[-1] if used else None
+            body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
+            prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
+                                           body, MOTION[post["medium"]]) if p)
+            frames = None
+            for attempt in range(PIECE_TRIES):
+                try:
+                    path = comfy.img2vid("wan", pic, post["medium"], prompt, rng.randrange(2 ** 32), out.parent.name,
+                                         f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
+                                         end=None if shot.climax else pic)
+                finally:
+                    comfy.stop()
+                frames = _frames(path)
+                path.unlink(missing_ok=True)
+                reason = _check_frames(cfg, _sample(frames, VIDEO_CHECK_FRAMES), post["medium"], post["strict"])
+                if not reason:
+                    break
+                print(f"scene: shot {i + 1} try {attempt + 1} dropped ({reason[0]}: {reason[1]})", flush=True)
+                frames = None
+            if frames is None:
+                notes.append(f"dropped after {PIECE_TRIES} tries")
+                continue
+            if writer is None:
+                h, w = frames.shape[1:3]
+                writer = subprocess.Popen(
+                    ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+                     "-r", str(WAN["fps"]), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+                     "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
+            cycle = (frames if shot.climax else frames[:-1]).tobytes()   # a loop's last frame is its first
+            for _ in range(shot.loops):
+                writer.stdin.write(cycle)
+            notes.append("ok " + " + ".join(l[0].split("-high")[0] for _, l in with_lora))
+            print(f"scene: shot {i + 1} {shot.name}: {notes[-1]}", flush=True)
+            if progress:
+                progress(i + 1, len(shots))
+        if writer is None:
+            return None, notes
+        writer.stdin.close()
+        if writer.wait() != 0:
+            raise RuntimeError("ffmpeg couldn't join the shots")
+        writer = None
+        return out, notes
+    except BaseException:
+        if writer:
+            writer.kill()
+            writer.wait()
+        out.unlink(missing_ok=True)
+        raise
+
+
+def render_preview(args: list[str]) -> None:
+    """scene-render POST_ID [--shots 4,5]: animate the pictures scene-preview drew."""
+    from . import db
+    from .comfy import Comfy
+    from .config import Config
+    from dataclasses import fields
+    ap = argparse.ArgumentParser(prog="dreamfeed scene-render")
+    ap.add_argument("post", type=int)
+    ap.add_argument("--shots", help="which shots, e.g. 4,5 (default all)")
+    a = ap.parse_args(args)
+    cfg = Config()
+    gen = cfg.generation()
+    conn = db.connect(cfg.db_path)
+    post = load_post(cfg, conn, a.post)
+    out_dir = cfg.data_dir / "generated"
+    subdir = out_dir / f"scene-preview-{a.post}"
+    saved = json.loads((subdir / "plan.json").read_text())
+    names = {f.name for f in fields(Shot)}
+    shots = [Shot(**{k: v for k, v in d.items() if k in names}) for d in saved]
+    pics = [Path(d["picture"]) if d["picture"] else None for d in saved]
+    if a.shots:
+        pick = [int(x) - 1 for x in a.shots.split(",")]
+        shots, pics = [shots[i] for i in pick], [pics[i] for i in pick]
+    comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
+    path, notes = render(cfg, comfy, post, shots, pics, subdir / "scene.mp4", random.Random())
+    print(f"scene-render: {path} {notes}", flush=True)

@@ -20,6 +20,8 @@ class Act:
     trigger: str           # the motion LoRA's trigger word
     tags: tuple            # any of these booru tags in the picture means this act
     motion: str            # fallback description when no text model writes one
+    lora: str = ""         # its own motion LoRA (models/loras/NAME-high/-low.safetensors); "" = VIDEO_ACT_LORA
+    strength: float = 0.8
 
 
 # In priority order: the first that matches wins (a double blowjob also has "fellatio").
@@ -28,7 +30,10 @@ ACTS = (
         "two partners take turns sucking his penis, heads bobbing in a steady rhythm"),
     Act("blowjob", "bl0wj0b", ("fellatio", "irrumatio", "deepthroat", "licking penis"),
         "she sucks his penis, her head bobbing up and down in a steady rhythm"),
-    Act("cowgirl", "c0wg1rl", ("cowgirl position", "reverse cowgirl position", "girl on top", "straddling"),
+    Act("reverse cowgirl", "r3v3rs3_c0wg1rl", ("reverse cowgirl position",),
+        "she rides him facing away, her hips bouncing up and down in a steady rhythm, her ass bouncing",
+        lora="wan2.2-i2v-revcowgirl"),
+    Act("cowgirl", "c0wg1rl", ("cowgirl position", "girl on top", "straddling"),
         "she rides him, her hips bouncing up and down in a steady rhythm, breasts bouncing"),
     Act("doggy", "d0gg1e", ("doggystyle", "sex from behind", "top-down bottom-up", "from behind", "all fours"),
         "he thrusts into her from behind in a steady rhythm, her body rocking forward with each thrust"),
@@ -36,6 +41,29 @@ ACTS = (
         "he thrusts into her as she lies on her back, her body rocking with each thrust, breasts bouncing"),
 )
 SEX = {"sex", "vaginal", "anal", "penetration", "imminent penetration"}
+
+# Climaxes, for the last shot of a scene (not picked from a picture's tags).
+CREAMPIE = Act("creampie", "cr34mp13", ("creampie", "cum in pussy"),
+               "thick white cum pours out of her vagina around his penis as he thrusts slowly and deep",
+               lora="wan2.2-i2v-creampie", strength=0.8)
+FACIAL = Act("facial", "", ("facial", "cum on face"),
+             "cum shoots out of his penis and lands on her face and tongue and mouth",
+             lora="wan2.2-i2v-facial", strength=1.0)
+CUMSHOT = Act("cumshot", "f4c3spl4sh", ("cum on body", "ejaculation"),
+              "he pulls out and cum shoots out of his penis onto her body in thick spurts",
+              lora="wan2.2-i2v-cumshot", strength=1.0)
+CLIMAXES = {a.name: a for a in (CREAMPIE, FACIAL, CUMSHOT)}
+
+
+def lora_for(act: Act, default: tuple | None, models_dir) -> tuple | None:
+    """(high file, low file, strength) for an act's motion LoRA: its own if it has one and both
+    files are there, otherwise VIDEO_ACT_LORA (default)."""
+    if not act.lora:
+        return default
+    files = (f"{act.lora}-high.safetensors", f"{act.lora}-low.safetensors")
+    if all((models_dir / "loras" / f).is_file() for f in files):
+        return (*files, act.strength)
+    return None
 
 
 def act_for(tags: list[str]) -> Act | None:
@@ -45,7 +73,7 @@ def act_for(tags: list[str]) -> Act | None:
         if not hit:
             continue
         # Positions only count with sex in the picture (lying on her back alone is a pinup).
-        if act.trigger in ("c0wg1rl", "d0gg1e", "m15510n4ry") and not have & SEX:
+        if act.trigger in ("r3v3rs3_c0wg1rl", "c0wg1rl", "d0gg1e", "m15510n4ry") and not have & SEX:
             continue
         return act
     return None

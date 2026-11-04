@@ -81,6 +81,9 @@ def main() -> None:
     elif cmd == "scene-preview":
         from .scene import preview
         preview(rest)
+    elif cmd == "scene-render":
+        from .scene import render_preview
+        render_preview(rest)
     elif cmd == "report":
         from .report import main as report
         report(rest)

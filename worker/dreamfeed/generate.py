@@ -469,7 +469,7 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                 continue
             medium, prompt, file, handle, caption, strict, ckpt = row
             act, written = plans.get(src, (None, [None] * pieces))
-            use_lora = gen.act_lora if act else None
+            use_lora = motion.lora_for(act, gen.act_lora, cfg.models_dir) if act else None
             own = style.get(handle)
             loras = ([use_lora] if use_lora else []) + ([(own[0], own[1], gen.video_style_strength)] if own else [])
             # Wan follows sentences; without a written one, the act's fixed description and the
