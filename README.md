@@ -124,7 +124,8 @@ From an image in the viewer, Animate also offers long clips of 15 seconds, 30 se
 (`worker/dreamfeed/longclip.py`). Wan makes about 5 seconds at a time, so a long clip is a chain of
 5-second pieces, each starting from the last frame of the one before, with its own motion
 description from the text model so the clip moves on instead of looping. Every piece is checked
-before its last frame is used, and one failing piece drops the whole clip. Each piece's colours
+before its last frame is used; a failing piece is thrown away and made again from the same
+start (3 tries), and only then is the whole clip dropped. Each piece's colours
 are matched to the source picture so drift doesn't add up, but faces and details still wander a
 little over a minute. About 5 minutes per piece: an hour for a minute.
 

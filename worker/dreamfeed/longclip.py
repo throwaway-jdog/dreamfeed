@@ -2,7 +2,8 @@
 starting from the last frame of the one before, with its own motion description.
 
 Every piece is checked (the same checks as clips) before its last frame is used for the next
-one; a piece that fails drops the whole clip. Each piece's colours are matched to the source
+one. A piece that fails is thrown away and made again from the same start frame with a new
+seed; after PIECE_TRIES failures the whole clip is dropped. Each piece's colours are matched to the source
 picture's, so small shifts don't add up over the chain. The pieces are joined into one file,
 without the repeated first frame of each.
 """
@@ -17,6 +18,7 @@ from .comfy import WAN
 PIECE_SECONDS = 5
 LENGTHS = (5, 15, 30, 60)       # what the viewer can ask for
 STD_RANGE = (0.8, 1.25)        # how far the colour match may stretch contrast
+PIECE_TRIES = 3                # a piece that fails a check is made again, from the same start
 
 
 class Dropped(Exception):
@@ -62,26 +64,30 @@ def make(comfy, check, image: Path, medium: str, prompts: list[str], seeds: list
     None. Raises Dropped when a piece fails or the request is cancelled."""
     start = image
     first_frame = out.with_suffix(".start.png")
-    writer = None
+    writer = ref = None
     try:
         for i, (prompt, seed) in enumerate(zip(prompts, seeds)):
             if cancelled():
                 raise Dropped("cancelled", f"after {i} of {len(prompts)} pieces")
-            try:
-                path = comfy.img2vid("wan", start, medium, prompt, seed, subdir, f"{name}-p{i:02d}",
-                                     strict=strict, loras=loras)
-            finally:
-                comfy.stop()   # fresh ComfyUI per piece, so Wan's models don't pile up in RAM
-            frames = _frames(path)
-            path.unlink(missing_ok=True)
-            h, w = frames.shape[1:3]
-            if i == 0:
-                with Image.open(image) as src:
-                    ref = np.asarray(src.convert("RGB").resize((w, h), Image.LANCZOS))
-            frames = _match_colors(frames, ref)
-            reason = check(_sample(frames, check_frames))
-            if reason:
-                raise Dropped(reason[0], f"piece {i + 1}: {reason[1]}")
+            for attempt in range(PIECE_TRIES):   # a failing piece is thrown away and made again
+                try:
+                    path = comfy.img2vid("wan", start, medium, prompt, (seed + attempt * 7919) % 2 ** 32, subdir,
+                                         f"{name}-p{i:02d}", strict=strict, loras=loras)
+                finally:
+                    comfy.stop()   # fresh ComfyUI per piece, so Wan's models don't pile up in RAM
+                frames = _frames(path)
+                path.unlink(missing_ok=True)
+                h, w = frames.shape[1:3]
+                if ref is None:
+                    with Image.open(image) as src:
+                        ref = np.asarray(src.convert("RGB").resize((w, h), Image.LANCZOS))
+                frames = _match_colors(frames, ref)
+                reason = check(_sample(frames, check_frames))
+                if not reason:
+                    break
+                print(f"longclip: piece {i + 1} try {attempt + 1} dropped ({reason[0]}: {reason[1]})", flush=True)
+            else:
+                raise Dropped(reason[0], f"piece {i + 1}, {PIECE_TRIES} tries: {reason[1]}")
             if writer is None:
                 writer = subprocess.Popen(
                     ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
