@@ -10,6 +10,7 @@
 import datetime as dt
 import json
 import random
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 
@@ -418,11 +419,14 @@ def pick_sources(conn, count: int, night: str | None = None) -> list[int]:
 
 
 def animate(cfg: Config, conn, night: str, sources: list[int],
-            until_window_closes: tuple[int, int] | None = None, motion_text: str = "") -> dict:
-    """Turn feed images into ~5 s Wan 2.2 clips, check every clip, put the passing ones in the feed.
+            until_window_closes: tuple[int, int] | None = None, motion_text: str = "",
+            seconds: int = 5) -> dict:
+    """Turn feed images into Wan 2.2 clips, check every clip, put the passing ones in the feed.
     motion_text, when given, leads the prompt; the image's own tags follow to keep the clip
-    consistent with the picture."""
-    from . import motion
+    consistent with the picture. seconds over 5 makes a long clip: a chain of 5-second pieces
+    (see longclip), each with its own motion description."""
+    from . import longclip, motion
+    pieces = longclip.pieces_for(seconds)
     from .comfy import Comfy
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
@@ -436,7 +440,11 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
         row = conn.execute("SELECT tags, prompt FROM generations WHERE id = ?", (src,)).fetchone()
         if row:   # posts from before tags were saved: their prompt's tags instead
             picture[src] = [t.strip() for t in (row[0] or row[1]).split(",") if t.strip()]
-    plans = motion.plan(cfg, list(picture.items()), motion_text.strip())
+    if pieces > 1:
+        plans = motion.plan_beats(cfg, list(picture.items()), pieces, motion_text.strip())
+    else:
+        plans = {g: (act, [text]) for g, (act, text) in
+                 motion.plan(cfg, list(picture.items()), motion_text.strip()).items()}
     from . import personas as people, videolora
     style = {}   # persona handle -> its style's video LoRA, if trained
     for p in people.load(cfg.personas_path):
@@ -458,30 +466,43 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
             if not row or not (out_dir / row[2]).is_file() or row[0] not in MOTION:
                 continue
             medium, prompt, file, handle, caption, strict = row
-            act, written = plans.get(src, (None, None))
+            act, written = plans.get(src, (None, [None] * pieces))
             use_lora = gen.act_lora if act else None
             own = style.get(handle)
             loras = ([use_lora] if use_lora else []) + ([(own[0], own[1], gen.video_style_strength)] if own else [])
             # Wan follows sentences; without a written one, the act's fixed description and the
             # picture's tags keep the clip consistent with the image.
-            body = written or ", ".join(p for p in (act.motion if act else "", prompt) if p)
-            motion_prompt = ", ".join(p for p in (own[2] if own else "", act.trigger if use_lora else "",
-                                                  motion_text.strip(), body, MOTION[medium]) if p)
-            seed = rng.randrange(2 ** 32)
+            fallback = ", ".join(p for p in (act.motion if act else "", prompt) if p)
+            prompts = [", ".join(p for p in (own[2] if own else "", act.trigger if use_lora else "",
+                                             motion_text.strip(), body or fallback, MOTION[medium]) if p)
+                       for body in written]
+            seeds = [rng.randrange(2 ** 32) for _ in prompts]
+            label = ("wan2.2-i2v" + (f" +{act.name}" if use_lora else "") + (" +style" if own else "")
+                     + (f" {seconds}s" if pieces > 1 else ""))
             with conn:
                 gid = conn.execute(
                     "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
                     " caption, kind, status) VALUES (?,?,?,?,?,?,?,?, 'video', 'queued')",
-                    (night, medium, "wan2.2-i2v" + (f" +{act.name}" if use_lora else "") + (" +style" if own else ""),
-                     motion_prompt, seed,
-                     src, handle, caption)).lastrowid
+                    (night, medium, label, "\n".join(prompts), seeds[0], src, handle, caption)).lastrowid
             try:
-                path = comfy.img2vid("wan", out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
-                                     strict=bool(strict), loras=loras)
+                if pieces == 1:
+                    path = comfy.img2vid("wan", out_dir / file, medium, prompts[0], seeds[0], night,
+                                         f"video-{gid}", strict=bool(strict), loras=loras)
+                else:
+                    (out_dir / night).mkdir(parents=True, exist_ok=True)
+                    path = longclip.make(
+                        comfy, lambda frames: _check_frames(cfg, frames, medium, bool(strict)),
+                        out_dir / file, medium, prompts, seeds, night, f"video-{gid}",
+                        out_dir / night / f"video-{gid}.mp4", bool(strict), loras, VIDEO_CHECK_FRAMES,
+                        progress=lambda d, t: _progress(conn, night, "animating", d, t),   # pieces done
+                        cancelled=lambda: _cancel_requested(conn, night))
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue
-            except (OSError, RuntimeError) as e:   # ComfyUI died, e.g. killed for low memory
+            except longclip.Dropped as e:
+                _set(conn, gid, status="dropped", reason=f"{e.args[0]}: {e.args[1]}"[:200])
+                continue
+            except (OSError, RuntimeError, subprocess.SubprocessError) as e:   # ComfyUI died, e.g. low memory
                 _set(conn, gid, status="dropped", reason=f"ComfyUI failed: {e}"[:200])
                 print(f"animate: ComfyUI failed ({e}); stopping clips for this run", flush=True)
                 break
@@ -493,6 +514,18 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
     finally:
         comfy.stop()
     return check_videos(cfg, conn, night)
+
+
+def _check_frames(cfg: Config, frames: list, medium: str, strict: bool) -> tuple[str, str] | None:
+    """The clip checks on some frames, for one piece of a long clip."""
+    from .checks import drop_reason
+    from .vision import Vision
+    vision = Vision(cfg.models_dir)
+    try:
+        a = vision.analyze(frames)
+    finally:
+        vision.close()
+    return drop_reason(a, medium, frames, cfg, strict=strict) or _feral(a)
 
 
 def check_videos(cfg: Config, conn, night: str) -> dict:
@@ -542,7 +575,8 @@ def animate_job(cfg: Config, conn, job_id: int, params: dict) -> None:
     status, message = "done", None
     try:
         sources = [int(i) for i in params.get("ids") or []] or pick_sources(conn, int(params.get("count", 0)))
-        stats = animate(cfg, conn, night, sources, motion_text=str(params.get("prompt") or ""))
+        stats = animate(cfg, conn, night, sources, motion_text=str(params.get("prompt") or ""),
+                        seconds=int(params.get("seconds") or 5))
         if _cancel_requested(conn, night):
             status = "cancelled"
         _finish(conn, night, status, stats)

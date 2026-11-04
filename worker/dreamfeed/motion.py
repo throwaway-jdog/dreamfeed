@@ -9,6 +9,7 @@ Wan reads plain sentences better than booru tags, so with CAPTION_MODEL set the 
 describes the motion for each clip from the picture's tags; otherwise a fixed description of
 the act is used. Descriptions go through the same checks as captions.
 """
+import re
 from dataclasses import dataclass
 
 from . import safety
@@ -93,6 +94,77 @@ def plan(cfg, items: list[tuple[int, list[str]]], extra: str = "") -> dict[int, 
         for gid, tags in items:
             act = out[gid][0]
             out[gid] = (act, describe(writer, tags, act, extra))
+    finally:
+        writer.close()
+    return out
+
+
+# ---- long clips: one description per 5-second piece -----------------------------------------
+
+BEATS_SYSTEM = (
+    "You write the motion prompts for a {seconds}-second animated clip made from one adult "
+    "illustration. The clip is made as {n} consecutive 5-second parts, each starting where the last "
+    "one ended. Write exactly {n} numbered lines, one per part, each one or two plain sentences "
+    "about what moves and how: body movement, rhythm, speed, hair, clothes and expressions. Make the "
+    "motion develop over the clip (shifts in position, pace building and easing, changes of "
+    "expression) while the characters, clothes and setting stay the same. Be explicit and concrete "
+    "about sexual motion when the picture is sexual. Every character is an adult. Never name "
+    "characters or series, never mention ages or anything young. Don't describe the camera unless "
+    "it moves. Reply with the numbered lines only.")
+BEAT_LINE = re.compile(r"^\s*\d+\s*[.):-]\s*(.+?)\s*$")
+
+
+def _passes(text: str) -> bool:
+    from .captions import REFUSAL, _names_in
+    return bool(text) and len(text) < 600 and not REFUSAL.search(text) and \
+        not safety.caption_blocked(text) and "[" not in text and not _names_in(text, set())
+
+
+def describe_beats(writer, tags: list[str], act: Act | None, n: int, extra: str = "") -> list[str | None]:
+    """n checked descriptions, one per piece; None where nothing passed (the caller falls back)."""
+    user = (f"The picture: {', '.join(tags)}"
+            + (f"\nThe act: {act.name} ({act.motion})" if act else "")
+            + (f"\nThe viewer asked for: {extra}" if extra else "")
+            + f"\nWrite the {n} numbered lines.")
+    system = BEATS_SYSTEM.format(seconds=n * 5, n=n)
+    best: list[str] = []
+    for _ in range(TRIES):
+        raw = writer.ask(system, user, max_new_tokens=80 * n)
+        if _refused(raw):   # one refusal line poisons the rest
+            continue
+        lines = [m.group(1) for m in map(BEAT_LINE.match, raw.splitlines()) if m]
+        good = [" ".join(t.split()) for t in lines if _passes(" ".join(t.split()))]
+        if len(good) > len(best):
+            best = good
+        if len(best) >= n:
+            break
+    if not best:
+        return [None] * n
+    # Too few lines: stretch the ones there are over the clip, in order.
+    return [best[i * len(best) // n] for i in range(n)]
+
+
+def _refused(text: str) -> bool:
+    from .captions import REFUSAL
+    return bool(REFUSAL.search(text))
+
+
+def plan_beats(cfg, items: list[tuple[int, list[str]]], n: int,
+               extra: str = "") -> dict[int, tuple[Act | None, list[str | None]]]:
+    """Like plan(), with n descriptions per item for a long clip."""
+    out = {gid: (act_for(tags), [None] * n) for gid, tags in items}
+    if not cfg.caption_model or not items:
+        return out
+    from .captions import Writer
+    try:
+        writer = Writer(cfg.caption_model)
+    except Exception as e:
+        print(f"motion: couldn't load {cfg.caption_model} ({e}); using fixed motion", flush=True)
+        return out
+    try:
+        for gid, tags in items:
+            act = out[gid][0]
+            out[gid] = (act, describe_beats(writer, tags, act, n, extra))
     finally:
         writer.close()
     return out

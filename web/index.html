@@ -140,6 +140,13 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .motion textarea { font: 16px/1.4 var(--font); color: #fff; background: #23211f; border: 1px solid #3a3733; border-radius: 12px;
   padding: 10px 12px; min-height: 84px; resize: vertical; width: 100%; }
 .motion textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.motion .lengths { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.motion .lengths legend { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+.motion .lengths input { position: absolute; opacity: 0; }
+.motion .lengths span { display: grid; place-items: center; min-height: 40px; border-radius: 10px; background: #23211f;
+  border: 1px solid #3a3733; font-weight: 600; }
+.motion .lengths input:checked + span { background: var(--accent); border-color: var(--accent); }
+.motion .lengths input:focus-visible + span { outline: 2px solid #fff; outline-offset: 1px; }
 .motion .row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
 .motion .row button { min-height: 48px; border-radius: 12px; font-weight: 700; }
 .motion .go { background: var(--accent); color: #fff; }
@@ -430,7 +437,15 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   <form class="motion" id="motion" hidden>
     <label for="motion-text">Describe the motion <small>(optional)</small></label>
     <textarea id="motion-text" maxlength="500" placeholder="e.g. she turns toward the camera and smiles, hair blowing in the wind"></textarea>
-    <small>Leave it empty and the clip uses the image's own tags. Takes about 3 minutes.</small>
+    <small>Leave it empty and the clip uses the image's own tags.</small>
+    <fieldset class="lengths" id="motion-len">
+      <legend>Length</legend>
+      <label><input type="radio" name="len" value="5" checked><span>5 s</span></label>
+      <label><input type="radio" name="len" value="15"><span>15 s</span></label>
+      <label><input type="radio" name="len" value="30"><span>30 s</span></label>
+      <label><input type="radio" name="len" value="60"><span>1 min</span></label>
+    </fieldset>
+    <small id="motion-time">Takes about 5 minutes.</small>
     <div class="row">
       <button class="no" type="button" id="motion-no">Cancel</button>
       <button class="go" type="submit">Animate</button>
@@ -868,8 +883,16 @@ function closeMotion() { $("motion").hidden = true; }
 function openMotion() {
   const it = state.items[state.idx]; if (!it) return;
   $("motion").hidden = false; $("motion-text").value = "";
+  $("motion").querySelector('input[name="len"][value="5"]').checked = true; showMotionTime();
   setTimeout(() => $("motion-text").focus(), 50);
 }
+const motionLen = () => Number($("motion").querySelector('input[name="len"]:checked').value);
+function showMotionTime() {   // about 5 minutes per 5-second piece
+  const min = motionLen();
+  $("motion-time").textContent = min <= 5 ? "Takes about 5 minutes."
+    : `Made as ${min / 5} pieces of 5 seconds: about ${min >= 60 ? "an hour" : `${min} minutes`}.`;
+}
+$("motion-len").onchange = showMotionTime;
 $("v-animate").onclick = openMotion;
 $("motion-no").onclick = closeMotion;
 $("motion").onsubmit = async e => {
@@ -877,11 +900,13 @@ $("motion").onsubmit = async e => {
   const it = state.items[state.idx]; if (!it) return;
   const go = $("motion").querySelector(".go"); go.disabled = true;
   try {
-    await api("api/animate", { id: it.id, prompt: $("motion-text").value.trim() }); it.animated = true;
+    const seconds = motionLen();
+    await api("api/animate", { id: it.id, prompt: $("motion-text").value.trim(), seconds }); it.animated = true;
     closeMotion();
     $("v-animate").querySelector("span").textContent = "Animate again";
     const ab = it.el?.querySelector(".act.anim span"); if (ab) ab.textContent = "Again";
-    toast("Animating. The clip shows up in the feed in a few minutes.");
+    toast(seconds > 5 ? "Animating. A long clip takes a while; it shows up in the feed when it's done."
+      : "Animating. The clip shows up in the feed in a few minutes.");
   } catch (err) { toast(err.message); }
   go.disabled = false;
 };
@@ -1023,7 +1048,7 @@ function renderLive(d) {
     const box = el("div", "live"), head = el("div", "head");
     const what = j.params.kind === "style" ? `train the ${j.params.name} style`
       : j.params.kind === "animate"
-      ? (j.params.ids ? "animate 1 image" : `animate the best ${j.params.count}`)
+      ? (j.params.ids ? `animate 1 image${j.params.seconds ? `, ${j.params.seconds} s` : ""}` : `animate the best ${j.params.count}`)
       : `${j.params.images} images, keep ${j.params.keep}${j.params.personas ? " · " + j.params.personas.map(h => personaOf(h)?.name || h).join(", ") : ""}`;
     head.append(el("span", null, `Waiting: ${what}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";
