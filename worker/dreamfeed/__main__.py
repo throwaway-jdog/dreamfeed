@@ -12,6 +12,7 @@ python -m dreamfeed job ID    Run a request queued from the dashboard (posts or 
 python -m dreamfeed lora-prep NAME --medium M --trigger W
                               Check and caption data/lora/NAME/raw for style-LoRA training.
 python -m dreamfeed video-prep NAME [--limit N] [--no-download]
+python -m dreamfeed scene-preview POST_ID [--seed N]   plan a scene's shots and draw them (no video)
                               Download, check and caption a style's videos for a video LoRA.
 python -m dreamfeed report    Per-persona posts, likes and drops, and recent runs.
 """
@@ -77,6 +78,9 @@ def main() -> None:
     elif cmd == "video-prep":
         from .videolora import main as video_prep
         video_prep(rest)
+    elif cmd == "scene-preview":
+        from .scene import preview
+        preview(rest)
     elif cmd == "report":
         from .report import main as report
         report(rest)
