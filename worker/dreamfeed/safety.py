@@ -16,7 +16,7 @@ Where they apply:
    the agecheck service's face estimate for photos), feral; for training data also photos
    and blocked tags, always at the strict threshold. Applied to posts, avatars, clips, each
    shot of a scene and the finished scene, style and video training data, character
-   close-ups (where a picture with one failing close-up is left out whole) and bootstrapped
+   close-ups (where a picture with a close-up failing an age check is left out whole) and bootstrapped
    pictures. A dropped file is deleted.
 4. Written text: generated captions and motion descriptions (caption_blocked), and artist
    posts and speech-bubble lines used as a voice (captions.clean).

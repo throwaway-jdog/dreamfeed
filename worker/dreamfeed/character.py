@@ -84,8 +84,8 @@ def _closeup(vision, img, tag: str, sizes):
 def _closeups(cfg: Config, vision, keep: list[Path], full: Path, out: Path, name: str, parts: list[str],
               traits: set[str], medium: str) -> dict:
     """Close-ups of each part, into their own folder (fewer repeats). Every one is checked
-    again like the pictures, and a picture with a close-up the checks flag is left out
-    altogether, with all its close-ups. data/lora/NAME/closeups.json lists what was kept and
+    again like the pictures, and a picture with a close-up the age checks flag is left out
+    altogether, with all its close-ups (one flagged feral is left out on its own). data/lora/NAME/closeups.json lists what was kept and
     why the rest weren't."""
     from PIL import Image
     from .checks import problem
@@ -128,7 +128,10 @@ def _closeups(cfg: Config, vision, keep: list[Path], full: Path, out: Path, name
         for e in dropped:
             if e["why"].startswith(("check", "someone")):
                 print(f"  {e['picture']}: {e['why']}", flush=True)
-    flagged = {e["picture"] for e in log if e.get("why", "").startswith("check")}
+    # A close-up the age checks flag says the picture's character may look young: the whole
+    # picture goes. One flagged feral (a tight crop of fur reads as an animal) is left out on its
+    # own; the picture passed that check whole.
+    flagged = {e["picture"] for e in log if e.get("why", "").startswith("check") and "feral" not in e["why"]}
     for n, txt in enumerate(keep):
         if f"{txt.parent.parent.parent.name}/{txt.with_suffix('.png').name}" in flagged:
             for f in full.glob(f"{n:04d}.*"):

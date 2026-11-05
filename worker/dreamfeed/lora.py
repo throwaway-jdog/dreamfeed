@@ -55,12 +55,20 @@ def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> 
     files = sorted(p for p in raw.rglob("*") if p.suffix.lower() in IMAGE_EXT and ".part" not in p.parts)
     vision = Vision(cfg.models_dir)
     stats = {"kept": 0, "dropped": {}, "unreadable": 0}
+    # An artist who always signs in the same strip: source.json "crop_top" (a share of the
+    # height) is cut off every picture first, or the LoRA learns to draw the signature.
+    try:
+        crop_top = float(json.loads((base / "source.json").read_text()).get("crop_top") or 0)
+    except (OSError, ValueError):
+        crop_top = 0.0
     for n, path in enumerate(files, 1):
         try:
             img = Image.open(path).convert("RGB")
         except Exception:
             stats["unreadable"] += 1
             continue
+        if crop_top:
+            img = img.crop((0, round(img.height * crop_top), img.width, img.height))
         a = vision.analyze([img])
         reason = problem(a, medium, [img], cfg, training=True)
         if reason:
