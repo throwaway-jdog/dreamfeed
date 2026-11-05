@@ -46,10 +46,11 @@ SCENE_WAN = {"motion_steps": 3}
 # the tagger should then find in it (motion.ACTS names; None when no act LoRA covers it).
 POSITIONS = {
     "missionary": ("missionary, on back, spread legs, sex, vaginal, penis", "missionary"),
-    "doggy": ("doggystyle, sex from behind, all fours, sex, vaginal, penis", "doggy"),
+    "doggy": ("doggystyle, (all fours:1.3), on floor, kneeling, sex from behind, sex, vaginal, penis", "doggy"),
     "cowgirl": ("cowgirl position, girl on top, straddling, sex, vaginal, penis", "cowgirl"),
     "reverse cowgirl": ("reverse cowgirl position, girl on top, from behind, sex, vaginal, penis", "reverse cowgirl"),
-    "blowjob": ("fellatio, oral, penis, kneeling, looking up", "blowjob"),
+    "blowjob": ("fellatio, oral, penis, kneeling, looking up, standing male, his hand on her head, "
+                "his body in frame", "blowjob"),
     "standing": ("standing sex, sex from behind, standing, against wall, sex, vaginal, penis", "standing"),
 }
 # Penetration shots are drawn side-on with both bodies whole: from below, it sits on the
@@ -77,6 +78,13 @@ NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejacula
 SCENE_NEGATIVE = ("2girls, multiple girls, twins, watermark, signature, text, logo, patreon username, "
                   "comic, multiple views, panels, split screen, inset, furry male")
 FURRY_PARTNER = {"furry male", "rabbit boy"}   # he's drawn as a second animal; a worse pick
+# Pictures that lose to any without these: he isn't there (a penis through a wall), he's cut
+# off at the edge, or the position turned into a different one.
+NO_PARTNER = {"glory hole", "disembodied penis", "dildo", "sex toy", "penis on wall"}
+CUT_OFF = {"head out of frame", "out of frame", "lower body"}
+WRONG_POSE = {"doggy": {"standing sex", "standing split"}}   # he may stand; she mustn't
+# What each shot keeps out of the picture, to match.
+SHOT_NEGATIVE = {"doggy": "standing sex, she is standing", "blowjob": "glory hole, disembodied penis, dildo, wall"}
 PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", "panel"}   # a shot is one picture
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
 PARTNER_LOOKS = ("dark-skinned male", "tan skin", "muscular male, dark skin")   # not grey: reads as fur   # one per scene
@@ -240,7 +248,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
         for i, shot in enumerate(shots):
             side_on = shot.act not in (None, "blowjob")
             neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, avoid, "" if shot.cum else NO_CUM,
-                                        SIDE_ON_NEGATIVE if side_on else "") if n)
+                                        SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, "")) if n)
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora)
@@ -274,7 +282,9 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 # Then side-on, for penetration: from below, Wan loses the penis at the edge.
                 side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
                 same_body = sum(t in seen for t in body)   # the tagger reads her as the post's build
-                fits = (fits and not (FURRY_PARTNER & seen), side, same_body)
+                bad = FURRY_PARTNER | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
+                    (CUT_OFF if shot.act not in (None, "blowjob") else set())
+                fits = (fits and not (bad & seen), side, same_body)
                 scored.append((fits, float(a.embedding.astype(np.float32) @ base), p))
             best = max(scored, key=lambda s: s[:2]) if scored else None
             for p in paths:
