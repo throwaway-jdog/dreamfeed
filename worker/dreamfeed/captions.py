@@ -136,10 +136,13 @@ def build_voice(base: Path) -> int:
 
 
 def voice(cfg, name: str) -> list[str]:
+    """A style's voice: its character's lines from speech bubbles when there are any
+    (speech.py), otherwise the artist's own post texts."""
     try:
-        return json.loads((cfg.data_dir / "lora" / name / "voice.json").read_text())["posts"]
-    except (OSError, ValueError, KeyError):
+        data = json.loads((cfg.data_dir / "lora" / name / "voice.json").read_text())
+    except (OSError, ValueError):
         return []
+    return data.get("speech") or data.get("posts") or []
 
 
 # ---- checking what the model wrote -----------------------------------------------------------

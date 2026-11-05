@@ -12,8 +12,12 @@ python -m dreamfeed job ID    Run a request queued from the dashboard (posts or 
 python -m dreamfeed lora-prep NAME --medium M --trigger W
                               Check and caption data/lora/NAME/raw for style-LoRA training.
 python -m dreamfeed video-prep NAME [--limit N] [--no-download]
-python -m dreamfeed scene-preview POST_ID [--seed N]   plan a scene's shots and draw them (no video)
                               Download, check and caption a style's videos for a video LoRA.
+python -m dreamfeed scene-preview POST_ID [--seed N]   plan a scene's shots and draw them (no video)
+python -m dreamfeed character-prep NAME --from STYLE --look TAGS [--traits TAGS] [--train STEPS]
+                              A character LoRA from a style's pictures of one character.
+python -m dreamfeed speech NAME
+                              A trained style's character voice, from its speech bubbles.
 python -m dreamfeed report    Per-persona posts, likes and drops, and recent runs.
 """
 import argparse
@@ -75,6 +79,12 @@ def main() -> None:
     elif cmd == "lora-prep":
         from .lora import main as lora_prep
         lora_prep(rest)
+    elif cmd == "character-prep":
+        from .character import main as character_prep
+        character_prep(rest)
+    elif cmd == "speech":
+        from .speech import main as speech
+        speech(rest)
     elif cmd == "video-prep":
         from .videolora import main as video_prep
         video_prep(rest)
