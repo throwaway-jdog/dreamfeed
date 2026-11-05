@@ -286,12 +286,8 @@ def request_animation(req: dict) -> dict:
             if req.get("scene"):
                 tags = conn.execute("SELECT coalesce(tags, prompt) FROM generations WHERE id = ?", (gid,)).fetchone()[0]
                 # POV pictures show only part of him: the tagger says 1boy or hetero, not duo.
-                if not {"duo", "1boy", "hetero"} & {t.strip() for t in (tags or "").split(",")}:
+                if not {"duo", "1boy", "hetero", "2girls", "yuri"} & {t.strip() for t in (tags or "").split(",")}:
                     raise ValueError("scenes need a post with two characters")
-                handle, prompt = conn.execute("SELECT persona, prompt FROM generations WHERE id = ?", (gid,)).fetchone()
-                poster = {p.handle: p for p in people.parse(read_personas())}.get(handle)
-                if poster and poster.friend_in(prompt or ""):
-                    raise ValueError("scenes with two personas aren't possible yet")
                 params = {"kind": "scene", "ids": [gid]}
                 if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
                                 (json.dumps(params),)).fetchone()[0]:
@@ -373,10 +369,12 @@ def styles() -> list[dict]:
 
 
 def voices() -> dict[str, int]:
-    """Styles whose artist's post texts were saved (voice.json): name -> how many posts."""
+    """Styles with a saved voice (voice.json): name -> how many lines, the character's
+    speech-bubble lines when there are any (what captions use), else the artist's posts."""
     out = {}
     for f in sorted((DATA / "lora").glob("*/voice.json")):
-        n = len(read_json(f).get("posts") or [])
+        d = read_json(f)
+        n = len(d.get("speech") or d.get("posts") or [])
         if n:
             out[f.parent.name] = n
     return out

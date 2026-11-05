@@ -46,7 +46,10 @@ CMD = [
 # (otherwise all three are held at once). Images keep the cache: one checkpoint serves the night.
 # Video also uses SageAttention: Wan spends most of its time in attention, and this does it
 # about twice as fast with no visible change.
-MODES = {"image": [], "video": ["--cache-none", "--use-sage-attention"]}
+# "regions": pictures with a LoRA tied to one part (two characters, each with their own),
+# where ComfyUI keeps extra copies of the model: weights read from disk, nothing pinned.
+MODES = {"image": [], "video": ["--cache-none", "--use-sage-attention"],
+         "regions": ["--cache-none", "--disable-pinned-memory", "--fast-disk"]}
 
 lock = threading.Lock()
 proc: subprocess.Popen | None = None

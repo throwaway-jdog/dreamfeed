@@ -28,6 +28,17 @@ class Act:
 ACTS = (
     Act("double blowjob", "d0ubl3_bj", ("cooperative fellatio", "double fellatio"),
         "two partners take turns sucking his penis, heads bobbing in a steady rhythm"),
+    # Girl-girl acts, each with its own LoRA (Civitai: cunnilingus 1954774 and fingering 2007360
+    # for Wan 2.2 I2V; scissoring 654646 was made for T2V, and is tried on I2V at less strength).
+    Act("cunnilingus", "cunn1l1ngu5", ("cunnilingus",),
+        "one girl licks between the other's thighs, her head moving, the other's hips rocking",
+        lora="wan2.2-i2v-cunnilingus", strength=0.8),
+    Act("fingering", "", ("fingering",),
+        "fingers slide in and out of her pussy in a steady rhythm, her hips rising to meet them",
+        lora="wan2.2-i2v-fingering", strength=0.8),
+    Act("scissoring", "", ("tribadism",),
+        "they grind their hips together in a steady rhythm, legs intertwined, bodies rocking",
+        lora="wan2.2-i2v-scissoring", strength=0.6),
     Act("blowjob", "bl0wj0b", ("fellatio", "irrumatio", "deepthroat", "licking penis"),
         "she sucks his penis, her head bobbing up and down in a steady rhythm"),
     Act("reverse cowgirl", "r3v3rs3_c0wg1rl", ("reverse cowgirl position",),
@@ -57,7 +68,12 @@ FACIAL = Act("facial", "", ("facial", "cum on face"),
 CUMSHOT = Act("cumshot", "f4c3spl4sh", ("cum on body", "ejaculation"),
               "he pulls out and cum shoots out of his penis onto her body in thick spurts",
               lora="wan2.2-i2v-cumshot", strength=1.0)
-CLIMAXES = {a.name: a for a in (CREAMPIE, FACIAL, CUMSHOT)}
+# Girl-girl climax (Civitai 2518574, Wan 2.2 I2V; it was trained on one long sentence, of
+# which this is the part about the act).
+SQUIRT = Act("squirt", "her vagina squirting clear fluid", ("female ejaculation", "squirting"),
+             "her hips shake as she cums, clear fluid squirting from her pussy in bursts",
+             lora="wan2.2-i2v-squirt", strength=0.8)
+CLIMAXES = {a.name: a for a in (CREAMPIE, FACIAL, CUMSHOT, SQUIRT)}
 
 
 def lora_for(act: Act, default: tuple | None, models_dir) -> tuple | None:

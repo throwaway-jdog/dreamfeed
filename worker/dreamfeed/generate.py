@@ -126,7 +126,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
         lora = p.lora_for(prompt)
         regions = p.regions(prompt, rng) if kind == "image" else None
         hooked = [r[3] for r in regions or [] if len(r) > 3 and r[3]]
-        if p.trigger and p.lora not in lora + hooked:   # not the persona's LoRA, so its trigger word means nothing
+        if p.trigger and p.lora and p.lora[0] not in {f for f, _ in lora + hooked}:   # its trigger means nothing then
             prompt = ", ".join(t for t in prompt.split(", ") if t != p.trigger)
         with conn:
             gid = conn.execute(

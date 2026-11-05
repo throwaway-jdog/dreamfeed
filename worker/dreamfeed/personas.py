@@ -12,8 +12,8 @@ list), {cosplay} (generic costumes only, never named characters), {setting}, {ch
 (one of the persona's characters, for artist personas that draw different people), {partner}
 (one of the persona's partners, so the man in their duo posts isn't always the same one),
 {girlfriend} (one of their girlfriends, the same for girl-girl posts), {friend} (another
-persona from their friends: that persona's trigger word and look, drawn with that persona's
-own LoRA in their half of the picture and this one's in the other, so the two stay themselves).
+persona from their friends: that persona's trigger word and look, each described again in her
+own half of the picture, with both their LoRAs on).
 """
 import json
 import random
@@ -47,6 +47,12 @@ SETTINGS = [
     "shower, wet", "city window at night, neon lights", "kitchen counter", "photo studio, ring light",
     "bedroom, fairy lights", "hot spring, steam", "beach at sunset", "messy bedroom, posters on wall",
 ]
+
+
+# With a friend in the picture, both character LoRAs are on for the whole picture at this share
+# of their strength. (Tying each to her own half, a ComfyUI hook, needs over 18 GB of memory
+# with two of them.)
+FRIEND_SHARE = 0.8
 
 
 @dataclass
@@ -130,11 +136,11 @@ class Persona:
         have = set(tags)
         left, right = (0.0, 0.6), (0.4, 1.0)
         friend = self.friend_in(prompt)
-        if friend:   # each with their own LoRA, in their own half only
+        if friend:   # each described again in her own half (both LoRAs are on: lora_for)
             mine, theirs = (left, right) if rng.random() < 0.5 else (right, left)
             look = ", ".join(t for t in self.look.split(", ") if t.strip() != "1girl")
             her = ", ".join(t for t in (self.trigger, look) if t)
-            return [(her, *mine, self.lora), (self._as_friend(friend.handle), *theirs, friend.lora)]
+            return [(her, *mine), (self._as_friend(friend.handle), *theirs)]
         other = next((x for x in self.partners + self.girlfriends
                       if x and {t.strip() for t in x.split(",") if t.strip()} <= have), None)
         if not other or not self.look:
@@ -147,8 +153,10 @@ class Persona:
         """The LoRAs for a prompt: the persona's own, unless the prompt's character is male and it
         is marked female-only (trained mostly on women, it would turn men into women), then the
         artist's style (art), which draws everyone in the picture."""
-        if self.friend_in(prompt):   # both characters' LoRAs go in their own halves (regions)
-            return [l for l in (self.art,) if l]
+        friend = self.friend_in(prompt)
+        if friend:   # both characters' LoRAs, each weaker so neither takes over the other
+            return [(f, round(st * FRIEND_SHARE, 2)) for f, st in (self.lora, friend.lora) if f] + \
+                [l for l in (self.art,) if l]
         own = self.lora
         if own and self.lora_female_only:
             tags = {t.strip() for t in prompt.split(",")}

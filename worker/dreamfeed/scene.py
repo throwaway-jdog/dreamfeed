@@ -71,6 +71,33 @@ HIS_MOTION = {
     "blowjob": "his hips push forward into her mouth, his hand on her head",
 }
 OPENERS = ("missionary", "blowjob")
+
+# Girl-girl scenes (a post with 2girls and no man): their own acts (motion.ACTS has a LoRA for
+# each but kissing). Each act: its tags for the picture, and the tags the tagger must see for
+# the picture to show it.
+YURI_POSITIONS = {
+    "kissing": ("french kiss, kissing, hug, embracing, nude, breasts press, cowboy shot", {"kiss", "french kiss"}),
+    "fingering": ("fingering, lying on back, spread legs, hand between legs, nude, full body", {"fingering"}),
+    "cunnilingus": ("cunnilingus, oral, spread legs, head between thighs, nude, full body", {"cunnilingus"}),
+    "scissoring": ("tribadism, scissoring, legs intertwined, nude, full body, from side", {"tribadism"}),
+}
+YURI_MOTION = {
+    "kissing": "they kiss deeply and slowly, their hands moving over each other's backs",
+    "fingering": "one girl's fingers move in and out between the other's legs, her hips rising to meet them",
+    "cunnilingus": "one girl licks between the other's thighs, her head moving, the other's hips rocking",
+    "scissoring": "they grind their hips together in a steady rhythm, legs intertwined, bodies rocking",
+}
+YURI_STILL = "they hold each other: gentle breathing, small shifts; nobody new appears"
+YURI_BOTH = {"2girls", "yuri"}                                 # one of these: both are there
+YURI_NOT = {"1boy", "penis", "testicles", "multiple boys", "3girls", "multiple girls"}   # nobody else
+YURI_NEGATIVE = "1boy, penis, testicles, multiple boys, 3girls, dildo, strap-on, sex toy"
+YURI_ONLY = re.compile(r"\b(kiss\w*|french kiss|fingering|cunnilingus|tribadism|scissoring|hug\w*|"
+                       r"embrac\w*|cheek-to-cheek|selfie|holding phone|smile)\b", re.I)
+
+
+def is_yuri(prompt: str) -> bool:
+    tags = set(_split(prompt))
+    return "2girls" in tags and not {"1boy", "hetero"} & tags
 MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl", "standing")
 
 NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejaculation, cum string"
@@ -263,6 +290,7 @@ class Shot:
     loops: int = 2     # times the 5-second clip plays before the cut
     climax: str = ""   # motion.CLIMAXES name: the clip adds that LoRA to the position's, and plays
                        # once without looping (a climax builds; it doesn't reset)
+    yuri: bool = False   # a girl-girl shot: act is a YURI_POSITIONS name
 
 
 def _frames(path: Path) -> np.ndarray:
@@ -336,6 +364,38 @@ def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
     ]
 
 
+def plan_yuri(rng: random.Random) -> list[Shot]:
+    """Kissing, two of fingering and cunnilingus, scissoring, the climax in it, cuddling after."""
+    a, b = rng.sample(["fingering", "cunnilingus"], 2)
+    pos = lambda name: YURI_POSITIONS[name][0]
+    return [
+        Shot("opening: kissing", f"{pos('kissing')}, blush, half-closed eyes", "kissing", False,
+             "slow and tender, just starting", yuri=True),
+        Shot(a, f"{pos(a)}, blush, open mouth", a, False, "a steady rhythm", yuri=True),
+        Shot(b, f"{pos(b)}, blush, open mouth, sweat, heavy breathing", b, False,
+             "faster, she's lost in it", yuri=True),
+        Shot("scissoring", f"{pos('scissoring')}, open mouth, sweat, heavy breathing", "scissoring", False,
+             "fast and intense, building toward climax", yuri=True),
+        Shot("climax: scissoring", f"{pos('scissoring')}, orgasm, (female ejaculation:1.2), squirting, "
+             "trembling, arched back, pussy juice, open mouth, sweat", "scissoring", True,
+             "the climax: both shuddering as they squirt, holding each other", loops=1, climax="squirt", yuri=True),
+        Shot("aftermath", "after sex, lying together, cuddling, hug, nude, smile, sweat, half-closed eyes",
+             None, False, "slow, catching their breath", loops=1, yuri=True),
+    ]
+
+
+def yuri_cast(prompt: str) -> str:
+    """The post's prompt minus its act and framing: the two of them, and where."""
+    keep = [t for t in _split(prompt) if not SCENE_ONLY.search(t) and not YURI_ONLY.search(t)]
+    keep = [t for t in keep if t not in ("duo", "2girls", "yuri")]
+    rating = [t for t in keep if t in ("nsfw", "explicit", "questionable")]
+    return ", ".join(rating + ["duo", "2girls", "yuri"] + [t for t in keep if t not in rating])
+
+
+def _bare(tag: str) -> str:
+    return re.sub(r"^\((.*):[\d.]+\)$", r"\1", tag.strip())
+
+
 def _crop(path: Path) -> None:
     with Image.open(path) as im:
         im = im.convert("RGB")
@@ -361,6 +421,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     finally:
         vision.close()
     base = seen_post.embedding.astype(np.float32)
+    if any(s.yuri for s in shots):
+        return _draw_yuri(cfg, comfy, persona, post, shots, subdir, name, rng, keep_room, seen_post)
     body, avoid = body_tags(character_body(persona, post["prompt"]), seen_post.general)
     # A post that says he's a furry (a persona's own partner) keeps him: his look is in the
     # post's prompt. Otherwise one of the human looks.
@@ -466,8 +528,90 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     return out
 
 
+def _draw_yuri(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
+               rng: random.Random, keep_room: Path | None, seen_post) -> list[tuple[Path | None, str]]:
+    """draw() for a girl-girl scene: both of them in every shot and nobody else, each in her
+    own half with her own LoRA when both are personas (persona.regions), the room drawn once."""
+    from . import captions
+    from .checks import problem
+    from .vision import Vision
+    base = seen_post.embedding.astype(np.float32)
+    cast = yuri_cast(post["prompt"])
+    room = background_tags(seen_post.general, cast)
+    with Image.open(post["file"]) as im:
+        post_edges, colour = _edges(im), wall_colour(im)
+    walls = [f"({colour} {WALLS[t]}:1.2)" for t in room if t in WALLS]
+    if room:
+        cast += ", " + ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS])
+    lora = persona.lora_for(post["prompt"]) if persona else None
+    # Sides are fixed for the scene: from the post's own prompt, where her look and the other's
+    # are written out whole.
+    regions = persona.regions(post["prompt"], rng) if persona else None
+    traits = {_bare(t) for r in regions or [] for t in r[0].split(",")} - {"adult", "mature female", "anthro"}
+    print(f"scene: girl-girl cast and setting: {cast}; each in her half: {bool(regions)}", flush=True)
+    negative = ", ".join(n for n in (persona.negative if persona else "", YURI_NEGATIVE) if n)
+    room_tags = ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS] +
+                          [t for t in _split(post["prompt"]) if t in SETTING_WORDS])
+    plate = draw_plate(cfg, comfy, post, room_tags, lora, negative, subdir, name, rng, post_edges)
+    no_twins = "twins, watermark, signature, text, logo, patreon username"
+    cands, asks = [], []
+    try:
+        for i, shot in enumerate(shots):
+            # (cum means squirting here: NO_CUM would keep "ejaculation" out of the climax.)
+            neg = ", ".join(n for n in (negative, no_twins, "" if shot.cum else NO_CUM,
+                                        "close-up, cropped, out of frame, head out of frame") if n)
+            asks.append((f"{cast}, {shot.tags}", neg))
+            cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0], rng.randrange(2 ** 32),
+                                        subdir, f"{name}-shot{i}-{c}", extra_negative=neg, strict=post["strict"],
+                                        lora=lora, regions=regions) for c in range(SHOT_CANDIDATES)])
+    finally:
+        comfy.stop()
+    vision = Vision(cfg.models_dir)
+    out = []
+    try:
+        for shot, paths in zip(shots, cands):
+            scored = []
+            for p in paths:
+                with Image.open(p) as im:
+                    img = im.convert("RGB")
+                a = vision.analyze([img])
+                if problem(a, post["medium"], [img], cfg, strict=post["strict"]):
+                    continue
+                if PANELS & set(captions.picture(a.general)):
+                    continue
+                seen = {t for t, sc in a.general.items() if sc >= TAG_SURE}
+                both = bool(YURI_BOTH & seen) and not (YURI_NOT & seen) and not (CUT_OFF & seen)
+                shows = shot.act is None or bool(YURI_POSITIONS[shot.act][1] & seen)
+                fits = (both, shows, len(traits & seen))
+                look = float(a.embedding.astype(np.float32) @ base)
+                bg = float(np.minimum(_edges(img), post_edges).sum())
+                scored.append((fits, (1 - BG_WEIGHT) * look + BG_WEIGHT * bg, p, look, bg))
+            best = max(scored, key=lambda s: s[:2]) if scored else None
+            for p in paths:
+                if not best or p != best[2]:
+                    p.unlink(missing_ok=True)
+            out.append((best[2], f"{'' if best[0][0] else 'not just the two of them, '}"
+                        f"{'' if best[0][1] else 'act not seen, '}their looks {best[0][2]}/{len(traits)}, "
+                        f"look {best[3]:.2f}, background {best[4]:.2f}") if best
+                       else (None, f"all {len(paths)} failed the checks"))
+    finally:
+        vision.close()
+    try:
+        if plate:
+            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng, regions=regions)
+    finally:
+        if plate and keep_room:
+            plate.replace(keep_room)
+        elif plate:
+            plate.unlink(missing_ok=True)
+    for path, _ in out:
+        if path:
+            _crop(path)
+    return out
+
+
 def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, subdir: str, name: str,
-              rng: random.Random) -> None:
+              rng: random.Random, regions=None) -> None:
     """Each winning shot's characters, cut out and pasted onto the scene's room, then a light
     pass of the image model to blend the edges and light, with the room's own pixels put back
     everywhere away from them. A shot whose blended picture fails a check keeps its own room."""
@@ -499,7 +643,8 @@ def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, 
             comp.save(comp_path)
             blended = comfy.txt2img(post["checkpoint"], post["medium"], asks[i][0], rng.randrange(2 ** 32),
                                     subdir, f"{name}-shot{i}-blend", extra_negative=asks[i][1],
-                                    strict=post["strict"], lora=lora, init=comp_path, denoise=BLEND_DENOISE)
+                                    strict=post["strict"], lora=lora, init=comp_path, denoise=BLEND_DENOISE,
+                                    regions=regions)
             comp_path.unlink(missing_ok=True)
             with Image.open(blended) as im:
                 final = cutout.keep_room(room, im.convert("RGB"), mask)
@@ -577,7 +722,7 @@ def preview(args: list[str]) -> None:
     post = load_post(cfg, conn, a.post)
     persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
     rng = random.Random(a.seed)
-    shots = plan(rng, picked)
+    shots = plan_yuri(rng) if is_yuri(post["prompt"]) else plan(rng, picked)
     out_dir = cfg.data_dir / "generated"
     subdir = f"scene-preview-{a.post}"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
@@ -590,11 +735,20 @@ def preview(args: list[str]) -> None:
     print(f"scene-preview: {sheet}", flush=True)
 
 
+def _motion_of(shot: Shot) -> str:
+    """What both of them do in the shot, for the video model."""
+    if shot.yuri:
+        return YURI_MOTION.get(shot.act, YURI_STILL)
+    return HIS_MOTION.get(shot.act, "")
+
+
 def _shot_prompt(writer, cast: str, shot: Shot, act) -> str | None:
     """A written, checked description of the shot's motion for its point in the scene."""
+    move = _motion_of(shot)
     where = (f"This is one shot of a longer scene: {shot.pace}. The clip loops, so the motion is a "
              f"repeating cycle that ends where it started." +
-             (f" Both of them move: {HIS_MOTION[shot.act]}." if shot.act in HIS_MOTION else
+             (f" Both of them move: {move}." if move and shot.act else
+              f" {YURI_STILL}." if shot.yuri else
               " Only she moves: gentle breathing, small shifts; nobody new appears."))
     return motion.describe(writer, [t.strip() for t in f"{cast}, {shot.tags}".split(",")], act, context=where)
 
@@ -614,7 +768,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
     persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
     own = persona and persona.lora and videolora.for_style(cfg, persona.lora[0])
     acts = {a.name: a for a in motion.ACTS}
-    cast = cast_tags(post["prompt"])
+    cast = yuri_cast(post["prompt"]) if any(s.yuri for s in shots) else cast_tags(post["prompt"])
     # Descriptions first: the text model and Wan don't share the GPU.
     comfy.stop()
     texts = [None] * len(shots)
@@ -645,7 +799,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
         loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
         clip_act = used[-1] if used else None
         body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
-        body = ", ".join(p for p in (body, HIS_MOTION.get(shot.act, "")) if p)
+        body = ", ".join(p for p in (body, _motion_of(shot)) if p)
         prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
                                        body, MOTION[post["medium"]]) if p)
         jobs[i] = (pic, prompt, loras, "ok " + " + ".join(l[0].split("-high")[0] for _, l in with_lora))
@@ -800,7 +954,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
         post = load_post(cfg, conn, src)
         persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
         rng = random.Random()
-        shots = plan(rng)
+        shots = plan_yuri(rng) if is_yuri(post["prompt"]) else plan(rng)
         with conn:
             gid = conn.execute(
                 "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"
