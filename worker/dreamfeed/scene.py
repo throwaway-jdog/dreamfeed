@@ -35,6 +35,12 @@ SHOT_CANDIDATES = 4
 PENETRATION = ({"penis"}, {"vaginal", "sex", "penetration"})
 ORAL = ({"penis"}, {"fellatio", "oral"})
 SHOT_TRIES = 3         # a shot whose clip fails a check is made again, then left out
+# Scene clips, picked by eye against the plain-clip settings (same picture and seed): the act
+# LoRA at full strength moves the bodies; the style LoRA lower so it doesn't fight it; one more
+# step without the speed-up LoRA so the motion keeps its detail.
+ACT_STRENGTH = 1.0
+STYLE_STRENGTH = 0.3
+SCENE_WAN = {"motion_steps": 3}
 
 # What a position looks like in a picture (booru tags for the image model), and the act
 # the tagger should then find in it (motion.ACTS names; None when no act LoRA covers it).
@@ -45,6 +51,10 @@ POSITIONS = {
     "reverse cowgirl": ("reverse cowgirl position, girl on top, from behind, sex, vaginal, penis", "reverse cowgirl"),
     "blowjob": ("fellatio, oral, penis, kneeling, looking up", "blowjob"),
 }
+# Penetration shots are drawn side-on with both bodies whole: from below, it sits on the
+# picture's bottom edge and Wan makes the penis vanish instead of moving it.
+SIDE_ON = "full body, (from side:1.2)"
+SIDE_ON_NEGATIVE = "pov, from below, close-up, cropped, out of frame, head out of frame"
 OPENERS = ("missionary", "blowjob")
 MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl")
 
@@ -111,15 +121,18 @@ def plan(rng: random.Random) -> list[Shot]:
     opener = rng.choice(OPENERS)
     a = rng.choice([p for p in MIDDLE if p != opener])
     b = rng.choice([p for p in MIDDLE if p not in (a, opener)] or [p for p in MIDDLE if p != a])
-    pos = lambda name: POSITIONS[name][0]
     act = lambda name: POSITIONS[name][1]
+
+    def pos(name: str, view: str = SIDE_ON) -> str:
+        return POSITIONS[name][0] if name == "blowjob" else f"{POSITIONS[name][0]}, {view}"
     return [
         Shot(f"opening: {opener}", f"{pos(opener)}, blush, half-closed eyes", act(opener), False,
              "slow and gentle, just starting"),
-        Shot(f"{a}", f"{pos(a)}, blush, open mouth", act(a), False, "a steady rhythm"),
+        Shot(f"{a}", f"{pos(a, 'full body, three-quarter view')}, blush, open mouth", act(a), False,
+             "a steady rhythm"),
         # No "close-up" here: in this kind of art it draws inset panels.
-        Shot(f"{a}, from the side", f"(from side:1.3), {pos(a)}, blush, open mouth, sweat, heavy breathing",
-             act(a), False, "faster, she's lost in it"),
+        Shot(f"{a}, from the side", f"{pos(a, 'full body, (from side:1.3)')}, blush, open mouth, sweat, "
+             "heavy breathing", act(a), False, "faster, she's lost in it"),
         Shot(f"{b}", f"{pos(b)}, open mouth, sweat, heavy breathing, motion lines", act(b), False,
              "fast and intense, building toward climax"),
         Shot(f"climax: {b}", f"{pos(b)}, orgasm, cum in pussy, creampie, cum overflow, trembling, open mouth, "
@@ -153,7 +166,9 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     cands: list[list[Path]] = []
     try:
         for i, shot in enumerate(shots):
-            neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, "" if shot.cum else NO_CUM) if n)
+            side_on = shot.act not in (None, "blowjob")
+            neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, "" if shot.cum else NO_CUM,
+                                        SIDE_ON_NEGATIVE if side_on else "") if n)
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora)
@@ -303,9 +318,9 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
             with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
             with_lora = [(a, l) for a, l in with_lora if l]
-            if act_strength is not None:
-                with_lora = [(a, (l[0], l[1], act_strength)) for a, l in with_lora]
-            style_s = gen.video_style_strength if style_strength is None else style_strength
+            act_s = ACT_STRENGTH if act_strength is None else act_strength
+            with_lora = [(a, (l[0], l[1], act_s)) for a, l in with_lora]
+            style_s = STYLE_STRENGTH if style_strength is None else style_strength
             loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
             clip_act = used[-1] if used else None
             body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
@@ -317,7 +332,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                     path = comfy.img2vid("wan", pic, post["medium"], prompt,
                                          seed if seed is not None else rng.randrange(2 ** 32), out.parent.name,
                                          f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
-                                         end=None if shot.climax else pic, wan=wan)
+                                         end=None if shot.climax else pic, wan=SCENE_WAN | (wan or {}))
                 finally:
                     comfy.stop()
                 frames = _frames(path)
