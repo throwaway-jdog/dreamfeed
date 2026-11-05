@@ -16,6 +16,9 @@ python -m dreamfeed video-prep NAME [--limit N] [--no-download]
 python -m dreamfeed scene-preview POST_ID [--seed N]   plan a scene's shots and draw them (no video)
 python -m dreamfeed character-prep NAME --from STYLE --look TAGS [--traits TAGS] [--train STEPS]
                               A character LoRA from a style's pictures of one character.
+python -m dreamfeed bootstrap PERSONA [--count N] [--keep N]
+                              Pictures of a persona's own character (no art yet) to train a
+                              character LoRA on.
 python -m dreamfeed speech NAME
                               A trained style's character voice, from its speech bubbles.
 python -m dreamfeed report    Per-persona posts, likes and drops, and recent runs.
@@ -85,6 +88,9 @@ def main() -> None:
     elif cmd == "speech":
         from .speech import main as speech
         speech(rest)
+    elif cmd == "bootstrap":
+        from .bootstrap import main as bootstrap
+        bootstrap(rest)
     elif cmd == "video-prep":
         from .videolora import main as video_prep
         video_prep(rest)
