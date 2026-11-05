@@ -397,7 +397,8 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
           </div></div>
         <label class="field"><span>Artist's page <small>an X media page, e621, Pixiv, … (anything gallery-dl reads). Drawings only: photos are dropped.</small></span>
           <input class="in" id="s-source" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://x.com/artist/media"></label>
-        <div class="field"><span>Images to download <small>at most; fewer after the checks</small></span>
+        <label class="check"><input type="checkbox" id="s-videos"><span>From videos <small class="hint">· for artists who only post animations: their videos are downloaded and frames from each are the pictures</small></span></label>
+        <div class="field"><span>Images to download <small>at most; fewer after the checks (videos: each gives up to 8 pictures)</small></span>
           <div class="seg" id="s-limit" role="group" aria-label="Images to download" style="grid-template-columns:repeat(3,1fr)">
             <button type="button" data-n="100" aria-pressed="false">100</button>
             <button type="button" data-n="300" aria-pressed="true">300</button>
@@ -1314,7 +1315,8 @@ $("s-form").onsubmit = async e => {
   e.preventDefault(); $("s-go").disabled = true;
   try {
     await api("api/styles/train", { name: $("s-name").value.trim().toLowerCase(), medium: styleState.medium,
-      source: $("s-source").value.trim(), limit: styleState.limit, steps: styleState.steps });
+      source: $("s-source").value.trim(), limit: styleState.limit, steps: styleState.steps,
+      videos: $("s-videos").checked });
     closeStyleForm(); toast("Queued. Progress shows here."); refreshDash();
   } catch (err) { $("s-err").textContent = err.message; }
   $("s-go").disabled = false;

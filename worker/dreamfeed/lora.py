@@ -26,6 +26,7 @@ SKIP_TAGS = {"commentary", "translated", "character name"}
 TAG_MIN = 0.35
 MAX_TAGS = 40
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+DUPLICATE = 0.95   # CLIP likeness of two copies of one picture (or two frames of one shot)
 # Every training image goes through checks.problem(training=True): see safety.py.
 
 
@@ -61,6 +62,7 @@ def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> 
         crop_top = float(json.loads((base / "source.json").read_text()).get("crop_top") or 0)
     except (OSError, ValueError):
         crop_top = 0.0
+    seen = []   # embeddings of the pictures kept, to leave out copies
     for n, path in enumerate(files, 1):
         try:
             img = Image.open(path).convert("RGB")
@@ -71,6 +73,9 @@ def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> 
             img = img.crop((0, round(img.height * crop_top), img.width, img.height))
         a = vision.analyze([img])
         reason = problem(a, medium, [img], cfg, training=True)
+        emb = a.embedding.astype("float32")
+        if not reason and any(float(emb @ e) >= DUPLICATE for e in seen):
+            reason = ("duplicate", "")
         if reason:
             stats["dropped"][reason[0]] = stats["dropped"].get(reason[0], 0) + 1
             path.unlink(missing_ok=True)
@@ -81,6 +86,7 @@ def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> 
         img.save(out / f"{stem}.png")
         (out / f"{stem}.txt").write_text(", ".join([trigger, *tags]))
         stats["kept"] += 1
+        seen.append(emb)
         if n % 5 == 0 or n == len(files):
             write_status(base, phase="checking", done=n, total=len(files), kept=stats["kept"])
         if n % 25 == 0:

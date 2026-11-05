@@ -15,7 +15,8 @@ POST /api/personas/avatar  {"handle": H} new profile picture the next time they 
 POST /api/personas/draft   {"description": "..."} have the worker draft a whole persona from it
 GET  /api/personas/draft   ?job=N its progress, and the draft when ready (opened in the editor)
 GET  /api/styles        trained and in-progress style LoRAs
-POST /api/styles/train  {"name", "medium", "source", "limit", "steps"} download, check and train one
+POST /api/styles/train  {"name", "medium", "source", "limit", "steps", "videos"} download, check and train one
+                        (videos: the artist only posts animations; frames of them are the pictures)
 POST /api/styles/cancel {"name": N} stop a style job
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
@@ -684,7 +685,7 @@ def queue_style(req: dict) -> dict:
             raise ValueError("a style is already being trained; one at a time")
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
             {"kind": "style", "name": name, "medium": medium, "source": source, "limit": limit,
-             "steps": steps}),)).lastrowid
+             "steps": steps, "videos": bool(req.get("videos"))}),)).lastrowid
     return {"job": jid}
 
 

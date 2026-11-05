@@ -4,7 +4,9 @@ A "style" job (queued by the web page) runs three steps, writing progress to
 data/lora/NAME/status.json for the dashboard:
 1. download: gallery-dl fetches up to LIMIT images from the source link into
    data/lora/NAME/raw (images only; an archive skips files already fetched or rejected), and
-   the text of each post into posts.jsonl
+   the text of each post into posts.jsonl. With "videos" (artists who only post animations),
+   it fetches videos instead, and FRAMES_PER_VIDEO frames spread over each become the
+   pictures (near-identical ones are dropped by lora-prep).
 2. check:    lora-prep in a child process (so its GPU memory is freed afterwards); drops
              photos, anything the adults-only or feral checks flag, and blocked tags
    then the texts of posts whose images passed become the style's voice (voice.json), which
@@ -43,6 +45,8 @@ GALLERY_DL = {
     },
 }
 IMAGE_FILTER = "extension in ('jpg', 'jpeg', 'png', 'webp')"
+VIDEO_FILTER = "extension in ('mp4', 'webm', 'mov', 'm4v', 'gif')"
+FRAMES_PER_VIDEO = 8      # spread over the middle 90% of each video
 
 
 class Stopped(Exception):
@@ -54,13 +58,19 @@ def run(cfg: Config, conn, job_id: int, params: dict) -> None:
     base = cfg.data_dir / "lora" / name
     base.mkdir(parents=True, exist_ok=True)
     (base / "cancel").unlink(missing_ok=True)
-    (base / "source.json").write_text(json.dumps({"source": params["source"], "medium": medium,
-                                                  "limit": params["limit"], "steps": params["steps"]}))
+    videos = bool(params.get("videos"))
+    try:   # keep settings made by hand (crop_top)
+        kept = {k: v for k, v in json.loads((base / "source.json").read_text()).items() if k == "crop_top"}
+    except (OSError, ValueError):
+        kept = {}
+    (base / "source.json").write_text(json.dumps(kept | {"source": params["source"], "medium": medium,
+                                                  "limit": params["limit"], "steps": params["steps"],
+                                                  "videos": videos}))
     with conn:
         conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,))
     status, message = "failed", None
     try:
-        got = download(base, params["source"], params["limit"])
+        got = download(base, params["source"], params["limit"], videos=videos)
         kept = check(base, name, medium, trigger_for(base, name))
         captions.build_voice(base)
         if kept < MIN_IMAGES:
@@ -98,17 +108,18 @@ def _watch(base: Path, proc: subprocess.Popen) -> None:
         raise Stopped()
 
 
-def download(base: Path, source: str, limit: int) -> int:
+def download(base: Path, source: str, limit: int, videos: bool = False) -> int:
     raw = base / "raw"
     raw.mkdir(exist_ok=True)
     write_status(base, phase="downloading", done=0, total=limit, message=None, kept=None)
-    conf = dict(GALLERY_DL, extractor=dict(GALLERY_DL["extractor"], **{
-        "base-directory": str(raw), "archive": str(base / "archive.sqlite3")}),
-        downloader={"part-directory": str(raw / ".part")})
+    ext = dict(GALLERY_DL["extractor"], **{"base-directory": str(raw), "archive": str(base / "archive.sqlite3")})
+    if videos:
+        ext["twitter"] = dict(ext["twitter"], videos=True)
+    conf = dict(GALLERY_DL, extractor=ext, downloader={"part-directory": str(raw / ".part")})
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(conf, f)
     cmd = ["gallery-dl", "--config-ignore", "--config", f.name, "--range", f"1-{limit}",
-           "--filter", IMAGE_FILTER]
+           "--filter", VIDEO_FILTER if videos else IMAGE_FILTER]
     host = source.split("/")[2].lower() if source.count("/") >= 2 else ""
     if host.removeprefix("www.").removeprefix("mobile.") in COOKIE_HOSTS:
         if not COOKIES.is_file():
@@ -132,8 +143,30 @@ def download(base: Path, source: str, limit: int) -> int:
     if code and not have:
         raise RuntimeError("download failed: " + (errors[-1] if errors else f"gallery-dl exit {code}")
                            + (" (expired cookies?)" if "x.com" in source or "twitter.com" in source else ""))
+    if videos:
+        frames = _frames_from_videos(raw)
+        print(f"style: {new} new videos, {frames} frames from them", flush=True)
+        return new
     print(f"style: {new} new images, {have} in raw", flush=True)
     return new
+
+
+def _frames_from_videos(raw: Path) -> int:
+    """Each video in raw becomes FRAMES_PER_VIDEO pictures, full size; the video is deleted
+    (the archive remembers it, so it isn't fetched again)."""
+    from .videolora import _duration
+    made = 0
+    for video in sorted(p for p in raw.iterdir() if p.is_file() and p.suffix.lower() in
+                        (".mp4", ".webm", ".mov", ".m4v", ".gif")):
+        length = _duration(video)
+        for n in range(FRAMES_PER_VIDEO if length > 0 else 0):
+            at = length * (0.05 + 0.9 * n / max(1, FRAMES_PER_VIDEO - 1))
+            out = raw / f"{video.stem}_f{n}.png"
+            done = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{at:.2f}", "-i", str(video),
+                                   "-frames:v", "1", str(out)], capture_output=True, timeout=120)
+            made += done.returncode == 0 and out.is_file()
+        video.unlink(missing_ok=True)
+    return made
 
 
 def check(base: Path, name: str, medium: str, trigger: str) -> int:

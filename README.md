@@ -164,9 +164,16 @@ fetches the artist's newer images and trains again; **Stop** cancels at any step
 then appears in the persona editor for personas of the same medium. The artist's post texts
 are saved too, for personas whose captions should sound like them (see Captions).
 
+**From videos** is for artists who only post animations: their videos are downloaded instead,
+and 8 frames spread over each become the pictures. A character LoRA can then be made from them
+like from any style (`character-prep`).
+
 The checks before training drop photographs (styles learn drawings, never real people), then
-anything the strict adult checks, the feral filter or the blocked tags flag; dropped files are
-deleted and not downloaded again. A style needs at least 20 images that pass.
+anything the strict adult checks, the feral filter or the blocked tags flag, and near-identical
+copies (the same picture from two sites, or two frames of one shot); dropped files are deleted
+and not downloaded again. A style needs at least 20 images that pass. An artist who always
+signs in the same strip at the top: set `"crop_top": 0.06` (a share of the height) in
+`data/lora/NAME/source.json` and the strip is cut off every picture before the checks.
 
 By hand: put images in `data/lora/NAME/raw/`, then
 
