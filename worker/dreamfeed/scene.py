@@ -140,7 +140,7 @@ BACKGROUND = {"tiles", "tile wall", "tile floor", "shower head", "shower (place)
               "outdoors", "beach", "ocean", "sand", "sky", "cloud", "sunset", "night", "night sky", "tree",
               "grass", "forest", "water", "pool", "onsen", "kitchen", "lamp", "door", "wooden floor",
               "carpet", "plant", "potted plant", "city", "building", "locker room", "classroom", "office"}
-BG_WEIGHT = 0.5      # of a candidate's score: background colours against likeness to the post
+BG_WEIGHT = 0.6      # of a candidate's score: background colours against likeness to the post
 # A shot whose frames drift this far from its first (one character turning into someone else
 # mid-clip) is made again. Normal motion stays above 0.95.
 DRIFT_MIN = 0.9
@@ -154,6 +154,22 @@ def _edges(img: Image.Image) -> np.ndarray:
     strips = np.concatenate([a[:20].reshape(-1, 3), a[20:, :12].reshape(-1, 3), a[20:, -12:].reshape(-1, 3)])
     h, _ = np.histogramdd(strips // 32, bins=(8, 8, 8), range=((0, 8),) * 3)
     return (h / h.sum()).ravel()
+
+
+# Named colours for the walls, as the image model knows them (RGB).
+COLOURS = {"white": (235, 235, 235), "light grey": (190, 190, 192), "grey": (150, 152, 156), "dark grey": (70, 72, 76), "black": (25, 25, 28),
+           "blue": (70, 120, 190), "light blue": (160, 200, 225), "teal": (80, 160, 160),
+           "beige": (215, 195, 160), "brown": (120, 85, 55), "pink": (225, 160, 180), "green": (100, 160, 100)}
+WALLS = {"tiles": "tiles", "tile wall": "tile wall", "tile floor": "tile floor", "indoors": "walls"}
+
+
+def wall_colour(img: Image.Image) -> str:
+    """The nearest named colour to the picture's top corners, where the wall mostly is (the
+    middle of the top edge often has her head in it)."""
+    a = np.asarray(img.convert("RGB").resize((96, 128)))
+    a = np.concatenate([a[:32, :18].reshape(-1, 3), a[:32, -18:].reshape(-1, 3)]).astype(np.float32)
+    mid = np.median(a, axis=0)   # the median: highlights and her ears don't count
+    return min(COLOURS, key=lambda c: float(((np.array(COLOURS[c]) - mid) ** 2).sum()))
 
 
 def background_tags(general: dict[str, float], cast: str) -> list[str]:
@@ -271,10 +287,12 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
         cast = ", ".join(t for t in _split(cast) if t not in BREASTS and t not in BUILD)
         cast += ", " + ", ".join(f"({t}:1.2)" for t in body)
     room = background_tags(seen_post.general, cast)
-    if room:
-        cast += ", " + ", ".join(f"({t}:1.1)" for t in room)
     with Image.open(post["file"]) as im:
-        post_edges = _edges(im)
+        post_edges, colour = _edges(im), wall_colour(im)
+    # The walls in the post's colour: "tiles" alone draws them blue in one shot, beige the next.
+    walls = [f"({colour} {WALLS[t]}:1.2)" for t in room if t in WALLS]
+    if room:
+        cast += ", " + ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS])
     print(f"scene: cast and setting: {cast}; keeping out: {avoid}", flush=True)
     lora = persona.lora_for(post["prompt"]) if persona else None
     negative = persona.negative if persona else ""
