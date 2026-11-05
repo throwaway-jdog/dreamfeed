@@ -132,6 +132,36 @@ def body_tags(prompt_body: list[str], general: dict[str, float]) -> tuple[list[s
     return tags, ", ".join(sorted(avoid - set(tags)))
 
 
+# The post's background, in every shot: otherwise each picture draws its own room. What the
+# tagger names goes in the prompt; colours it can't name are matched by picking candidates whose
+# edges (top and sides, mostly background) are coloured like the post's.
+BACKGROUND = {"tiles", "tile wall", "tile floor", "shower head", "shower (place)", "bathroom", "bathtub",
+              "steam", "bedroom", "bed", "bed sheet", "pillow", "window", "curtains", "couch", "indoors",
+              "outdoors", "beach", "ocean", "sand", "sky", "cloud", "sunset", "night", "night sky", "tree",
+              "grass", "forest", "water", "pool", "onsen", "kitchen", "lamp", "door", "wooden floor",
+              "carpet", "plant", "potted plant", "city", "building", "locker room", "classroom", "office"}
+BG_WEIGHT = 0.5      # of a candidate's score: background colours against likeness to the post
+# A shot whose frames drift this far from its first (one character turning into someone else
+# mid-clip) is made again. Normal motion stays above 0.95.
+DRIFT_MIN = 0.9
+DRIFT_FRAMES = 16
+STACK_SCALE = 0.8    # each LoRA's strength when a climax stacks two: at full strength they fight
+
+
+def _edges(img: Image.Image) -> np.ndarray:
+    """A colour histogram of the picture's top and sides, where the background mostly is."""
+    a = np.asarray(img.convert("RGB").resize((96, 128)))
+    strips = np.concatenate([a[:20].reshape(-1, 3), a[20:, :12].reshape(-1, 3), a[20:, -12:].reshape(-1, 3)])
+    h, _ = np.histogramdd(strips // 32, bins=(8, 8, 8), range=((0, 8),) * 3)
+    return (h / h.sum()).ravel()
+
+
+def background_tags(general: dict[str, float], cast: str) -> list[str]:
+    have = set(_split(cast))
+    return [t for t, sc in sorted(general.items(), key=lambda kv: -kv[1])
+            if t in BACKGROUND and sc >= TAG_SURE and t not in have]
+
+
 # Tags that belong to what's happening, not to who and where: dropped from the post's own
 # tags to get the cast and setting.
 SCENE_ONLY = re.compile(r"\b(cum|semen|creampie|ejaculat|bukkake|facial|after sex|orgasm|"
@@ -240,6 +270,11 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     if body:   # her build once, weighted, in place of whatever the post's prompt said
         cast = ", ".join(t for t in _split(cast) if t not in BREASTS and t not in BUILD)
         cast += ", " + ", ".join(f"({t}:1.2)" for t in body)
+    room = background_tags(seen_post.general, cast)
+    if room:
+        cast += ", " + ", ".join(f"({t}:1.1)" for t in room)
+    with Image.open(post["file"]) as im:
+        post_edges = _edges(im)
     print(f"scene: cast and setting: {cast}; keeping out: {avoid}", flush=True)
     lora = persona.lora_for(post["prompt"]) if persona else None
     negative = persona.negative if persona else ""
@@ -285,14 +320,16 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 bad = FURRY_PARTNER | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
                     (CUT_OFF if shot.act not in (None, "blowjob") else set())
                 fits = (fits and not (bad & seen), side, same_body)
-                scored.append((fits, float(a.embedding.astype(np.float32) @ base), p))
+                look = float(a.embedding.astype(np.float32) @ base)
+                bg = float(np.minimum(_edges(img), post_edges).sum())   # 1 = the same colours
+                scored.append((fits, (1 - BG_WEIGHT) * look + BG_WEIGHT * bg, p, look, bg))
             best = max(scored, key=lambda s: s[:2]) if scored else None
             for p in paths:
                 if not best or p != best[2]:
                     p.unlink(missing_ok=True)
             if best:
                 _crop(best[2])
-            out.append((best[2], f"{'' if best[0][0] else 'act not seen, '}{'' if best[0][1] else 'not side-on, '}body {best[0][2]}/{len(body)}, look {best[1]:.2f}") if best
+            out.append((best[2], f"{'' if best[0][0] else 'act not seen, '}{'' if best[0][1] else 'not side-on, '}body {best[0][2]}/{len(body)}, look {best[3]:.2f}, background {best[4]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
@@ -365,8 +402,9 @@ def preview(args: list[str]) -> None:
 def _shot_prompt(writer, cast: str, shot: Shot, act) -> str | None:
     """A written, checked description of the shot's motion for its point in the scene."""
     where = (f"This is one shot of a longer scene: {shot.pace}. The clip loops, so the motion is a "
-             f"repeating cycle that ends where it started. Both of them move: "
-             f"{HIS_MOTION.get(shot.act, 'he moves with her')}.")
+             f"repeating cycle that ends where it started." +
+             (f" Both of them move: {HIS_MOTION[shot.act]}." if shot.act in HIS_MOTION else
+              " Only she moves: gentle breathing, small shifts; nobody new appears."))
     return motion.describe(writer, [t.strip() for t in f"{cast}, {shot.tags}".split(",")], act, context=where)
 
 
@@ -380,7 +418,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
     import subprocess
     from . import personas as people, videolora
     from .comfy import WAN
-    from .generate import MOTION, VIDEO_CHECK_FRAMES, _check_frames
+    from .generate import MOTION
     gen = cfg.generation()
     persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
     own = persona and persona.lora and videolora.for_style(cfg, persona.lora[0])
@@ -411,8 +449,11 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
             with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
             with_lora = [(a, l) for a, l in with_lora if l]
-            act_s = ACT_STRENGTH if act_strength is None else act_strength
-            with_lora = [(a, (l[0], l[1], act_s)) for a, l in with_lora]
+            # The shared act LoRA at ACT_STRENGTH; an act's own LoRA at the strength it's made for.
+            scale = STACK_SCALE if len(with_lora) > 1 else 1.0
+            with_lora = [(a, (l[0], l[1], round(scale * (act_strength if act_strength is not None
+                                                          else l[2] if a.lora else ACT_STRENGTH), 2)))
+                         for a, l in with_lora]
             style_s = STYLE_STRENGTH if style_strength is None else style_strength
             loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
             clip_act = used[-1] if used else None
@@ -431,7 +472,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                     comfy.stop()
                 frames = _frames(path)
                 path.unlink(missing_ok=True)
-                reason = _check_frames(cfg, _sample(frames, VIDEO_CHECK_FRAMES), post["medium"], post["strict"])
+                reason = _check_shot(cfg, frames, post)
                 if not reason:
                     break
                 print(f"scene: shot {i + 1} try {attempt + 1} dropped ({reason[0]}: {reason[1]})", flush=True)
@@ -465,6 +506,25 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             writer.wait()
         out.unlink(missing_ok=True)
         raise
+
+
+def _check_shot(cfg, frames: np.ndarray, post: dict) -> tuple[str, str] | None:
+    """The clip checks, and that no frame drifts away from the first (a morph)."""
+    from .checks import drop_reason
+    from .generate import VIDEO_CHECK_FRAMES, _feral
+    from .vision import Vision
+    vision = Vision(cfg.models_dir)
+    try:
+        sample = _sample(frames, VIDEO_CHECK_FRAMES)
+        a = vision.analyze(sample)
+        reason = drop_reason(a, post["medium"], sample, cfg, strict=post["strict"]) or _feral(a)
+        if reason:
+            return reason
+        embs = vision.embed([Image.fromarray(frames[0])] + _sample(frames, DRIFT_FRAMES))
+    finally:
+        vision.close()
+    low = float((embs[1:] @ embs[0]).min())
+    return ("drift", f"a frame is only {low:.2f} like the first") if low < DRIFT_MIN else None
 
 
 def render_preview(args: list[str]) -> None:

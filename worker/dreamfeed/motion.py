@@ -39,7 +39,7 @@ ACTS = (
     Act("standing", "standing sex, the man is standing behind the woman and penetrating her. He is thrusting his hip up and down",
         ("standing sex", "standing split", "against wall"),
         "he stands behind her and thrusts his hips into her hard, her body bouncing with each thrust",
-        lora="wan2.2-i2v-standing", strength=1.0),
+        lora="wan2.2-i2v-standing", strength=0.8),   # at 1.0 it smears the penis
     Act("doggy", "d0gg1e", ("doggystyle", "sex from behind", "top-down bottom-up", "from behind", "all fours"),
         "he thrusts into her from behind in a steady rhythm, her body rocking forward with each thrust"),
     Act("missionary", "m15510n4ry", ("missionary", "on back", "spread legs", "lying"),

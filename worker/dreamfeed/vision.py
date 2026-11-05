@@ -78,6 +78,11 @@ class Vision:
         x = self.clip_tf(img).unsqueeze(0).to(self.device)
         return F.normalize(self.clip.encode_image(x).float(), dim=-1)[0]
 
+    @torch.no_grad()
+    def embed(self, frames: list[Image.Image]) -> np.ndarray:
+        """One normalized embedding per frame (float32), to compare frames with each other."""
+        return torch.stack([self._embed(f) for f in frames]).cpu().numpy().astype(np.float32)
+
     def _zero_shot(self, emb: torch.Tensor, name: str) -> dict[str, float]:
         labels, text = self.prompts[name]
         probs = torch.softmax(100 * emb @ text.T, dim=-1).cpu().numpy()
