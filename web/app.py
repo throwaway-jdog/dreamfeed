@@ -290,7 +290,8 @@ def request_animation(req: dict) -> dict:
                 raise LookupError("only images in the feed can be animated")
             if req.get("scene"):
                 tags = conn.execute("SELECT coalesce(tags, prompt) FROM generations WHERE id = ?", (gid,)).fetchone()[0]
-                if "duo" not in {t.strip() for t in (tags or "").split(",")}:
+                # POV pictures show only part of him: the tagger says 1boy or hetero, not duo.
+                if not {"duo", "1boy", "hetero"} & {t.strip() for t in (tags or "").split(",")}:
                     raise ValueError("scenes need a post with two characters")
                 params = {"kind": "scene", "ids": [gid]}
                 if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",

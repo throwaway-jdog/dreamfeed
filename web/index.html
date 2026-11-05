@@ -177,6 +177,8 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .toast { position: fixed; z-index: 20; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
   background: var(--raise); color: var(--fg); border: 1px solid var(--rule); padding: 10px 16px; border-radius: 999px;
   font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); max-width: calc(100vw - 32px); }
+.toast-act { margin-left: 10px; background: none; border: 0; padding: 4px 2px; color: var(--accent, var(--fg));
+  font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
 @media (min-width: 960px) { .viewer .nav { width: 30%; cursor: pointer; } }
 @media (prefers-reduced-motion: reduce) { .post, .viewer .stage img, .viewer .heart { transition: none; } }
 /* Dashboard */
@@ -639,9 +641,14 @@ async function api(url, body) {
 }
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, action, onAction) {
   const t = $("toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600);
+  if (action) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action;
+    b.onclick = () => { t.hidden = true; clearTimeout(toastTimer); onAction(); };
+    t.append(" ", b);
+  }
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, action ? 6000 : 2600);
 }
 
 function nightLabel(n) {
@@ -836,7 +843,15 @@ async function skip(it) {
   removeItem(it);
   try { await api("api/feedback", { id: it.id, action: "skip" }); refreshSummary(); }
   catch (e) { toast(e.message); reset(); return; }
+  toast("Skipped", "Undo", () => unskip(it, at));
   if (state.idx >= 0) { if (!state.items.length) closeViewer(); else showAt(Math.min(at, state.items.length - 1)); }
+}
+
+async function unskip(it, at) {
+  try { await api("api/feedback", { id: it.id, action: "clear" }); refreshSummary(); }
+  catch (e) { toast(e.message); return; }
+  if (state.idx >= 0) closeViewer();
+  reset();
 }
 
 function removeItem(it) {

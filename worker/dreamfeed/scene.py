@@ -88,6 +88,7 @@ SHOT_NEGATIVE = {"doggy": "standing sex, she is standing", "blowjob": "wall", No
 PARTNER_NEGATIVE = "glory hole, disembodied penis, dildo, penis through wall"   # every shot
 SOLO_FOCUS = 0.7   # "solo focus" this sure in a sex shot: he's barely there (a penis, no man)
 PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", "panel"}   # a shot is one picture
+FURRY_HIM_AVOID = "human male, cat boy, feminine male"   # a furry partner from the post
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
 # His look, one per scene, spelled out so he's the same man in every shot: (prompt, what to
 # keep out, whether the tagger should read him as dark-skinned). Bald, like most anons in
@@ -142,7 +143,9 @@ def character_body(persona, prompt: str) -> list[str]:
         core = [t for t in tags if t not in BREASTS and t not in BUILD]
         if core and set(core) <= have and "female" in core:
             return [t for t in tags if t in BREASTS or t in BUILD]
-    return []
+    # One-character personas say it in their look ("(medium breasts:1.3)").
+    look = [re.sub(r"^\((.*):[\d.]+\)$", r"\1", t) for t in _split(persona.look if persona else "")]
+    return [t for t in look if t in BREASTS or t in BUILD]
 
 
 def body_tags(prompt_body: list[str], general: dict[str, float]) -> tuple[list[str], str]:
@@ -292,15 +295,16 @@ def hair_tags(general: dict[str, float]) -> tuple[list[str], str]:
     return tags, ", ".join(avoid)
 
 
-def cast_tags(prompt: str, partner: str = "") -> str:
+def cast_tags(prompt: str, partner: str = "", faceless: bool = True) -> str:
     """The post's prompt minus everything that belongs to the act: who and where. partner: his
-    look, the same in every shot of a scene."""
+    look, the same in every shot of a scene. faceless: draw him as a faceless male (a human
+    partner; a furry one from the post is drawn as the post says)."""
     keep = [t.strip() for t in prompt.split(",") if t.strip() and not SCENE_ONLY.search(t)]
     keep = [t for t in keep if t not in ("duo", "male", "1boy", PARTNER)]
     # Rating first, then the pair, then her.
     rating = [t for t in keep if t in ("nsfw", "explicit", "questionable")]
     rest = [t for t in keep if t not in rating]
-    return ", ".join(rating + ["duo", PARTNER] + ([partner] if partner else []) + rest)
+    return ", ".join(rating + ["duo"] + ([PARTNER] if faceless else ["1boy"]) + ([partner] if partner else []) + rest)
 
 
 def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
@@ -359,8 +363,11 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
         vision.close()
     base = seen_post.embedding.astype(np.float32)
     body, avoid = body_tags(character_body(persona, post["prompt"]), seen_post.general)
-    him, him_avoid, him_dark = rng.choice(PARTNER_LOOKS)
-    cast = cast_tags(post["prompt"], him)
+    # A post that says he's a furry (a persona's own partner) keeps him: his look is in the
+    # post's prompt. Otherwise one of the human looks.
+    furry_him = "furry male" in _split(post["prompt"])
+    him, him_avoid, him_dark = ("", FURRY_HIM_AVOID, None) if furry_him else rng.choice(PARTNER_LOOKS)
+    cast = cast_tags(post["prompt"], him, faceless=not furry_him)
     hair, hair_avoid = hair_tags(seen_post.general)
     if hair:
         cast += ", " + ", ".join(hair)
@@ -428,8 +435,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
                 # The tagger reads her as the post's build and hair, and him in his skin.
                 same_body = sum(t in seen for t in body + hair + fur) + \
-                    int(("dark-skinned male" in seen) == him_dark)
-                bad = FURRY_PARTNER | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
+                    int("furry male" in seen if furry_him else ("dark-skinned male" in seen) == him_dark)
+                bad = (set() if furry_him else FURRY_PARTNER) | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
                     (CUT_OFF if shot.act not in (None, "blowjob") else set())
                 missing = bool(NO_PARTNER & seen) or (shot.act is not None and a.general.get("solo focus", 0) >= SOLO_FOCUS)
                 # He must be there before anything else counts: a fallback pick must never be
