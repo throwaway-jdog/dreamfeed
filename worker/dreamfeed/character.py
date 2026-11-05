@@ -57,6 +57,10 @@ PARTS = {
 }
 
 
+def _tags(txt: Path) -> list[str]:
+    return [t.strip() for t in txt.read_text().split(",")[1:] if t.strip()]   # [0] is the style trigger
+
+
 def _closeup(vision, img, tag: str, sizes):
     """(score, square crop, its analysis) where the tagger sees tag most surely, or None."""
     w, h = img.size
