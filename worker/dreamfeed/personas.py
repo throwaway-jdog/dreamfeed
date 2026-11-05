@@ -96,7 +96,10 @@ class Persona:
         body = post.prompt.format(**fill)
         if "{setting}" not in post.prompt:
             body += ", " + fill["setting"]
-        parts = [p for p in (self.trigger, self.art_trigger, self.look, body) if p]
+        look = self.look
+        if "2girls" in {t.strip() for t in body.split(",")}:   # her look says 1girl
+            look = ", ".join(t for t in look.split(", ") if t.strip() != "1girl")
+        parts = [p for p in (self.trigger, self.art_trigger, look, body) if p]
         return RATINGS[post.rating] + ", ".join(parts)
 
     def lora_for(self, prompt: str) -> list[tuple[str, float]]:
