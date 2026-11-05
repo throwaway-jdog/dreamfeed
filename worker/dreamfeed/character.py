@@ -2,7 +2,7 @@
 
     python -m dreamfeed character-prep NAME --from STYLE --look "red hair, green eyes"
                                        --traits "red hair, green eyes, freckles, ..."
-                                       [--closeups TAG] [--train STEPS]
+                                       [--closeups PARTS] [--train STEPS]
 
 Some artists mostly draw one character. Their style LoRA learns her a little, but it learns
 from everything they draw. This keeps only the style's training pictures that show her:
@@ -12,10 +12,13 @@ Each caption starts with the trigger NAME and leaves out her --traits, so the Lo
 whole look to the one word; everything else (pose, outfit, partner, text) stays tagged, so it
 can still be asked for or kept out.
 
---closeups TAG adds a close-up of each picture: the square where the tagger sees TAG most
-surely (her hairclip, say). A small detail she always wears is a few pixels of a whole
-picture, so the LoRA learns "a hairclip" but not which one; close-ups show it. Each one is
-checked again like the pictures (adults-only at the strict threshold).
+--closeups PARTS adds close-ups of her: hairclip, face, breasts, pussy, ass, or penis (for
+femboy characters; solo pictures only). For each picture, the square where the tagger sees the
+part most surely. Small details are a few pixels of a whole picture, so the LoRA learns "a
+hairclip" but not which one; close-ups show it. They go in their own folder with half the
+repeats and are captioned "close-up", so she isn't drawn cropped unless asked. A square with
+someone else in it is left out, and each one is checked again like the pictures (adults-only
+at the strict threshold). closeups.json lists what was kept and why the rest weren't.
 
 The pictures were already checked when the style was prepared (adults-only at the strict
 threshold, photos, feral, blocked tags); they are copied, not downloaded again. --train
@@ -36,21 +39,29 @@ CROWD = {"2girls", "3girls", "4girls", "multiple girls", "group sex", "yuri"}
 KEEP_SHARE = 0.8     # of the pictures that show her: the most alike, by CLIP
 MIN_PICTURES = 20
 REPEATS = 8          # fewer pictures than a style, each seen more often
-CLOSEUP_SIZES = (0.3, 0.45)   # the square's side, as a share of the picture's shorter side
-CLOSEUP_SURE = 0.5            # the tagger's score for TAG in the best square
-CLOSEUP_MIN_PX = 384
 TAG_MIN = 0.35
+CLOSEUP_REPEATS = 4   # half a whole picture's: close-ups of her shouldn't outweigh her
+CLOSEUP_MIN_PX = 384
+CLOSEUP_SURE = 0.5    # the tagger's score for the part in the best square
+# Each part: the tag that finds it, the square's side as shares of the picture's shorter side,
+# tags that mean the square shows someone else too, and whether only solo pictures count
+# (a penis in a picture with a partner may be his).
+NOT_HER = {"1boy", "multiple boys", "penis", "testicles", "male pubic hair"} | CROWD
+PARTS = {
+    "hairclip": ("hairclip", (0.3, 0.45), CROWD, False),
+    "face": ("portrait", (0.35, 0.5), NOT_HER, False),
+    "breasts": ("nipples", (0.35, 0.5), NOT_HER, False),
+    "pussy": ("pussy", (0.3, 0.45), NOT_HER, False),
+    "ass": ("ass", (0.4, 0.55), NOT_HER, False),
+    "penis": ("penis", (0.3, 0.45), CROWD | {"1girl", "pussy"}, True),   # femboy characters
+}
 
 
-def _tags(txt: Path) -> list[str]:
-    return [t.strip() for t in txt.read_text().split(",")[1:] if t.strip()]   # [0] is the style trigger
-
-
-def _closeup(vision, img, tag: str):
+def _closeup(vision, img, tag: str, sizes):
     """(score, square crop, its analysis) where the tagger sees tag most surely, or None."""
     w, h = img.size
     best = None
-    for share in CLOSEUP_SIZES:
+    for share in sizes:
         side = int(min(w, h) * share)
         if side < CLOSEUP_MIN_PX:
             continue
@@ -62,33 +73,61 @@ def _closeup(vision, img, tag: str):
                 score = a.general.get(tag, 0)
                 if best is None or score > best[0]:
                     best = (score, crop, a)
-    return best if best and best[0] >= CLOSEUP_SURE else None
+    return best
 
 
-def _closeups(cfg: Config, vision, keep: list[Path], out: Path, name: str, tag: str,
-              traits: set[str], medium: str) -> int:
+def _closeups(cfg: Config, vision, keep: list[Path], out: Path, name: str, parts: list[str],
+              traits: set[str], medium: str) -> dict:
+    """Close-ups of each part, into their own folder (fewer repeats). Every one is checked
+    again like the pictures; data/lora/NAME/closeups.json lists what was kept and why the
+    rest weren't."""
     from PIL import Image
     from .checks import drop_reason
-    n = 0
-    for txt in keep:
-        with Image.open(txt.with_suffix(".png")) as im:
-            found = _closeup(vision, im.convert("RGB"), tag)
-        if not found:
-            continue
-        _, crop, a = found
-        if drop_reason(a, medium, [crop], cfg, strict=True):
-            continue
-        tags = [t for t, v in sorted(a.general.items(), key=lambda kv: -kv[1])
-                if v >= TAG_MIN and t not in traits and t not in CROWD]
-        crop.resize((1024, 1024), Image.LANCZOS).save(out / f"c{n:04d}.png")
-        (out / f"c{n:04d}.txt").write_text(", ".join([name, "close-up"] + tags))
-        n += 1
-    print(f"character-prep: {n} close-ups of {tag}", flush=True)
-    return n
+    log, counts = [], {}
+    for part in parts:
+        tag, sizes, others, solo_only = PARTS[part]
+        n = 0
+        for txt in keep:
+            if n >= len(keep):   # no more close-ups of one part than whole pictures
+                break
+            entry = {"part": part, "picture": txt.with_suffix(".png").name}
+            log.append(entry)
+            if solo_only and "solo" not in _tags(txt):
+                entry["why"] = "not a solo picture"
+                continue
+            with Image.open(txt.with_suffix(".png")) as im:
+                found = _closeup(vision, im.convert("RGB"), tag, sizes)
+            if not found or found[0] < CLOSEUP_SURE:
+                entry["why"] = f"no {tag} (best {found[0]:.2f})" if found else "picture too small"
+                continue
+            score, crop, a = found
+            seen = {t for t, v in a.general.items() if v >= TAG_MIN}
+            if seen & others:
+                entry["why"] = "someone else in it: " + ", ".join(sorted(seen & others))
+                continue
+            reason = drop_reason(a, medium, [crop], cfg, strict=True)
+            if reason:
+                entry["why"] = "check: " + " ".join(reason)
+                continue
+            tags = [t for t, v in sorted(a.general.items(), key=lambda kv: -kv[1])
+                    if v >= TAG_MIN and t not in traits and t not in CROWD and t != "close-up"]
+            stem = f"{part}-{n:03d}"
+            crop.resize((1024, 1024), Image.LANCZOS).save(out / f"{stem}.png")
+            (out / f"{stem}.txt").write_text(", ".join([name, "close-up"] + tags))
+            entry.update(kept=stem, score=round(score, 2))
+            n += 1
+        counts[part] = n
+        dropped = [e for e in log if e["part"] == part and "kept" not in e]
+        print(f"character-prep: {n} close-ups of {part}, {len(dropped)} not used", flush=True)
+        for e in dropped:
+            if e["why"].startswith(("check", "someone")):
+                print(f"  {e['picture']}: {e['why']}", flush=True)
+    (out.parent.parent / "closeups.json").write_text(json.dumps(log, indent=1))
+    return counts
 
 
 def prepare(cfg: Config, name: str, style: str, look: list[str], traits: set[str],
-            closeups: str | None = None) -> dict:
+            closeups: list[str] | None = None) -> dict:
     from PIL import Image
     from .vision import Vision
     src = cfg.data_dir / "lora" / style
@@ -107,14 +146,19 @@ def prepare(cfg: Config, name: str, style: str, look: list[str], traits: set[str
             with Image.open(txt.with_suffix(".png")) as im:
                 embs.append(vision.embed([im.convert("RGB")])[0])
         keep, out, base = _copy(cfg, name, picks, embs, traits)
-        extra = _closeups(cfg, vision, keep, out, name, closeups, traits, medium) if closeups else 0
+        if closeups:
+            crops = out.parent / f"{CLOSEUP_REPEATS}_{name}"
+            crops.mkdir()
+            extra = _closeups(cfg, vision, keep, crops, name, closeups, traits, medium)
+        else:
+            extra = {}
     finally:
         vision.close()
     stats = {"kept": len(keep), "closeups": extra, "trigger": name, "medium": medium, "from": style, "look": look}
     (base / "prep.json").write_text(json.dumps(stats))
     # No "source": it isn't downloaded, so the dashboard offers no retrain from a page.
     (base / "source.json").write_text(json.dumps({"source": None, "medium": medium, "from": style}))
-    write_status(base, phase="prepared", kept=len(keep) + extra, message=None)
+    write_status(base, phase="prepared", kept=len(keep) + sum(extra.values()), message=None)
     print(f"character-prep: {name} {stats}", flush=True)
     return stats
 
@@ -155,7 +199,8 @@ def main(args: list[str]) -> None:
     ap.add_argument("--from", dest="style", required=True, help="the trained style whose pictures to use")
     ap.add_argument("--look", required=True, help="tags every picture of her has, comma separated")
     ap.add_argument("--traits", default="", help="her tags to leave out of captions (the trigger learns them)")
-    ap.add_argument("--closeups", metavar="TAG", help="also a close-up of each picture where the tagger sees TAG")
+    ap.add_argument("--closeups", metavar="PARTS",
+                    help="close-ups of these, comma separated: " + ", ".join(PARTS))
     ap.add_argument("--train", type=int, metavar="STEPS", help="then ask the trainer for this many steps")
     a = ap.parse_args(args)
     if not a.name.replace("_", "").isalnum() or not a.style.replace("_", "").isalnum():
@@ -163,6 +208,9 @@ def main(args: list[str]) -> None:
     split = lambda s: [t.strip() for t in s.split(",") if t.strip()]
     look = split(a.look)
     cfg = Config()
-    stats = prepare(cfg, a.name, a.style, look, set(look) | set(split(a.traits)), a.closeups)
+    parts = split(a.closeups or "")
+    if set(parts) - set(PARTS):
+        sys.exit(f"character-prep: unknown parts {sorted(set(parts) - set(PARTS))}; known: {', '.join(PARTS)}")
+    stats = prepare(cfg, a.name, a.style, look, set(look) | set(split(a.traits)), parts)
     if a.train:
         train(cfg, a.name, stats["medium"], a.train)
