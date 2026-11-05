@@ -102,6 +102,17 @@ HAIR_LENGTHS = ("very short hair", "short hair", "medium hair", "long hair", "ve
 HAIR_STYLES = {"ponytail", "twintails", "bob cut", "braid", "hair bun", "side ponytail", "pixie cut"}
 NOT_HAIR = {"pubic hair", "female pubic hair", "male pubic hair", "body hair", "facial hair", "wet hair",
             "hair between eyes", "hair over one eye", "hair ornament", "hair flower", "hairband"}
+# How furry she is, read off the post (a furry post only): these go in every shot weighted,
+# and count toward a candidate's score. Without them, hair and a human-ish face pull her
+# toward a bunny girl with skin.
+FUR_TAGS = {"furry female": 1.3, "body fur": 1.25, "snout": 1.15, "animal nose": 1.1}
+NOT_FURRY = "kemonomimi mode, human face, human skin, human nose, humanoid, skin"
+# The room, drawn once per scene with nobody in it; every shot starts from it (img2img) and
+# keeps about 1 - PLATE_DENOISE of it: walls, colours and fixtures stay put, and there's
+# enough noise left to draw the two of them in any pose.
+PLATE_CANDIDATES = 3
+PLATE_DENOISE = 0.8
+PLATE_NEGATIVE = "1girl, 1boy, person, people, character, animal, furry, nude, text, watermark"
 # The climax shows cum, but a little: the picture and the creampie LoRA each add their own.
 CLIMAX_NEGATIVE = "cum overflow, excessive cum, cum pool, cum on floor, cum on legs, bukkake, cum string"
 CROP = 0.04   # off the top and bottom of each shot: style LoRAs learn the artist's signature strip
@@ -186,6 +197,43 @@ def wall_colour(img: Image.Image) -> str:
     a = np.concatenate([a[:32, :18].reshape(-1, 3), a[:32, -18:].reshape(-1, 3)]).astype(np.float32)
     mid = np.median(a, axis=0)   # the median: highlights and her ears don't count
     return min(COLOURS, key=lambda c: float(((np.array(COLOURS[c]) - mid) ** 2).sum()))
+
+
+# Words in a post's prompt that name where it is (its {setting}), for the empty room.
+SETTING_WORDS = {"shower", "bathroom", "bedroom", "beach", "beach at sunset", "hot spring", "steam", "onsen",
+                 "kitchen", "living room", "classroom", "office", "forest", "pool", "night", "sunset", "city"}
+
+
+def draw_plate(cfg, comfy, post: dict, room: str, lora, negative: str, subdir: str, name: str,
+               rng: random.Random, post_edges: np.ndarray) -> Path | None:
+    """The scene's room with nobody in it, coloured like the post's; None if every try had
+    someone in it (then shots start from noise, as before)."""
+    from .vision import Vision
+    prompt = f"no humans, scenery, empty room, detailed background, {room}"
+    try:
+        paths = [comfy.txt2img(post["checkpoint"], post["medium"], prompt, rng.randrange(2 ** 32), subdir,
+                               f"{name}-room-{c}", extra_negative=", ".join(n for n in (negative, PLATE_NEGATIVE) if n),
+                               strict=post["strict"], lora=lora) for c in range(PLATE_CANDIDATES)]
+    finally:
+        comfy.stop()
+    vision = Vision(cfg.models_dir)
+    scored = []
+    try:
+        for p in paths:
+            with Image.open(p) as im:
+                img = im.convert("RGB")
+            a = vision.analyze([img])
+            if a.general.get("no humans", 0) < 0.5 or a.general.get("1girl", 0) >= TAG_SURE:
+                continue
+            scored.append((float(np.minimum(_edges(img), post_edges).sum()), p))
+    finally:
+        vision.close()
+    best = max(scored)[1] if scored else None
+    for p in paths:
+        if p != best:
+            p.unlink(missing_ok=True)
+    print(f"scene: room {'drawn' if best else 'not drawn (people in every try)'}: {room}", flush=True)
+    return best
 
 
 def background_tags(general: dict[str, float], cast: str) -> list[str]:
@@ -295,9 +343,10 @@ def _crop(path: Path) -> None:
 
 
 def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
-         rng: random.Random) -> list[tuple[Path | None, str]]:
+         rng: random.Random, keep_room: Path | None = None) -> list[tuple[Path | None, str]]:
     """One checked picture per shot: (path or None, note). Candidates that lose are deleted;
-    winners are cropped (CROP)."""
+    winners are cropped (CROP). The empty room they start from is deleted too, or moved to
+    keep_room."""
     from . import captions
     from .checks import drop_reason
     from .generate import _feral
@@ -315,8 +364,12 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     cast = cast_tags(post["prompt"], him)
     hair, hair_avoid = hair_tags(seen_post.general)
     if hair:
-        cast += ", " + ", ".join(f"({t}:1.15)" for t in hair)
-    avoid = ", ".join(a for a in (avoid, hair_avoid, him_avoid) if a)
+        cast += ", " + ", ".join(hair)
+    fur = [t for t in FUR_TAGS if post["medium"] == "furry" and seen_post.general.get(t, 0) >= TAG_SURE]
+    if fur:   # her fur colour too: the room's grey tints white fur otherwise
+        cast = ", ".join(f"({t}:1.25)" if t.endswith(" fur") else t for t in _split(cast))
+        cast += ", " + ", ".join(f"({t}:{FUR_TAGS[t]})" for t in fur)
+    avoid = ", ".join(a for a in (avoid, hair_avoid, him_avoid, NOT_FURRY if fur else "") if a)
     if body:   # her build once, weighted, in place of whatever the post's prompt said
         cast = ", ".join(t for t in _split(cast) if t not in BREASTS and t not in BUILD)
         cast += ", " + ", ".join(f"({t}:1.2)" for t in body)
@@ -330,6 +383,9 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     print(f"scene: cast and setting: {cast}; keeping out: {avoid}", flush=True)
     lora = persona.lora_for(post["prompt"]) if persona else None
     negative = persona.negative if persona else ""
+    room_tags = ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS] +
+                          [t for t in _split(post["prompt"]) if t in SETTING_WORDS])
+    plate = draw_plate(cfg, comfy, post, room_tags, lora, negative, subdir, name, rng, post_edges)
     cands: list[list[Path]] = []
     try:
         for i, shot in enumerate(shots):
@@ -339,10 +395,15 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                                         PARTNER_NEGATIVE, CLIMAX_NEGATIVE if shot.climax else "") if n)
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
-                                        extra_negative=neg, strict=post["strict"], lora=lora)
+                                        extra_negative=neg, strict=post["strict"], lora=lora,
+                                        init=plate, denoise=PLATE_DENOISE if plate else 1.0)
                           for c in range(SHOT_CANDIDATES_SIDE if side_on else SHOT_CANDIDATES)])
     finally:
         comfy.stop()
+        if plate and keep_room:
+            plate.replace(keep_room)
+        elif plate:
+            plate.unlink(missing_ok=True)
     vision = Vision(cfg.models_dir)
     out = []
     try:
@@ -370,7 +431,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 # Then side-on, for penetration: from below, Wan loses the penis at the edge.
                 side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
                 # The tagger reads her as the post's build and hair, and him in his skin.
-                same_body = sum(t in seen for t in body + hair) + \
+                same_body = sum(t in seen for t in body + hair + fur) + \
                     int(("dark-skinned male" in seen) == him_dark)
                 bad = FURRY_PARTNER | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
                     (CUT_OFF if shot.act not in (None, "blowjob") else set())
@@ -387,7 +448,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     p.unlink(missing_ok=True)
             if best:
                 _crop(best[2])
-            out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}her and him {best[0][3]}/{len(body) + len(hair) + 1}, look {best[3]:.2f}, background {best[4]:.2f}") if best
+            out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}her and him {best[0][3]}/{len(body) + len(hair) + len(fur) + 1}, look {best[3]:.2f}, background {best[4]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
@@ -449,7 +510,8 @@ def preview(args: list[str]) -> None:
     out_dir = cfg.data_dir / "generated"
     subdir = f"scene-preview-{a.post}"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
-    pictures = draw(cfg, comfy, persona, post, shots, subdir, f"post{a.post}", rng)
+    pictures = draw(cfg, comfy, persona, post, shots, subdir, f"post{a.post}", rng,
+                    keep_room=out_dir / subdir / "room.png")
     sheet = contact_sheet(post["file"], shots, pictures, out_dir / subdir / "contact-sheet.jpg")
     from dataclasses import asdict
     (out_dir / subdir / "plan.json").write_text(json.dumps(
