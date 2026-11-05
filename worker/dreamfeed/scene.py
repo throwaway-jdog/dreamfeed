@@ -84,7 +84,9 @@ NO_PARTNER = {"glory hole", "disembodied penis", "dildo", "sex toy", "penis on w
 CUT_OFF = {"head out of frame", "out of frame", "lower body"}
 WRONG_POSE = {"doggy": {"standing sex", "standing split"}}   # he may stand; she mustn't
 # What each shot keeps out of the picture, to match.
-SHOT_NEGATIVE = {"doggy": "standing sex, she is standing", "blowjob": "glory hole, disembodied penis, dildo, wall"}
+SHOT_NEGATIVE = {"doggy": "standing sex, she is standing", "blowjob": "wall", None: "pov, penis"}
+PARTNER_NEGATIVE = "glory hole, disembodied penis, dildo, penis through wall"   # every shot
+SOLO_FOCUS = 0.7   # "solo focus" this sure in a sex shot: he's barely there (a penis, no man)
 PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", "panel"}   # a shot is one picture
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
 PARTNER_LOOKS = ("dark-skinned male", "tan skin", "muscular male, dark skin")   # not grey: reads as fur   # one per scene
@@ -301,7 +303,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
         for i, shot in enumerate(shots):
             side_on = shot.act not in (None, "blowjob")
             neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, avoid, "" if shot.cum else NO_CUM,
-                                        SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, "")) if n)
+                                        SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, ""),
+                                        PARTNER_NEGATIVE) if n)
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora)
@@ -337,7 +340,10 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 same_body = sum(t in seen for t in body)   # the tagger reads her as the post's build
                 bad = FURRY_PARTNER | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
                     (CUT_OFF if shot.act not in (None, "blowjob") else set())
-                fits = (fits and not (bad & seen), side, same_body)
+                missing = bool(NO_PARTNER & seen) or (shot.act is not None and a.general.get("solo focus", 0) >= SOLO_FOCUS)
+                # He must be there before anything else counts: a fallback pick must never be
+                # a penis through the wall.
+                fits = (not missing and not (bad & seen), fits, side, same_body)
                 look = float(a.embedding.astype(np.float32) @ base)
                 bg = float(np.minimum(_edges(img), post_edges).sum())   # 1 = the same colours
                 scored.append((fits, (1 - BG_WEIGHT) * look + BG_WEIGHT * bg, p, look, bg))
@@ -347,7 +353,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     p.unlink(missing_ok=True)
             if best:
                 _crop(best[2])
-            out.append((best[2], f"{'' if best[0][0] else 'act not seen, '}{'' if best[0][1] else 'not side-on, '}body {best[0][2]}/{len(body)}, look {best[3]:.2f}, background {best[4]:.2f}") if best
+            out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}body {best[0][3]}/{len(body)}, look {best[3]:.2f}, background {best[4]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
