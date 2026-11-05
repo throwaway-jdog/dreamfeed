@@ -9,7 +9,8 @@ the artist behind the style named in "voice" (captions.py).
 
 Placeholders allowed in a post prompt: {outfit} (from the persona's outfits, or a generic
 list), {cosplay} (generic costumes only, never named characters), {setting}, {character}
-(one of the persona's characters, for artist personas that draw different people).
+(one of the persona's characters, for artist personas that draw different people), {partner}
+(one of the persona's partners, so the man in their duo posts isn't always the same one).
 """
 import json
 import random
@@ -64,6 +65,7 @@ class Persona:
     avatar: str
     posts: list[Post]
     outfits: list[str] = field(default_factory=list)
+    partners: list[str] = field(default_factory=list)
     settings: list[str] = field(default_factory=list)
     characters: list[str] = field(default_factory=list)
     emoji: list[str] = field(default_factory=list)
@@ -84,6 +86,7 @@ class Persona:
             "cosplay": rng.choice(COSPLAY),
             "setting": rng.choice(self.settings or SETTINGS),
             "character": rng.choice(self.characters) if self.characters else "",
+            "partner": rng.choice(self.partners) if self.partners else "faceless male",
         }
         body = post.prompt.format(**fill)
         if "{setting}" not in post.prompt:
@@ -147,10 +150,10 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         if rating not in RATINGS or not k.get("prompt") or not k.get("captions"):
             raise Invalid(f"{where}: every kind of post needs a prompt, captions and a rating")
         try:
-            k["prompt"].format(outfit="", cosplay="", setting="", character="")
+            k["prompt"].format(outfit="", cosplay="", setting="", character="", partner="")
         except (KeyError, IndexError, ValueError):
             raise Invalid(f"{where}: a prompt uses an unknown placeholder; allowed are "
-                          "{outfit} {cosplay} {setting} {character}")
+                          "{outfit} {cosplay} {setting} {character} {partner}")
         posts.append(Post(str(k.get("kind", "post")), float(k.get("weight", 1)), k["prompt"], rating,
                           [str(c) for c in k["captions"]]))
     if not posts:
@@ -160,14 +163,14 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
     persona = Persona(
         handle=handle, name=str(p.get("name") or handle), medium=p["medium"], bio=str(p.get("bio", "")),
         look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
-        posts=posts, outfits=list(p.get("outfits", [])), settings=list(p.get("settings", [])),
+        posts=posts, outfits=list(p.get("outfits", [])), partners=list(p.get("partners", [])), settings=list(p.get("settings", [])),
         characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
         hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
         weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),
         paused=bool(p.get("paused", False)), voice=str(p.get("voice") or ""))
     if persona.voice and not HANDLE.match(persona.voice):
         raise Invalid(f"{where}: voice must be the name of a trained style")
-    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.settings, *persona.characters,
+    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.partners, *persona.settings, *persona.characters,
                      *(k.prompt for k in posts)])
     bad = safety.blocked(text)
     if bad:

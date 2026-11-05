@@ -339,7 +339,7 @@ def cancel(req: dict) -> dict:
 # written, so a bad edit is refused here instead of breaking the nightly run.
 EDIT_LOCK = threading.Lock()
 TEXT_FIELDS = {"name": 60, "bio": 300, "look": 1000, "avatar": 500, "negative": 500, "based_on": 200}
-LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "settings": (40, 200), "emoji": (10, 16),
+LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "partners": (30, 200), "settings": (40, 200), "emoji": (10, 16),
                "hashtags": (10, 40)}
 MAX_POST_KINDS = 12
 NEW_FILE = {"_note": "Private. Fictional posters for the dreamfeed timeline, edited from the dashboard or by hand. "

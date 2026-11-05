@@ -52,7 +52,9 @@ keeps the previous version as `data/personas.json.bak`. The format, from
 - `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
-  who draw different people). The captions are examples of how the persona writes (below).
+  who draw different people), and `{partner}` (one of `partners`, so duo posts don't always
+  show the same man; a faceless male when there are none). The captions are examples of how
+  the persona writes (below).
 - `voice`: the name of a trained style; the persona's captions then sound like that
   artist's own posts instead of its example captions.
 
@@ -127,7 +129,8 @@ chained, so each shot is its own clip:
 
 1. Plan: opening (missionary or blowjob), a position, the same from the side, another position,
    the climax in it, aftermath. The post gives the cast and setting (its tags minus act, position
-   and cum); the partner is a faceless male with one look for the whole scene. Cum is kept out of
+   and cum); the partner is a faceless male with one look for the whole scene, or, when the post's partner
+   is a furry (`furry male` in its prompt), that one. Cum is kept out of
    every shot before the climax.
 2. Draw: one picture per shot with the persona's own model and style LoRA, checked like posts; of
    3 candidates, the one showing the intended act and looking most like the post wins. Comic-panel
