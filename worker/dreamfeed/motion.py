@@ -49,8 +49,8 @@ SEX = {"sex", "vaginal", "anal", "penetration", "imminent penetration"}
 
 # Climaxes, for the last shot of a scene (not picked from a picture's tags).
 CREAMPIE = Act("creampie", "cr34mp13", ("creampie", "cum in pussy"),
-               "thick white cum pours out of her vagina around his penis as he thrusts slowly and deep",
-               lora="wan2.2-i2v-creampie", strength=0.8)
+               "he thrusts deep and holds still inside her as he cums, a little cum leaking out around his penis",
+               lora="wan2.2-i2v-creampie", strength=0.6)   # higher floods the shot
 FACIAL = Act("facial", "", ("facial", "cum on face"),
              "cum shoots out of his penis and lands on her face and tongue and mouth",
              lora="wan2.2-i2v-facial", strength=1.0)

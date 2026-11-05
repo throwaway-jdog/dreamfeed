@@ -89,7 +89,21 @@ PARTNER_NEGATIVE = "glory hole, disembodied penis, dildo, penis through wall"   
 SOLO_FOCUS = 0.7   # "solo focus" this sure in a sex shot: he's barely there (a penis, no man)
 PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", "panel"}   # a shot is one picture
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
-PARTNER_LOOKS = ("dark-skinned male", "tan skin", "muscular male, dark skin")   # not grey: reads as fur   # one per scene
+# His look, one per scene, spelled out so he's the same man in every shot: (prompt, what to
+# keep out, whether the tagger should read him as dark-skinned). Bald, like most anons in
+# this art. Not grey: it reads as fur.
+PARTNER_LOOKS = (
+    ("(tan skin:1.2), (muscular male:1.1), (bald:1.2)", "dark skin, very dark skin, pale skin, black skin", False),
+    ("(dark skin:1.2), dark-skinned male, (muscular male:1.1), (bald:1.2)", "pale skin, tan skin, light skin", True),
+)
+# Her hair, read off the post: the character often doesn't say, and then each shot guesses
+# (long in one, none in the next). One colour, one length, plus a style if the tagger is sure.
+HAIR_LENGTHS = ("very short hair", "short hair", "medium hair", "long hair", "very long hair")
+HAIR_STYLES = {"ponytail", "twintails", "bob cut", "braid", "hair bun", "side ponytail", "pixie cut"}
+NOT_HAIR = {"pubic hair", "female pubic hair", "male pubic hair", "body hair", "facial hair", "wet hair",
+            "hair between eyes", "hair over one eye", "hair ornament", "hair flower", "hairband"}
+# The climax shows cum, but a little: the picture and the creampie LoRA each add their own.
+CLIMAX_NEGATIVE = "cum overflow, excessive cum, cum pool, cum on floor, cum on legs, bukkake, cum string"
 CROP = 0.04   # off the top and bottom of each shot: style LoRAs learn the artist's signature strip
 
 # Her body, read off the post's picture and put in every shot: otherwise each picture draws
@@ -218,6 +232,19 @@ def _sample(frames: np.ndarray, count: int) -> list[Image.Image]:
     return [Image.fromarray(frames[i]) for i in idx]
 
 
+def hair_tags(general: dict[str, float]) -> tuple[list[str], str]:
+    """(her hair tags, what to keep out) from the tagger's scores for the post's picture."""
+    sure = {t: sc for t, sc in general.items() if sc >= TAG_SURE}
+    colours = [(sc, t) for t, sc in sure.items() if t.endswith(" hair") and t not in NOT_HAIR
+               and t not in HAIR_LENGTHS and t not in ("multicolored hair", "two-tone hair", "gradient hair")]
+    lengths = [(sc, t) for t, sc in sure.items() if t in HAIR_LENGTHS]
+    tags = [max(colours)[1]] if colours else []
+    tags += [max(lengths)[1]] if lengths else []
+    tags += [t for t in sure if t in HAIR_STYLES]
+    avoid = [t for t in HAIR_LENGTHS if lengths and t != max(lengths)[1]]
+    return tags, ", ".join(avoid)
+
+
 def cast_tags(prompt: str, partner: str = "") -> str:
     """The post's prompt minus everything that belongs to the act: who and where. partner: his
     look, the same in every shot of a scene."""
@@ -251,7 +278,7 @@ def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
              "heavy breathing", act(a), False, "faster, she's lost in it"),
         Shot(f"{b}", f"{pos(b)}, open mouth, sweat, heavy breathing, motion lines", act(b), False,
              "fast and intense, building toward climax"),
-        Shot(f"climax: {b}", f"{pos(b)}, orgasm, cum in pussy, creampie, cum overflow, trembling, open mouth, "
+        Shot(f"climax: {b}", f"{pos(b)}, orgasm, cum in pussy, trembling, open mouth, "
              "sweat", act(b), True, "the climax: he cums inside her, both shuddering", loops=1, climax="creampie"),
         Shot("aftermath", "after sex, lying, on back, cum in pussy, cum on body, sweat, heavy breathing, "
              "half-closed eyes, smile", None, True, "slow, catching their breath", loops=1),
@@ -284,7 +311,12 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
         vision.close()
     base = seen_post.embedding.astype(np.float32)
     body, avoid = body_tags(character_body(persona, post["prompt"]), seen_post.general)
-    cast = cast_tags(post["prompt"], rng.choice(PARTNER_LOOKS))
+    him, him_avoid, him_dark = rng.choice(PARTNER_LOOKS)
+    cast = cast_tags(post["prompt"], him)
+    hair, hair_avoid = hair_tags(seen_post.general)
+    if hair:
+        cast += ", " + ", ".join(f"({t}:1.15)" for t in hair)
+    avoid = ", ".join(a for a in (avoid, hair_avoid, him_avoid) if a)
     if body:   # her build once, weighted, in place of whatever the post's prompt said
         cast = ", ".join(t for t in _split(cast) if t not in BREASTS and t not in BUILD)
         cast += ", " + ", ".join(f"({t}:1.2)" for t in body)
@@ -304,7 +336,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             side_on = shot.act not in (None, "blowjob")
             neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, avoid, "" if shot.cum else NO_CUM,
                                         SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, ""),
-                                        PARTNER_NEGATIVE) if n)
+                                        PARTNER_NEGATIVE, CLIMAX_NEGATIVE if shot.climax else "") if n)
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora)
@@ -337,7 +369,9 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     (need is None or (need[0] <= seen and bool(need[1] & seen)))
                 # Then side-on, for penetration: from below, Wan loses the penis at the edge.
                 side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
-                same_body = sum(t in seen for t in body)   # the tagger reads her as the post's build
+                # The tagger reads her as the post's build and hair, and him in his skin.
+                same_body = sum(t in seen for t in body + hair) + \
+                    int(("dark-skinned male" in seen) == him_dark)
                 bad = FURRY_PARTNER | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
                     (CUT_OFF if shot.act not in (None, "blowjob") else set())
                 missing = bool(NO_PARTNER & seen) or (shot.act is not None and a.general.get("solo focus", 0) >= SOLO_FOCUS)
@@ -353,7 +387,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     p.unlink(missing_ok=True)
             if best:
                 _crop(best[2])
-            out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}body {best[0][3]}/{len(body)}, look {best[3]:.2f}, background {best[4]:.2f}") if best
+            out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}her and him {best[0][3]}/{len(body) + len(hair) + 1}, look {best[3]:.2f}, background {best[4]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
