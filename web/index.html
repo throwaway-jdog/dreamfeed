@@ -559,7 +559,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <section class="panel">
       <h2>Kinds of post</h2>
       <p class="note">Each night picks one of these per post, by weight. Prompts are booru tags and can use
-        <code>{outfit}</code> <code>{cosplay}</code> <code>{setting}</code> <code>{character}</code> <code>{partner}</code> <code>{girlfriend}</code>.</p>
+        <code>{outfit}</code> <code>{cosplay}</code> <code>{setting}</code> <code>{character}</code> <code>{partner}</code> <code>{girlfriend}</code> <code>{friend}</code>.</p>
       <div id="e-kinds" class="field" style="gap:10px"></div>
       <button class="secondary" type="button" id="e-add-kind">Add a kind of post</button>
     </section>
@@ -570,6 +570,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <label class="field"><span>Outfits <small>one per line; empty uses a general list</small></span><textarea class="in" id="e-outfits" rows="3"></textarea></label>
       <label class="field"><span>Partners <small>one per line, for <code>{partner}</code> in duo posts; empty is a faceless man</small></span><textarea class="in" id="e-partners" rows="3"></textarea></label>
       <label class="field"><span>Girlfriends <small>one per line, for <code>{girlfriend}</code> in girl-girl posts</small></span><textarea class="in" id="e-girlfriends" rows="3"></textarea></label>
+      <label class="field"><span>Friends <small>other personas' handles, one per line, for <code>{friend}</code>: they appear as themselves, with their own style</small></span><textarea class="in" id="e-friends" rows="2" autocapitalize="none"></textarea></label>
       <label class="field"><span>Settings <small>one per line; empty uses a general list</small></span><textarea class="in" id="e-settings" rows="3"></textarea></label>
       <label class="field"><span>Emoji <small>added to some captions</small></span><input class="in" id="e-emoji" autocomplete="off" placeholder="✨ 💕"></label>
       <label class="field"><span>Hashtags <small>separated by spaces, without #</small></span><input class="in" id="e-tags" autocomplete="off" autocapitalize="none" placeholder="cosplay lewd"></label>
@@ -1441,9 +1442,9 @@ function openEditor(p, asNew = false) {
   $("e-handle-note").hidden = !ed.isNew;
   $("e-bio").value = c.bio || ""; $("e-note").value = c.based_on || "";
   $("e-look").value = c.look || ""; $("e-chars").value = (c.characters || []).join("\n"); $("e-avatar").value = c.avatar || "";
-  $("e-outfits").value = (c.outfits || []).join("\n"); $("e-partners").value = (c.partners || []).join("\n"); $("e-girlfriends").value = (c.girlfriends || []).join("\n"); $("e-settings").value = (c.settings || []).join("\n");
+  $("e-outfits").value = (c.outfits || []).join("\n"); $("e-partners").value = (c.partners || []).join("\n"); $("e-girlfriends").value = (c.girlfriends || []).join("\n"); $("e-friends").value = (c.friends || []).join("\n"); $("e-settings").value = (c.settings || []).join("\n");
   $("e-emoji").value = (c.emoji || []).join(" "); $("e-tags").value = (c.hashtags || []).join(" "); $("e-neg").value = c.negative || "";
-  $("e-more").open = !!(c.outfits?.length || c.partners?.length || c.girlfriends?.length || c.settings?.length || c.negative);
+  $("e-more").open = !!(c.outfits?.length || c.partners?.length || c.girlfriends?.length || c.friends?.length || c.settings?.length || c.negative);
   $("e-weight").value = c.weight ?? 1; $("e-video").value = c.video_share ?? 0.2; renderRanges();
   ed.paused = !!c.paused; setPressed("e-paused", ed.paused, "Yes", "No");
   ed.medium = c.medium || "anime"; ed.loraOn = !!c.lora?.enabled;
@@ -1493,7 +1494,7 @@ function collect() {
     handle: $("e-handle").value.trim().toLowerCase(), name: $("e-name").value.trim(), medium: ed.medium,
     bio: $("e-bio").value.trim(), based_on: $("e-note").value.trim(), look: $("e-look").value.trim(),
     characters: lines($("e-chars").value), avatar: $("e-avatar").value.trim(),
-    outfits: lines($("e-outfits").value), partners: lines($("e-partners").value), girlfriends: lines($("e-girlfriends").value), settings: lines($("e-settings").value),
+    outfits: lines($("e-outfits").value), partners: lines($("e-partners").value), girlfriends: lines($("e-girlfriends").value), friends: lines($("e-friends").value).map(h => h.replace(/^@/, "").toLowerCase()), settings: lines($("e-settings").value),
     emoji: words($("e-emoji").value), hashtags: words($("e-tags").value), negative: $("e-neg").value.trim(),
     weight: +$("e-weight").value, video_share: +$("e-video").value, paused: ed.paused, posts, voice: $("e-voice").value,
     lora: (ed.loraOn || ed.cur.lora) && $("e-style").value ? { style: $("e-style").value, strength: +$("e-strength").value,

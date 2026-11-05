@@ -55,8 +55,10 @@ keeps the previous version as `data/personas.json.bak`. The format, from
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
   who draw different people), and `{partner}` (one of `partners`, so duo posts don't always
-  show the same man; a faceless male when there are none) and `{girlfriend}` (one of
-  `girlfriends`, for girl-girl posts). The captions are examples of how
+  show the same man; a faceless male when there are none), `{girlfriend}` (one of
+  `girlfriends`, for girl-girl posts) and `{friend}` (one of `friends`, other personas'
+  handles: that persona appears as themselves, each drawn with their own LoRA in their own half
+  of the picture; scenes from such posts aren't possible yet). The captions are examples of how
   the persona writes (below).
 - `voice`: the name of a trained style; the persona's captions then sound like that
   artist's own posts instead of its example captions.

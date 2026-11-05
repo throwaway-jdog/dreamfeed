@@ -124,7 +124,9 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
         ckpt = gen.checkpoints[p.medium]
         seed = rng.randrange(2 ** 32)
         lora = p.lora_for(prompt)
-        if p.trigger and p.lora not in lora:   # not the persona's LoRA, so its trigger word means nothing
+        regions = p.regions(prompt, rng) if kind == "image" else None
+        hooked = [r[3] for r in regions or [] if len(r) > 3 and r[3]]
+        if p.trigger and p.lora not in lora + hooked:   # not the persona's LoRA, so its trigger word means nothing
             prompt = ", ".join(t for t in prompt.split(", ") if t != p.trigger)
         with conn:
             gid = conn.execute(
@@ -134,7 +136,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
         try:
             path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}",
                                  strict=p.strict, lora=lora, extra_negative=p.negative if kind == "image" else "",
-                                 regions=p.regions(prompt, rng) if kind == "image" else None)
+                                 regions=regions)
         except ValueError as e:   # safety.prompts refused it
             _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
             return

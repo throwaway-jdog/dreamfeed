@@ -11,7 +11,9 @@ Placeholders allowed in a post prompt: {outfit} (from the persona's outfits, or 
 list), {cosplay} (generic costumes only, never named characters), {setting}, {character}
 (one of the persona's characters, for artist personas that draw different people), {partner}
 (one of the persona's partners, so the man in their duo posts isn't always the same one),
-{girlfriend} (one of their girlfriends, the same for girl-girl posts).
+{girlfriend} (one of their girlfriends, the same for girl-girl posts), {friend} (another
+persona from their friends: that persona's trigger word and look, drawn with that persona's
+own LoRA in their half of the picture and this one's in the other, so the two stay themselves).
 """
 import json
 import random
@@ -68,6 +70,8 @@ class Persona:
     outfits: list[str] = field(default_factory=list)
     partners: list[str] = field(default_factory=list)
     girlfriends: list[str] = field(default_factory=list)
+    friends: list[str] = field(default_factory=list)   # other personas' handles, for {friend}
+    cast: dict = field(default_factory=dict, repr=False)   # every persona by handle (parse sets it)
     settings: list[str] = field(default_factory=list)
     characters: list[str] = field(default_factory=list)
     emoji: list[str] = field(default_factory=list)
@@ -92,6 +96,7 @@ class Persona:
             "character": rng.choice(self.characters) if self.characters else "",
             "partner": rng.choice(self.partners) if self.partners else "faceless male",
             "girlfriend": rng.choice(self.girlfriends) if self.girlfriends else "another girl",
+            "friend": self._as_friend(rng.choice(self.friends)) if self.friends and "{friend}" in post.prompt else "",
         }
         body = post.prompt.format(**fill)
         if "{setting}" not in post.prompt:
@@ -102,6 +107,20 @@ class Persona:
         parts = [p for p in (self.trigger, self.art_trigger, look, body) if p]
         return RATINGS[post.rating] + ", ".join(parts)
 
+    def _as_friend(self, handle: str) -> str:
+        """Another persona as they appear in this one's post: their trigger word and look."""
+        f = self.cast[handle]
+        look = ", ".join(t for t in f.look.split(", ") if t.strip() != "1girl")
+        return ", ".join(t for t in (f.trigger, look) if t)
+
+    def friend_in(self, prompt: str):
+        """The friend (a Persona) this prompt shows, or None."""
+        for h in self.friends:
+            text = self._as_friend(h)
+            if text and text in prompt:
+                return self.cast[h]
+        return None
+
     def regions(self, prompt: str, rng: random.Random):
         """For a post with one of their partners or girlfriends: [(her tags, x from, x to), (the
         other's tags, x from, x to)], each repeated for their own part of the picture (shares of
@@ -109,12 +128,18 @@ class Persona:
         looks. (Without the whole prompt, she loses her look.) None for anything else."""
         tags = [t.strip() for t in prompt.split(",") if t.strip()]
         have = set(tags)
+        left, right = (0.0, 0.6), (0.4, 1.0)
+        friend = self.friend_in(prompt)
+        if friend:   # each with their own LoRA, in their own half only
+            mine, theirs = (left, right) if rng.random() < 0.5 else (right, left)
+            look = ", ".join(t for t in self.look.split(", ") if t.strip() != "1girl")
+            her = ", ".join(t for t in (self.trigger, look) if t)
+            return [(her, *mine, self.lora), (self._as_friend(friend.handle), *theirs, friend.lora)]
         other = next((x for x in self.partners + self.girlfriends
                       if x and {t.strip() for t in x.split(",") if t.strip()} <= have), None)
         if not other or not self.look:
             return None
         her = [t for t in [self.trigger] + [t.strip() for t in self.look.split(",")] if t and t in have]
-        left, right = (0.0, 0.6), (0.4, 1.0)
         mine, theirs = (left, right) if rng.random() < 0.5 else (right, left)
         return [(", ".join(her), *mine), (other, *theirs)]
 
@@ -122,6 +147,8 @@ class Persona:
         """The LoRAs for a prompt: the persona's own, unless the prompt's character is male and it
         is marked female-only (trained mostly on women, it would turn men into women), then the
         artist's style (art), which draws everyone in the picture."""
+        if self.friend_in(prompt):   # both characters' LoRAs go in their own halves (regions)
+            return [l for l in (self.art,) if l]
         own = self.lora
         if own and self.lora_female_only:
             tags = {t.strip() for t in prompt.split(",")}
@@ -160,6 +187,18 @@ def parse(raw: dict) -> list[Persona]:
     out, seen = [], set()
     for i, p in enumerate(raw.get("personas", [])):
         out.append(_persona(p, f"{p.get('name') or p.get('handle') or f'persona {i + 1}'}", seen))
+    cast = {p.handle: p for p in out}
+    for p in out:
+        p.cast = cast
+        for f in p.friends:
+            if f == p.handle or f not in cast:
+                raise Invalid(f"{p.name}: friend @{f} isn't another persona")
+            if cast[f].medium != p.medium:
+                raise Invalid(f"{p.name}: friend @{f} is {cast[f].medium}, not {p.medium}")
+            if cast[f].strict:   # their stricter adult prompts and checks would not apply here
+                raise Invalid(f"{p.name}: friend @{f} uses the strict checks, so can't be a friend")
+        if "{friend}" in " ".join(k.prompt for k in p.posts) and not p.friends:
+            raise Invalid(f"{p.name}: a prompt uses {{friend}} but there are no friends")
     return out
 
 
@@ -176,10 +215,10 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         if rating not in RATINGS or not k.get("prompt") or not k.get("captions"):
             raise Invalid(f"{where}: every kind of post needs a prompt, captions and a rating")
         try:
-            k["prompt"].format(outfit="", cosplay="", setting="", character="", partner="", girlfriend="")
+            k["prompt"].format(outfit="", cosplay="", setting="", character="", partner="", girlfriend="", friend="")
         except (KeyError, IndexError, ValueError):
             raise Invalid(f"{where}: a prompt uses an unknown placeholder; allowed are "
-                          "{outfit} {cosplay} {setting} {character} {partner} {girlfriend}")
+                          "{outfit} {cosplay} {setting} {character} {partner} {girlfriend} {friend}")
         posts.append(Post(str(k.get("kind", "post")), float(k.get("weight", 1)), k["prompt"], rating,
                           [str(c) for c in k["captions"]]))
     if not posts:
@@ -190,7 +229,7 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         handle=handle, name=str(p.get("name") or handle), medium=p["medium"], bio=str(p.get("bio", "")),
         look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
         posts=posts, outfits=list(p.get("outfits", [])), partners=list(p.get("partners", [])),
-        girlfriends=list(p.get("girlfriends", [])), settings=list(p.get("settings", [])),
+        girlfriends=list(p.get("girlfriends", [])), friends=[str(f) for f in p.get("friends", [])], settings=list(p.get("settings", [])),
         characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
         hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
         weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),

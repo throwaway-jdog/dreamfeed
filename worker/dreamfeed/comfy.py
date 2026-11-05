@@ -112,7 +112,10 @@ class Comfy:
             workflow[f"lora{n}"] = {"class_type": "LoraLoader", "inputs": {
                 "model": [prev, 0], "clip": [prev, 1], "lora_name": file,
                 "strength_model": strength, "strength_clip": strength}}
-        self.start()
+        # A LoRA tied to one region keeps a second copy of the model in memory, which image mode
+        # can't hold: such a picture runs in the leaner video mode, on a fresh ComfyUI each time.
+        hooked = any(len(r) > 3 and r[3] for r in regions or [])
+        self.start("video" if hooked else "image")
         for n, (tags, x0, x1, *own) in enumerate(regions or []):
             if safety.blocked(tags):
                 raise ValueError(f"blocked tags in a region: {', '.join(safety.blocked(tags))}")
@@ -146,6 +149,8 @@ class Comfy:
                 images = entry.get("outputs", {}).get("save", {}).get("images", [])
                 if images:
                     img = images[0]
+                    if hooked:
+                        self.stop()
                     return self.output_dir / img["subfolder"] / img["filename"]
             time.sleep(1)
         raise TimeoutError(f"ComfyUI prompt {prompt_id} did not finish in 600s")

@@ -293,6 +293,10 @@ def request_animation(req: dict) -> dict:
                 # POV pictures show only part of him: the tagger says 1boy or hetero, not duo.
                 if not {"duo", "1boy", "hetero"} & {t.strip() for t in (tags or "").split(",")}:
                     raise ValueError("scenes need a post with two characters")
+                handle, prompt = conn.execute("SELECT persona, prompt FROM generations WHERE id = ?", (gid,)).fetchone()
+                poster = {p.handle: p for p in people.parse(read_personas())}.get(handle)
+                if poster and poster.friend_in(prompt or ""):
+                    raise ValueError("scenes with two personas aren't possible yet")
                 params = {"kind": "scene", "ids": [gid]}
                 if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
                                 (json.dumps(params),)).fetchone()[0]:
@@ -339,7 +343,7 @@ def cancel(req: dict) -> dict:
 # written, so a bad edit is refused here instead of breaking the nightly run.
 EDIT_LOCK = threading.Lock()
 TEXT_FIELDS = {"name": 60, "bio": 300, "look": 1000, "avatar": 500, "negative": 500, "based_on": 200}
-LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "partners": (30, 200), "girlfriends": (30, 200), "settings": (40, 200), "emoji": (10, 16),
+LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "partners": (30, 200), "girlfriends": (30, 200), "friends": (10, 20), "settings": (40, 200), "emoji": (10, 16),
                "hashtags": (10, 40)}
 MAX_POST_KINDS = 12
 NEW_FILE = {"_note": "Private. Fictional posters for the dreamfeed timeline, edited from the dashboard or by hand. "
