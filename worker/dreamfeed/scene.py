@@ -107,11 +107,10 @@ NOT_HAIR = {"pubic hair", "female pubic hair", "male pubic hair", "body hair", "
 # toward a bunny girl with skin.
 FUR_TAGS = {"furry female": 1.3, "body fur": 1.25, "snout": 1.15, "animal nose": 1.1}
 NOT_FURRY = "kemonomimi mode, human face, human skin, human nose, humanoid, skin"
-# The room, drawn once per scene with nobody in it; every shot starts from it (img2img) and
-# keeps about 1 - PLATE_DENOISE of it: walls, colours and fixtures stay put, and there's
-# enough noise left to draw the two of them in any pose.
+# The room, drawn once per scene with nobody in it. Each shot is drawn on its own, then its
+# characters are cut out and pasted onto the room (cutout.py), so it's the same room in all.
 PLATE_CANDIDATES = 3
-PLATE_DENOISE = 0.8
+BLEND_DENOISE = 0.3   # the pass over each pasted shot: edges and light, not a new picture
 PLATE_NEGATIVE = "1girl, 1boy, person, people, character, animal, furry, nude, text, watermark"
 # The climax shows cum, but a little: the picture and the creampie LoRA each add their own.
 CLIMAX_NEGATIVE = "cum overflow, excessive cum, cum pool, cum on floor, cum on legs, bukkake, cum string"
@@ -387,23 +386,20 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                           [t for t in _split(post["prompt"]) if t in SETTING_WORDS])
     plate = draw_plate(cfg, comfy, post, room_tags, lora, negative, subdir, name, rng, post_edges)
     cands: list[list[Path]] = []
+    asks: list[tuple[str, str]] = []   # each shot's prompt and negative, for the blending pass
     try:
         for i, shot in enumerate(shots):
             side_on = shot.act not in (None, "blowjob")
             neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, avoid, "" if shot.cum else NO_CUM,
                                         SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, ""),
                                         PARTNER_NEGATIVE, CLIMAX_NEGATIVE if shot.climax else "") if n)
-            cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
+            asks.append((f"{cast}, {shot.tags}", neg))
+            cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0],
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
-                                        extra_negative=neg, strict=post["strict"], lora=lora,
-                                        init=plate, denoise=PLATE_DENOISE if plate else 1.0)
+                                        extra_negative=neg, strict=post["strict"], lora=lora)
                           for c in range(SHOT_CANDIDATES_SIDE if side_on else SHOT_CANDIDATES)])
     finally:
         comfy.stop()
-        if plate and keep_room:
-            plate.replace(keep_room)
-        elif plate:
-            plate.unlink(missing_ok=True)
     vision = Vision(cfg.models_dir)
     out = []
     try:
@@ -446,13 +442,83 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             for p in paths:
                 if not best or p != best[2]:
                     p.unlink(missing_ok=True)
-            if best:
-                _crop(best[2])
             out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}her and him {best[0][3]}/{len(body) + len(hair) + len(fur) + 1}, look {best[3]:.2f}, background {best[4]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
+    try:
+        if plate:
+            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng)
+    finally:
+        if plate and keep_room:
+            plate.replace(keep_room)
+        elif plate:
+            plate.unlink(missing_ok=True)
+    for path, _ in out:
+        if path:
+            _crop(path)
     return out
+
+
+def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, subdir: str, name: str,
+              rng: random.Random) -> None:
+    """Each winning shot's characters, cut out and pasted onto the scene's room, then a light
+    pass of the image model to blend the edges and light, with the room's own pixels put back
+    everywhere away from them. A shot whose blended picture fails a check keeps its own room."""
+    from . import cutout
+    from .checks import drop_reason
+    from .generate import _feral
+    from .vision import Vision
+    with Image.open(plate) as im:
+        room = im.convert("RGB")
+    cut = cutout.Cutout()
+    try:
+        masks = []
+        for path, _ in out:
+            if path is None:
+                masks.append(None)
+                continue
+            with Image.open(path) as im:
+                masks.append(cut.mask(im.convert("RGB")))
+    finally:
+        cut.close()
+    pasted: list[Path | None] = []
+    try:
+        for i, ((path, _), mask) in enumerate(zip(out, masks)):
+            if path is None:
+                pasted.append(None)
+                continue
+            with Image.open(path) as im:
+                comp = cutout.paste(room, im.convert("RGB"), mask)
+            comp_path = path.with_name(f"{path.stem}-pasted.png")
+            comp.save(comp_path)
+            blended = comfy.txt2img(post["checkpoint"], post["medium"], asks[i][0], rng.randrange(2 ** 32),
+                                    subdir, f"{name}-shot{i}-blend", extra_negative=asks[i][1],
+                                    strict=post["strict"], lora=lora, init=comp_path, denoise=BLEND_DENOISE)
+            comp_path.unlink(missing_ok=True)
+            with Image.open(blended) as im:
+                final = cutout.keep_room(room, im.convert("RGB"), mask)
+            blended.unlink(missing_ok=True)
+            final_path = path.with_name(f"{path.stem}-room.png")
+            final.save(final_path)
+            pasted.append(final_path)
+    finally:
+        comfy.stop()
+    vision = Vision(cfg.models_dir)
+    try:
+        for i, final_path in enumerate(pasted):
+            if final_path is None:
+                continue
+            with Image.open(final_path) as im:
+                img = im.convert("RGB")
+            a = vision.analyze([img])
+            if drop_reason(a, post["medium"], [img], cfg, strict=post["strict"]) or _feral(a):
+                final_path.unlink(missing_ok=True)
+                out[i] = (out[i][0], out[i][1] + ", own room (the pasted one failed a check)")
+                continue
+            final_path.replace(out[i][0])
+    finally:
+        vision.close()
 
 
 def contact_sheet(post_file: Path, shots: list[Shot], pictures: list[tuple[Path | None, str]],
