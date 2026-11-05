@@ -27,6 +27,11 @@ TAG_MIN = 0.35
 MAX_TAGS = 40
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 DUPLICATE = 0.95   # CLIP likeness of two copies of one picture (or two frames of one shot)
+# Signatures, found per picture: the tagger looks at each corner on its own (a signature is a
+# few pixels of the whole picture, but most of a corner), and a strip with one is cut off.
+MARK_TAGS = ("signature", "artist name", "watermark", "patreon logo", "patreon username", "web address", "twitter username")
+MARK_SURE = 0.5
+CORNER_W, CORNER_H = 0.4, 0.1   # a corner: this share of the width and of the height
 # Every training image goes through checks.problem(training=True): see safety.py.
 
 
@@ -41,6 +46,23 @@ def write_status(base, **fields) -> None:
     tmp = path.with_name("status.json.tmp")
     tmp.write_text(json.dumps(data))
     os.replace(tmp, path)
+
+
+def strip_marks(vision, img):
+    """The picture without a strip (top or bottom, CORNER_H high) whose corner the tagger reads
+    as a signature or watermark; and which strips were cut."""
+    w, h = img.size
+    cut = []
+    for edge in ("top", "bottom"):
+        y0 = 0 if edge == "top" else round(h * (1 - CORNER_H))
+        for x0 in (0, round(w * (1 - CORNER_W))):
+            corner = img.crop((x0, y0, x0 + round(w * CORNER_W), y0 + round(h * CORNER_H)))
+            if max(vision.analyze([corner]).general.get(t, 0.0) for t in MARK_TAGS) >= MARK_SURE:
+                cut.append(edge)
+                break
+    top = round(h * CORNER_H) if "top" in cut else 0
+    bottom = h - round(h * CORNER_H) if "bottom" in cut else h
+    return (img.crop((0, top, w, bottom)) if cut else img), cut
 
 
 def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> dict:
@@ -71,6 +93,9 @@ def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> 
             continue
         if crop_top:
             img = img.crop((0, round(img.height * crop_top), img.width, img.height))
+        img, cut = strip_marks(vision, img)
+        if cut:
+            stats["signatures cut"] = stats.get("signatures cut", 0) + 1
         a = vision.analyze([img])
         reason = problem(a, medium, [img], cfg, training=True)
         emb = a.embedding.astype("float32")

@@ -39,7 +39,7 @@ from pathlib import Path
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import personas as people, safety   # the worker's own persona rules (see Dockerfile)
+from dreamfeed import acts, personas as people, safety   # the worker's own persona rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -274,6 +274,17 @@ def queue_generation(req: dict) -> dict:
 MAX_PROMPT = 500
 
 
+def scene_acts(req: dict) -> dict:
+    """The acts a scene from this post can be made of, for the picker."""
+    with db() as conn:
+        row = conn.execute("SELECT prompt FROM generations WHERE id = ? AND kind = 'image'",
+                           (int(req.get("id", 0)),)).fetchone()
+    if not row:
+        raise LookupError("no such image")
+    k = acts.kind(row[0] or "")
+    return {"kind": k, "slots": [{"slot": s, "label": label, "options": list(opts)} for s, label, opts in acts.SLOTS[k]]}
+
+
 def request_animation(req: dict) -> dict:
     with db() as conn:
         busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
@@ -289,7 +300,9 @@ def request_animation(req: dict) -> dict:
                 # POV pictures show only part of him: the tagger says 1boy or hetero, not duo.
                 if not {"duo", "1boy", "hetero", "2girls", "yuri"} & {t.strip() for t in (tags or "").split(",")}:
                     raise ValueError("scenes need a post with two characters")
-                params = {"kind": "scene", "ids": [gid]}
+                prompt = conn.execute("SELECT prompt FROM generations WHERE id = ?", (gid,)).fetchone()[0] or ""
+                picks = acts.checked(prompt, req.get("picks"))   # chosen acts; the rest random
+                params = {"kind": "scene", "ids": [gid]} | ({"picks": picks} if picks else {})
                 if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
                                 (json.dumps(params),)).fetchone()[0]:
                     raise ValueError("a scene from this post is already waiting")
@@ -864,7 +877,8 @@ class Handler(BaseHTTPRequestHandler):
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
-                   "/api/animate": request_animation, "/api/personas/save": save_persona,
+                   "/api/animate": request_animation, "/api/scene-acts": scene_acts,
+                   "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
                    "/api/styles/video": queue_video, "/api/styles/video-cancel": cancel_video,

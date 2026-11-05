@@ -174,9 +174,11 @@ like from any style (`character-prep`).
 The checks before training drop photographs (styles learn drawings, never real people), then
 anything the strict adult checks, the feral filter or the blocked tags flag, and near-identical
 copies (the same picture from two sites, or two frames of one shot); dropped files are deleted
-and not downloaded again. A style needs at least 20 images that pass. An artist who always
-signs in the same strip at the top: set `"crop_top": 0.06` (a share of the height) in
-`data/lora/NAME/source.json` and the strip is cut off every picture before the checks.
+and not downloaded again. A style needs at least 20 images that pass. Signatures are found per
+picture: the tagger looks at each corner on its own, and a top or bottom strip with a signature,
+watermark or artist name in it is cut off before the checks (a LoRA learns to draw them
+otherwise). An artist who always signs in the same strip: `"crop_top": 0.06` (a share of the
+height) in `data/lora/NAME/source.json` cuts it off every picture first.
 
 By hand: put images in `data/lora/NAME/raw/`, then
 

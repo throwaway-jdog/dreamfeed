@@ -21,7 +21,6 @@ import argparse
 import json
 import random
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,24 +69,24 @@ HIS_MOTION = {
     "standing": "he stands behind her and thrusts his hips into her hard, his whole body moving",
     "blowjob": "his hips push forward into her mouth, his hand on her head",
 }
-OPENERS = ("missionary", "blowjob")
+from .acts import (GIRL_GIRL_MIDDLE as YURI_MIDDLE, GIRL_GIRL_PEAK as YURI_PEAK,
+                   STRAIGHT_MIDDLE as MIDDLE, STRAIGHT_OPENERS as OPENERS)
 
 # Girl-girl scenes (a post with 2girls and no man): their own acts (motion.ACTS has a LoRA for
 # each but kissing). Each act: its tags for the picture, and the tags the tagger must see for
 # the picture to show it.
 YURI_POSITIONS = {
-    "kissing": ("french kiss, kissing, hug, embracing, nude, breasts press, cowboy shot", {"kiss", "french kiss"}),
-    "fingering": ("fingering, lying on back, spread legs, hand between legs, nude, full body", {"fingering"}),
-    "cunnilingus": ("cunnilingus, oral, spread legs, head between thighs, nude, full body", {"cunnilingus"}),
-    "scissoring": ("tribadism, scissoring, legs intertwined, nude, full body, from side", {"tribadism"}),
-    "rimming": ("anilingus, licking ass, face in ass, all fours, ass, nude, full body", {"anilingus"}),
-    "69": ("69, cunnilingus, mutual oral, lying, nude, full body", {"69"}),
-    "toy": ("dildo, sex toy, vaginal object insertion, holding dildo, spread legs, lying on back, nude, full body",
-            {"dildo", "vaginal object insertion", "object insertion"}),
-    "strap-on": ("strap-on, sex from behind, doggystyle, all fours, nude, full body, from side", {"strap-on"}),
+    "kissing": ("(french kiss:1.2), kissing, hug, embracing, nude, breasts press, cowboy shot", {"kiss", "french kiss"}),
+    "fingering": ("(fingering:1.3), (lying on back:1.2), spread legs, hand between legs, nude, full body", {"fingering"}),
+    "cunnilingus": ("(cunnilingus:1.3), oral, (lying on back:1.2), spread legs, head between thighs, nude, full body",
+                    {"cunnilingus"}),
+    "scissoring": ("(tribadism:1.3), scissoring, (lying:1.2), legs intertwined, nude, full body, from side", {"tribadism"}),
+    "rimming": ("(anilingus:1.3), licking ass, face in ass, (all fours:1.2), ass, nude, full body", {"anilingus"}),
+    "69": ("(69:1.3), cunnilingus, mutual oral, (lying:1.2), nude, full body", {"69"}),
+    "toy": ("(dildo:1.3), sex toy, vaginal object insertion, holding dildo, spread legs, (lying on back:1.2), nude, "
+            "full body", {"dildo", "vaginal object insertion", "object insertion"}),
+    "strap-on": ("(strap-on:1.3), sex from behind, (doggystyle:1.2), all fours, nude, full body, from side", {"strap-on"}),
 }
-YURI_MIDDLE = ("fingering", "cunnilingus", "rimming", "69", "toy")
-YURI_PEAK = ("scissoring", "strap-on")     # the last act, where the climax happens
 YURI_TOYS = {"toy", "strap-on"}            # shots where toys aren't kept out
 # Which motion.ACTS act (its LoRA) animates each, where the names differ.
 YURI_CLIP_ACT = {"69": "cunnilingus"}
@@ -112,9 +111,8 @@ YURI_ONLY = re.compile(r"\b(kiss\w*|french kiss|fingering|cunnilingus|tribadism|
 
 
 def is_yuri(prompt: str) -> bool:
-    tags = set(_split(prompt))
-    return "2girls" in tags and not {"1boy", "hetero"} & tags
-MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl", "standing")
+    from .acts import kind
+    return kind(prompt) == "girl-girl"
 
 NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejaculation, cum string"
 # Every shot: the partner mustn't turn into a second copy of her, and no artist text.
@@ -351,14 +349,13 @@ def cast_tags(prompt: str, partner: str = "", faceless: bool = True) -> str:
     return ", ".join(rating + ["duo"] + ([PARTNER] if faceless else ["1boy"]) + ([partner] if partner else []) + rest)
 
 
-def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
+def plan(rng: random.Random, picks: dict | None = None) -> list[Shot]:
     """Opener, a position, a close-up in it, another position, the climax in that one, after.
-    positions: the two middle positions, to test them (default: picked at random)."""
-    opener = rng.choice(OPENERS)
-    a = rng.choice([p for p in MIDDLE if p != opener])
-    b = rng.choice([p for p in MIDDLE if p not in (a, opener)] or [p for p in MIDDLE if p != a])
-    if positions:
-        a, b = positions
+    picks: acts.SLOTS choices ({"opening", "first", "second"}); the rest at random."""
+    picks = picks or {}
+    opener = picks.get("opening") or rng.choice(OPENERS)
+    a = picks.get("first") or rng.choice([p for p in MIDDLE if p not in (opener, picks.get("second"))])
+    b = picks.get("second") or rng.choice([p for p in MIDDLE if p not in (a, opener)] or [p for p in MIDDLE if p != a])
     act = lambda name: POSITIONS[name][1]
 
     def pos(name: str, view: str = SIDE_ON) -> str:
@@ -380,13 +377,13 @@ def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
     ]
 
 
-def plan_yuri(rng: random.Random, picks: list[str] | None = None) -> list[Shot]:
+def plan_yuri(rng: random.Random, picks: dict | None = None) -> list[Shot]:
     """Kissing, two of YURI_MIDDLE, one of YURI_PEAK and the climax in it, cuddling after.
-    picks: the two middle acts and the peak, to test them."""
-    a, b = rng.sample(YURI_MIDDLE, 2)
-    peak = rng.choice(YURI_PEAK)
-    if picks:
-        a, b, peak = picks
+    picks: acts.SLOTS choices ({"first", "second", "peak"}); the rest at random."""
+    picks = picks or {}
+    a = picks.get("first") or rng.choice([x for x in YURI_MIDDLE if x != picks.get("second")])
+    b = picks.get("second") or rng.choice([x for x in YURI_MIDDLE if x != a])
+    peak = picks.get("peak") or rng.choice(YURI_PEAK)
     pos = lambda name: YURI_POSITIONS[name][0]
     return [
         Shot("opening: kissing", f"{pos('kissing')}, blush, half-closed eyes", "kissing", False,
@@ -425,24 +422,20 @@ def _crop(path: Path) -> None:
     im.save(path)
 
 
-def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
-         rng: random.Random, keep_room: Path | None = None) -> list[tuple[Path | None, str]]:
-    """One checked picture per shot: (path or None, note). Candidates that lose are deleted;
-    winners are cropped (CROP). The empty room they start from is deleted too, or moved to
-    keep_room."""
-    from . import captions
-    from .checks import problem
-    from .vision import Vision
-    # The post first: its likeness to score candidates by, and her body for every shot.
-    vision = Vision(cfg.models_dir)
-    try:
-        with Image.open(post["file"]) as im:
-            seen_post = vision.analyze([im.convert("RGB")])
-    finally:
-        vision.close()
-    base = seen_post.embedding.astype(np.float32)
-    if any(s.yuri for s in shots):
-        return _draw_yuri(cfg, comfy, persona, post, shots, subdir, name, rng, keep_room, seen_post)
+@dataclass
+class Kind:
+    """What one kind of scene (straight, girl-girl) needs from the shared drawing pipeline."""
+    cast: str                                  # who and where, the same in every shot
+    avoid: str                                 # kept out of every shot
+    regions: list | None                       # each character again in her own half
+    negative: callable                         # shot -> its negative prompt
+    candidates: callable                       # shot -> how many pictures to draw
+    fits: callable                             # (shot, seen, analysis) -> sortable tuple, best first
+    note: callable                             # (fits) -> what the winner lacks, for the log
+
+
+def _straight(persona, post: dict, seen_post, rng: random.Random) -> Kind:
+    """One woman and a man: her build, hair and fur from the post; him one look for the scene."""
     body, avoid = body_tags(character_body(persona, post["prompt"]), seen_post.general)
     # A post that says he's a furry (a persona's own partner) keeps him: his look is in the
     # post's prompt. Otherwise one of the human looks.
@@ -456,10 +449,94 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     if fur:   # her fur colour too: the room's grey tints white fur otherwise
         cast = ", ".join(f"({t}:1.25)" if t.endswith(" fur") else t for t in _split(cast))
         cast += ", " + ", ".join(f"({t}:{FUR_TAGS[t]})" for t in fur)
-    avoid = ", ".join(a for a in (avoid, hair_avoid, him_avoid, NOT_FURRY if fur else "") if a)
+    # Her avoid list goes in her half only when there are halves (his look may need short hair).
+    regions = persona.regions(post["prompt"], rng) if persona else None
+    avoid = ", ".join(a for a in (avoid, him_avoid, NOT_FURRY if fur else "",
+                                  "" if regions else hair_avoid) if a)
     if body:   # her build once, weighted, in place of whatever the post's prompt said
         cast = ", ".join(t for t in _split(cast) if t not in BREASTS and t not in BUILD)
         cast += ", " + ", ".join(f"({t}:1.2)" for t in body)
+
+    def negative(shot: Shot) -> str:
+        side_on = shot.act not in (None, "blowjob")
+        return ", ".join(n for n in (SCENE_NEGATIVE, "" if shot.cum else NO_CUM,
+                                     SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, ""),
+                                     PARTNER_NEGATIVE, CLIMAX_NEGATIVE if shot.climax else "") if n)
+
+    def fits(shot: Shot, seen: set, a) -> tuple:
+        shows = {act.name for act in motion.ACTS if seen & set(act.tags)}
+        # Side-on, the tagger can't tell which way she faces on top.
+        if shot.act == "reverse cowgirl" and "cowgirl" in shows:
+            shows.add("reverse cowgirl")
+        # Showing the intended act matters more than looking like the post: the position,
+        # and the penis actually in it (a cowgirl on his lap with nothing inside isn't).
+        need = ORAL if shot.act == "blowjob" else PENETRATION if shot.act else None
+        act_ok = (shot.act is None or shot.act in shows) and \
+            (need is None or (need[0] <= seen and bool(need[1] & seen)))
+        # Then side-on, for penetration: from below, Wan loses the penis at the edge.
+        side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
+        # The tagger reads her as the post's build and hair, and him in his skin.
+        same = sum(t in seen for t in body + hair + fur) + \
+            int("furry male" in seen if furry_him else ("dark-skinned male" in seen) == him_dark)
+        bad = (set() if furry_him else FURRY_PARTNER) | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
+            (CUT_OFF if shot.act not in (None, "blowjob") else set())
+        missing = bool(NO_PARTNER & seen) or (shot.act is not None and a.general.get("solo focus", 0) >= SOLO_FOCUS)
+        # He must be there before anything else counts: a fallback pick must never be a
+        # penis through the wall.
+        return (not missing and not (bad & seen), act_ok, side, same)
+
+    total = len(body) + len(hair) + len(fur) + 1
+    return Kind(cast, avoid, regions, negative,
+                lambda shot: SHOT_CANDIDATES_SIDE if shot.act not in (None, "blowjob") else SHOT_CANDIDATES,
+                fits,
+                lambda f: f"{'' if f[0] else 'partner missing or cut off, '}{'' if f[1] else 'act not seen, '}"
+                          f"{'' if f[2] else 'not side-on, '}her and him {f[3]}/{total}")
+
+
+def _girl_girl(persona, post: dict, seen_post, rng: random.Random) -> Kind:
+    """Two women: both in every shot and nobody else."""
+    regions = persona.regions(post["prompt"], rng) if persona else None
+    traits = {_bare(t) for r in regions or [] for t in r[0].split(",")} - {"adult", "mature female", "anthro"}
+
+    def negative(shot: Shot) -> str:
+        # (cum means squirting here: NO_CUM would keep "ejaculation" out of the climax.)
+        return ", ".join(n for n in (YURI_NEGATIVE, "twins, watermark, signature, text, logo, patreon username",
+                                     "" if shot.cum else NO_CUM, "" if shot.act in YURI_TOYS else NO_TOYS,
+                                     "close-up, cropped, out of frame, head out of frame",
+                                     # Side by side and standing is what two characters default to.
+                                     "" if shot.act in (None, "kissing") else "standing, side-by-side") if n)
+
+    def fits(shot: Shot, seen: set, a) -> tuple:
+        both = bool(YURI_BOTH & seen) and not (YURI_NOT & seen) and not (CUT_OFF & seen)
+        shows = shot.act is None or bool(YURI_POSITIONS[shot.act][1] & seen)
+        return (both, shows, len(traits & seen))
+
+    return Kind(yuri_cast(post["prompt"]), "", regions, negative,
+                lambda shot: SHOT_CANDIDATES_SIDE if shot.act not in (None, "kissing") else SHOT_CANDIDATES,
+                fits,
+                lambda f: f"{'' if f[0] else 'not just the two of them, '}{'' if f[1] else 'act not seen, '}"
+                          f"their looks {f[2]}/{len(traits)}")
+
+
+def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
+         rng: random.Random, keep_room: Path | None = None) -> list[tuple[Path | None, str]]:
+    """One checked picture per shot: (path or None, note), for any kind of scene (Kind). The
+    room is drawn once; of each shot's candidates, the one that best shows what the kind needs,
+    then looks most like the post, wins, and is pasted into the room. Losers are deleted;
+    winners are cropped (CROP). The room is deleted too, or moved to keep_room."""
+    from . import captions
+    from .checks import problem
+    from .vision import Vision
+    # The post first: its likeness to score candidates by, and her body for every shot.
+    vision = Vision(cfg.models_dir)
+    try:
+        with Image.open(post["file"]) as im:
+            seen_post = vision.analyze([im.convert("RGB")])
+    finally:
+        vision.close()
+    base = seen_post.embedding.astype(np.float32)
+    kind = (_girl_girl if any(s.yuri for s in shots) else _straight)(persona, post, seen_post, rng)
+    cast = kind.cast
     room = background_tags(seen_post.general, cast)
     with Image.open(post["file"]) as im:
         post_edges, colour = _edges(im), wall_colour(im)
@@ -467,7 +544,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     walls = [f"({colour} {WALLS[t]}:1.2)" for t in room if t in WALLS]
     if room:
         cast += ", " + ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS])
-    print(f"scene: cast and setting: {cast}; keeping out: {avoid}", flush=True)
+    print(f"scene: cast and setting: {cast}; keeping out: {kind.avoid}; "
+          f"each in their half: {bool(kind.regions)}", flush=True)
     lora = persona.lora_for(post["prompt"]) if persona else None
     negative = persona.negative if persona else ""
     room_tags = ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS] +
@@ -477,15 +555,13 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     asks: list[tuple[str, str]] = []   # each shot's prompt and negative, for the blending pass
     try:
         for i, shot in enumerate(shots):
-            side_on = shot.act not in (None, "blowjob")
-            neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, avoid, "" if shot.cum else NO_CUM,
-                                        SIDE_ON_NEGATIVE if side_on else "", SHOT_NEGATIVE.get(shot.act, ""),
-                                        PARTNER_NEGATIVE, CLIMAX_NEGATIVE if shot.climax else "") if n)
+            neg = ", ".join(n for n in (negative, kind.avoid, kind.negative(shot)) if n)
             asks.append((f"{cast}, {shot.tags}", neg))
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0],
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
-                                        extra_negative=neg, strict=post["strict"], lora=lora)
-                          for c in range(SHOT_CANDIDATES_SIDE if side_on else SHOT_CANDIDATES)])
+                                        extra_negative=neg, strict=post["strict"], lora=lora,
+                                        regions=kind.regions)
+                          for c in range(kind.candidates(shot))])
     finally:
         comfy.stop()
     vision = Vision(cfg.models_dir)
@@ -503,26 +579,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     continue
                 # Every tag the tagger is sure of: its top-tags list cuts off "penis" and the view.
                 seen = {t for t, sc in a.general.items() if sc >= TAG_SURE}
-                shows = {act.name for act in motion.ACTS if seen & set(act.tags)}
-                # Side-on, the tagger can't tell which way she faces on top.
-                if shot.act == "reverse cowgirl" and "cowgirl" in shows:
-                    shows.add("reverse cowgirl")
-                # Showing the intended act matters more than looking like the post: the position,
-                # and the penis actually in it (a cowgirl on his lap with nothing inside isn't).
-                need = ORAL if shot.act == "blowjob" else PENETRATION if shot.act else None
-                fits = (shot.act is None or shot.act in shows) and \
-                    (need is None or (need[0] <= seen and bool(need[1] & seen)))
-                # Then side-on, for penetration: from below, Wan loses the penis at the edge.
-                side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
-                # The tagger reads her as the post's build and hair, and him in his skin.
-                same_body = sum(t in seen for t in body + hair + fur) + \
-                    int("furry male" in seen if furry_him else ("dark-skinned male" in seen) == him_dark)
-                bad = (set() if furry_him else FURRY_PARTNER) | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
-                    (CUT_OFF if shot.act not in (None, "blowjob") else set())
-                missing = bool(NO_PARTNER & seen) or (shot.act is not None and a.general.get("solo focus", 0) >= SOLO_FOCUS)
-                # He must be there before anything else counts: a fallback pick must never be
-                # a penis through the wall.
-                fits = (not missing and not (bad & seen), fits, side, same_body)
+                fits = kind.fits(shot, seen, a)
                 look = float(a.embedding.astype(np.float32) @ base)
                 bg = float(np.minimum(_edges(img), post_edges).sum())   # 1 = the same colours
                 scored.append((fits, (1 - BG_WEIGHT) * look + BG_WEIGHT * bg, p, look, bg))
@@ -530,96 +587,13 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             for p in paths:
                 if not best or p != best[2]:
                     p.unlink(missing_ok=True)
-            out.append((best[2], f"{'' if best[0][0] else 'partner missing or cut off, '}{'' if best[0][1] else 'act not seen, '}{'' if best[0][2] else 'not side-on, '}her and him {best[0][3]}/{len(body) + len(hair) + len(fur) + 1}, look {best[3]:.2f}, background {best[4]:.2f}") if best
+            out.append((best[2], f"{kind.note(best[0])}, look {best[3]:.2f}, background {best[4]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
     try:
         if plate:
-            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng)
-    finally:
-        if plate and keep_room:
-            plate.replace(keep_room)
-        elif plate:
-            plate.unlink(missing_ok=True)
-    for path, _ in out:
-        if path:
-            _crop(path)
-    return out
-
-
-def _draw_yuri(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
-               rng: random.Random, keep_room: Path | None, seen_post) -> list[tuple[Path | None, str]]:
-    """draw() for a girl-girl scene: both of them in every shot and nobody else, each in her
-    own half with her own LoRA when both are personas (persona.regions), the room drawn once."""
-    from . import captions
-    from .checks import problem
-    from .vision import Vision
-    base = seen_post.embedding.astype(np.float32)
-    cast = yuri_cast(post["prompt"])
-    room = background_tags(seen_post.general, cast)
-    with Image.open(post["file"]) as im:
-        post_edges, colour = _edges(im), wall_colour(im)
-    walls = [f"({colour} {WALLS[t]}:1.2)" for t in room if t in WALLS]
-    if room:
-        cast += ", " + ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS])
-    lora = persona.lora_for(post["prompt"]) if persona else None
-    # Sides are fixed for the scene: from the post's own prompt, where her look and the other's
-    # are written out whole.
-    regions = persona.regions(post["prompt"], rng) if persona else None
-    traits = {_bare(t) for r in regions or [] for t in r[0].split(",")} - {"adult", "mature female", "anthro"}
-    print(f"scene: girl-girl cast and setting: {cast}; each in her half: {bool(regions)}", flush=True)
-    negative = ", ".join(n for n in (persona.negative if persona else "", YURI_NEGATIVE) if n)
-    room_tags = ", ".join(walls + [f"({t}:1.1)" for t in room if t not in WALLS] +
-                          [t for t in _split(post["prompt"]) if t in SETTING_WORDS])
-    plate = draw_plate(cfg, comfy, post, room_tags, lora, negative, subdir, name, rng, post_edges)
-    no_twins = "twins, watermark, signature, text, logo, patreon username"
-    cands, asks = [], []
-    try:
-        for i, shot in enumerate(shots):
-            # (cum means squirting here: NO_CUM would keep "ejaculation" out of the climax.)
-            neg = ", ".join(n for n in (negative, no_twins, "" if shot.cum else NO_CUM,
-                                        "" if shot.act in YURI_TOYS else NO_TOYS,
-                                        "close-up, cropped, out of frame, head out of frame") if n)
-            asks.append((f"{cast}, {shot.tags}", neg))
-            cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0], rng.randrange(2 ** 32),
-                                        subdir, f"{name}-shot{i}-{c}", extra_negative=neg, strict=post["strict"],
-                                        lora=lora, regions=regions) for c in range(SHOT_CANDIDATES)])
-    finally:
-        comfy.stop()
-    vision = Vision(cfg.models_dir)
-    out = []
-    try:
-        for shot, paths in zip(shots, cands):
-            scored = []
-            for p in paths:
-                with Image.open(p) as im:
-                    img = im.convert("RGB")
-                a = vision.analyze([img])
-                if problem(a, post["medium"], [img], cfg, strict=post["strict"]):
-                    continue
-                if PANELS & set(captions.picture(a.general)):
-                    continue
-                seen = {t for t, sc in a.general.items() if sc >= TAG_SURE}
-                both = bool(YURI_BOTH & seen) and not (YURI_NOT & seen) and not (CUT_OFF & seen)
-                shows = shot.act is None or bool(YURI_POSITIONS[shot.act][1] & seen)
-                fits = (both, shows, len(traits & seen))
-                look = float(a.embedding.astype(np.float32) @ base)
-                bg = float(np.minimum(_edges(img), post_edges).sum())
-                scored.append((fits, (1 - BG_WEIGHT) * look + BG_WEIGHT * bg, p, look, bg))
-            best = max(scored, key=lambda s: s[:2]) if scored else None
-            for p in paths:
-                if not best or p != best[2]:
-                    p.unlink(missing_ok=True)
-            out.append((best[2], f"{'' if best[0][0] else 'not just the two of them, '}"
-                        f"{'' if best[0][1] else 'act not seen, '}their looks {best[0][2]}/{len(traits)}, "
-                        f"look {best[3]:.2f}, background {best[4]:.2f}") if best
-                       else (None, f"all {len(paths)} failed the checks"))
-    finally:
-        vision.close()
-    try:
-        if plate:
-            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng, regions=regions)
+            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng, regions=kind.regions)
     finally:
         if plate and keep_room:
             plate.replace(keep_room)
@@ -732,18 +706,18 @@ def preview(args: list[str]) -> None:
     ap = argparse.ArgumentParser(prog="dreamfeed scene-preview")
     ap.add_argument("post", type=int)
     ap.add_argument("--seed", type=int)
-    ap.add_argument("--positions", help=f"the two middle positions, e.g. doggy,standing ({', '.join(MIDDLE)})")
+    ap.add_argument("--acts", help="acts.SLOTS picks, e.g. first=doggy,second=standing (the rest random)")
     a = ap.parse_args(args)
-    picked = a.positions.split(",") if a.positions else None
-    if picked and (len(picked) != 2 or set(picked) - set(MIDDLE)):
-        sys.exit(f"scene-preview: --positions takes two of {', '.join(MIDDLE)}")
+    from .acts import checked
+    picked_raw = dict(x.split("=", 1) for x in a.acts.split(",")) if a.acts else {}
     cfg = Config()
     gen = cfg.generation()
     conn = db.connect(cfg.db_path)
     post = load_post(cfg, conn, a.post)
     persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
     rng = random.Random(a.seed)
-    shots = plan_yuri(rng) if is_yuri(post["prompt"]) else plan(rng, picked)
+    picked = checked(post["prompt"], picked_raw)
+    shots = plan_yuri(rng, picked) if is_yuri(post["prompt"]) else plan(rng, picked)
     out_dir = cfg.data_dir / "generated"
     subdir = f"scene-preview-{a.post}"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
@@ -976,7 +950,9 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
         post = load_post(cfg, conn, src)
         persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
         rng = random.Random()
-        shots = plan_yuri(rng) if is_yuri(post["prompt"]) else plan(rng)
+        from .acts import checked
+        picked = checked(post["prompt"], params.get("picks"))
+        shots = plan_yuri(rng, picked) if is_yuri(post["prompt"]) else plan(rng, picked)
         with conn:
             gid = conn.execute(
                 "INSERT INTO generations(night, medium, checkpoint, prompt, seed, source_generation, persona,"

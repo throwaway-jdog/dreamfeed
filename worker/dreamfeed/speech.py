@@ -1,6 +1,6 @@
 """A character's voice from the speech bubbles in an artist's pictures.
 
-    python -m dreamfeed speech NAME [--no-ocr]
+    python -m dreamfeed speech NAME [--no-ocr] [--no-polish]
 
 Some artists mostly draw one character and give her lines in speech bubbles. Those lines are
 how she talks, which suits a persona that posts as that character better than the artist's
@@ -10,6 +10,10 @@ an artist's post (captions.clean: business chatter, links, handles and blocked w
 names become [name]), and saves them in data/lora/NAME/voice.json as "speech". A persona
 whose voice is NAME then writes like these lines (captions.voice prefers them).
 --no-ocr cleans the text read last time again (speech-raw.json), after changing the rules.
+
+Then the caption model mends what OCR misread ("take ar christmas present" -> "take your
+christmas present"): spelling only, or DROP for a line too garbled to mend; a mended line must
+stay close to what was read and pass the same checks again (--no-polish skips it).
 
 OCR can't tell who is speaking, so a line said to her ends up in the list too. Reading uses
 GOT-OCR 2.0 (Apache 2.0, about 1.5 GB, downloaded into HF_HOME on first use).
@@ -115,6 +119,36 @@ def _keep(texts: list[str]) -> list[str]:
     return kept[:MAX_LINES]
 
 
+POLISH = ("These lines were read by OCR from speech bubbles in comics, so some words are misread. "
+          "For the line below, reply with the same line with only its misread words fixed: keep its "
+          "wording, slang, casing and punctuation. If it's too garbled to tell what it says, reply DROP. "
+          "Reply with the line only.")
+POLISH_CLOSE = 0.75   # a mended line this alike (difflib) to what OCR read, or it's dropped
+
+
+def _polish(cfg: Config, lines: list[str]) -> list[str]:
+    import difflib
+    from . import captions
+    if not cfg.caption_model:
+        return lines
+    writer = captions.Writer(cfg.caption_model)
+    out = []
+    try:
+        for line in lines:
+            fixed = writer.ask(POLISH, line, max_new_tokens=80).strip().strip('"')
+            if not fixed or fixed.upper().startswith("DROP"):
+                continue
+            if difflib.SequenceMatcher(None, fixed.lower(), line.lower()).ratio() < POLISH_CLOSE:
+                continue
+            fixed = captions.clean(_tidy(fixed))
+            if fixed and _good(fixed):
+                out.append(fixed)
+    finally:
+        writer.close()
+    print(f"speech: {len(out)} of {len(lines)} lines kept after mending", flush=True)
+    return out
+
+
 def _save(base: Path, name: str, lines: list[str]) -> int:
     path = base / "voice.json"
     try:
@@ -127,11 +161,12 @@ def _save(base: Path, name: str, lines: list[str]) -> int:
     return len(lines)
 
 
-def build(cfg: Config, name: str, reread: bool = True) -> int:
+def build(cfg: Config, name: str, reread: bool = True, polish: bool = True) -> int:
     base = cfg.data_dir / "lora" / name
-    if not reread and (base / "speech-raw.json").is_file():
-        return _save(base, name, _keep(json.loads((base / "speech-raw.json").read_text())))
-    return _read(cfg, name)
+    if reread or not (base / "speech-raw.json").is_file():
+        _read(cfg, name)
+    lines = _keep(json.loads((base / "speech-raw.json").read_text()))
+    return _save(base, name, _polish(cfg, lines) if polish else lines)
 
 
 def _read(cfg: Config, name: str) -> int:
@@ -160,11 +195,11 @@ def _read(cfg: Config, name: str) -> int:
         torch.cuda.empty_cache()
     # The OCR text as read, to tune the cleaning without reading every picture again (--no-ocr).
     (base / "speech-raw.json").write_text(json.dumps(raw, ensure_ascii=False, indent=1))
-    return _save(base, name, _keep(raw))
+    return len(raw)
 
 
 def main(args: list[str]) -> None:
     names = [a for a in args if not a.startswith("--")]
     if len(names) != 1 or not names[0].replace("_", "").isalnum():
-        sys.exit("usage: python -m dreamfeed speech NAME [--no-ocr]")
-    build(Config(), names[0], reread="--no-ocr" not in args)
+        sys.exit("usage: python -m dreamfeed speech NAME [--no-ocr] [--no-polish]")
+    build(Config(), names[0], reread="--no-ocr" not in args, polish="--no-polish" not in args)
