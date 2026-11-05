@@ -10,7 +10,8 @@ the artist behind the style named in "voice" (captions.py).
 Placeholders allowed in a post prompt: {outfit} (from the persona's outfits, or a generic
 list), {cosplay} (generic costumes only, never named characters), {setting}, {character}
 (one of the persona's characters, for artist personas that draw different people), {partner}
-(one of the persona's partners, so the man in their duo posts isn't always the same one).
+(one of the persona's partners, so the man in their duo posts isn't always the same one),
+{girlfriend} (one of their girlfriends, the same for girl-girl posts).
 """
 import json
 import random
@@ -66,6 +67,7 @@ class Persona:
     posts: list[Post]
     outfits: list[str] = field(default_factory=list)
     partners: list[str] = field(default_factory=list)
+    girlfriends: list[str] = field(default_factory=list)
     settings: list[str] = field(default_factory=list)
     characters: list[str] = field(default_factory=list)
     emoji: list[str] = field(default_factory=list)
@@ -76,6 +78,8 @@ class Persona:
     lora: tuple[str, float] | None = None   # (file in models/loras, strength)
     lora_female_only: bool = False          # skip the LoRA for male characters
     trigger: str = ""                       # the LoRA's trigger word, put first in every prompt
+    art: tuple[str, float] | None = None    # the artist's style LoRA, with a character LoRA: for everyone
+    art_trigger: str = ""
     negative: str = ""                      # extra negative prompt for every post (e.g. "face, eyes")
     paused: bool = False                    # keeps the profile and posts, makes no new ones
     voice: str = ""                         # a style whose artist's posts their captions sound like
@@ -87,20 +91,23 @@ class Persona:
             "setting": rng.choice(self.settings or SETTINGS),
             "character": rng.choice(self.characters) if self.characters else "",
             "partner": rng.choice(self.partners) if self.partners else "faceless male",
+            "girlfriend": rng.choice(self.girlfriends) if self.girlfriends else "another girl",
         }
         body = post.prompt.format(**fill)
         if "{setting}" not in post.prompt:
             body += ", " + fill["setting"]
-        parts = [p for p in (self.trigger, self.look, body) if p]
+        parts = [p for p in (self.trigger, self.art_trigger, self.look, body) if p]
         return RATINGS[post.rating] + ", ".join(parts)
 
-    def lora_for(self, prompt: str) -> tuple[str, float] | None:
-        """The style LoRA, unless the prompt's character is male and the LoRA is marked
-        female-only (trained mostly on women, it would turn men into women)."""
-        if not self.lora or not self.lora_female_only:
-            return self.lora
-        tags = {t.strip() for t in prompt.split(",")}
-        return None if "male" in tags and "female" not in tags else self.lora
+    def lora_for(self, prompt: str) -> list[tuple[str, float]]:
+        """The LoRAs for a prompt: the persona's own, unless the prompt's character is male and it
+        is marked female-only (trained mostly on women, it would turn men into women), then the
+        artist's style (art), which draws everyone in the picture."""
+        own = self.lora
+        if own and self.lora_female_only:
+            tags = {t.strip() for t in prompt.split(",")}
+            own = None if "male" in tags and "female" not in tags else own
+        return [l for l in (own, self.art) if l]
 
     def avatar_prompt(self, rng: random.Random) -> str:
         who = self.look or (rng.choice(self.characters) if self.characters else "")
@@ -150,10 +157,10 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         if rating not in RATINGS or not k.get("prompt") or not k.get("captions"):
             raise Invalid(f"{where}: every kind of post needs a prompt, captions and a rating")
         try:
-            k["prompt"].format(outfit="", cosplay="", setting="", character="", partner="")
+            k["prompt"].format(outfit="", cosplay="", setting="", character="", partner="", girlfriend="")
         except (KeyError, IndexError, ValueError):
             raise Invalid(f"{where}: a prompt uses an unknown placeholder; allowed are "
-                          "{outfit} {cosplay} {setting} {character} {partner}")
+                          "{outfit} {cosplay} {setting} {character} {partner} {girlfriend}")
         posts.append(Post(str(k.get("kind", "post")), float(k.get("weight", 1)), k["prompt"], rating,
                           [str(c) for c in k["captions"]]))
     if not posts:
@@ -163,14 +170,15 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
     persona = Persona(
         handle=handle, name=str(p.get("name") or handle), medium=p["medium"], bio=str(p.get("bio", "")),
         look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
-        posts=posts, outfits=list(p.get("outfits", [])), partners=list(p.get("partners", [])), settings=list(p.get("settings", [])),
+        posts=posts, outfits=list(p.get("outfits", [])), partners=list(p.get("partners", [])),
+        girlfriends=list(p.get("girlfriends", [])), settings=list(p.get("settings", [])),
         characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
         hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
         weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),
         paused=bool(p.get("paused", False)), voice=str(p.get("voice") or ""))
     if persona.voice and not HANDLE.match(persona.voice):
         raise Invalid(f"{where}: voice must be the name of a trained style")
-    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.partners, *persona.settings, *persona.characters,
+    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.partners, *persona.girlfriends, *persona.settings, *persona.characters,
                      *(k.prompt for k in posts)])
     bad = safety.blocked(text)
     if bad:
@@ -189,6 +197,15 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
             persona.lora = (str(lo["file"]), float(lo.get("strength", 0.8)))
             persona.lora_female_only = bool(lo.get("female_only", False))
             persona.trigger = trigger
+    art = p.get("art")
+    if art:
+        if not isinstance(art, dict) or not str(art.get("file", "")).endswith(".safetensors"):
+            raise Invalid(f"{where}: art needs {{\"file\": \"x.safetensors\", \"strength\": 0.5, \"trigger\": \"word\"}}")
+        if safety.blocked(str(art.get("trigger", ""))):
+            raise Invalid(f"{where}: the artist style's trigger word uses blocked tags")
+        if art.get("enabled", True):
+            persona.art = (str(art["file"]), float(art.get("strength", 0.5)))
+            persona.art_trigger = str(art.get("trigger", ""))
     return persona
 
 

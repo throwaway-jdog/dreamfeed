@@ -46,14 +46,17 @@ keeps the previous version as `data/personas.json.bak`. The format, from
   `"female_only": true` for a LoRA trained mostly on women, which otherwise turns male
   characters female: those posts then skip the LoRA). Artist LoRAs can bake in the artist's
   watermark faintly, so give those personas `"negative": "watermark, text, signature"`.
-  `"enabled": false` switches the style off and keeps its settings.
+  `"enabled": false` switches the style off and keeps its settings. With a character LoRA
+  in `lora`, `art` (same form) adds the artist's style LoRA, applied after it to everyone in
+  the picture, so partners are drawn in the artist's style without turning into her.
 - `paused`: keeps the profile and posts but makes nothing new, except on **Post now**.
 - `based_on`: a private note, never shown or used in prompts.
 - `posts`: kinds of post, each with `weight`, `rating` (`explicit`, `questionable`,
   `general`), `prompt` and `captions`. Prompts may use `{outfit}`, `{cosplay}` (generic
   costumes only), `{setting}` and `{character}` (from `characters`, for artist personas
   who draw different people), and `{partner}` (one of `partners`, so duo posts don't always
-  show the same man; a faceless male when there are none). The captions are examples of how
+  show the same man; a faceless male when there are none) and `{girlfriend}` (one of
+  `girlfriends`, for girl-girl posts). The captions are examples of how
   the persona writes (below).
 - `voice`: the name of a trained style; the persona's captions then sound like that
   artist's own posts instead of its example captions.

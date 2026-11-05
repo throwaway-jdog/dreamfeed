@@ -86,7 +86,7 @@ def _examples(cfg, description: str) -> list[dict]:
         picks = creators[:1] + (artists or [EXAMPLE])[:1]
     out = []
     for p in picks:
-        p = {k: v for k, v in p.items() if k not in ("based_on", "lora", "voice", "paused", "weight", "negative")}
+        p = {k: v for k, v in p.items() if k not in ("based_on", "lora", "art", "voice", "paused", "weight", "negative")}
         p["posts"] = [dict(k, captions=k["captions"][:4]) for k in p.get("posts", [])[:3]]
         out.append(p)
     return out

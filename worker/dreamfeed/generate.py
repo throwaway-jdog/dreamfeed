@@ -73,6 +73,9 @@ def active_personas(cfg: Config, gen: GenConfig, conn, mediums: list[str] | None
         if p.lora and not (cfg.models_dir / "loras" / p.lora[0]).exists():
             print(f"generate: @{p.handle} posting without {p.lora[0]} (not in models/loras)", flush=True)
             p.lora, p.trigger = None, ""
+        if p.art and not (cfg.models_dir / "loras" / p.art[0]).exists():
+            print(f"generate: @{p.handle} posting without {p.art[0]} (not in models/loras)", flush=True)
+            p.art, p.art_trigger = None, ""
         out.append(p)
     return out
 
@@ -121,7 +124,7 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
         ckpt = gen.checkpoints[p.medium]
         seed = rng.randrange(2 ** 32)
         lora = p.lora_for(prompt)
-        if p.trigger and not lora:   # no LoRA for this one, so its trigger word means nothing
+        if p.trigger and p.lora not in lora:   # not the persona's LoRA, so its trigger word means nothing
             prompt = ", ".join(t for t in prompt.split(", ") if t != p.trigger)
         with conn:
             gid = conn.execute(

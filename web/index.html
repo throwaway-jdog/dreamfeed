@@ -532,6 +532,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
         <div class="field"><span>Strength <small>higher looks more like the training art</small></span>
           <div class="range"><input type="range" id="e-strength" min="0.2" max="1.2" step="0.05"><output id="e-strength-v"></output></div></div>
         <label class="check"><input type="checkbox" id="e-female"><span>Female characters only <small class="hint">· posts with a male character skip the style (for styles trained mostly on women)</small></span></label>
+        <label class="field"><span>Artist style too <small>for a character style: the artist's style, which draws everyone else in the picture</small></span><select class="in" id="e-art"></select></label>
+        <div class="field" id="e-art-box"><span>Artist style strength</span>
+          <div class="range"><input type="range" id="e-art-strength" min="0.2" max="1.2" step="0.05"><output id="e-art-strength-v"></output></div></div>
       </div>
     </section>
 
@@ -556,7 +559,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <section class="panel">
       <h2>Kinds of post</h2>
       <p class="note">Each night picks one of these per post, by weight. Prompts are booru tags and can use
-        <code>{outfit}</code> <code>{cosplay}</code> <code>{setting}</code> <code>{character}</code> <code>{partner}</code>.</p>
+        <code>{outfit}</code> <code>{cosplay}</code> <code>{setting}</code> <code>{character}</code> <code>{partner}</code> <code>{girlfriend}</code>.</p>
       <div id="e-kinds" class="field" style="gap:10px"></div>
       <button class="secondary" type="button" id="e-add-kind">Add a kind of post</button>
     </section>
@@ -566,6 +569,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="field" style="gap:16px">
       <label class="field"><span>Outfits <small>one per line; empty uses a general list</small></span><textarea class="in" id="e-outfits" rows="3"></textarea></label>
       <label class="field"><span>Partners <small>one per line, for <code>{partner}</code> in duo posts; empty is a faceless man</small></span><textarea class="in" id="e-partners" rows="3"></textarea></label>
+      <label class="field"><span>Girlfriends <small>one per line, for <code>{girlfriend}</code> in girl-girl posts</small></span><textarea class="in" id="e-girlfriends" rows="3"></textarea></label>
       <label class="field"><span>Settings <small>one per line; empty uses a general list</small></span><textarea class="in" id="e-settings" rows="3"></textarea></label>
       <label class="field"><span>Emoji <small>added to some captions</small></span><input class="in" id="e-emoji" autocomplete="off" placeholder="✨ 💕"></label>
       <label class="field"><span>Hashtags <small>separated by spaces, without #</small></span><input class="in" id="e-tags" autocomplete="off" autocapitalize="none" placeholder="cosplay lewd"></label>
@@ -1388,6 +1392,9 @@ function renderMedium() {
   const sel = $("e-style"), keep = sel.value, opts = ed.styles.filter(s => s.medium === ed.medium);
   sel.replaceChildren(...opts.map(s => { const o = el("option", null, s.name); o.value = s.name; return o; }));
   if (opts.some(s => s.name === keep)) sel.value = keep;
+  const art = $("e-art"), keepArt = art.value, none = el("option", null, "none"); none.value = "";
+  art.replaceChildren(none, ...opts.map(s => { const o = el("option", null, s.name); o.value = s.name; return o; }));
+  if (opts.some(s => s.name === keepArt)) art.value = keepArt;
   $("e-lora-on").disabled = !opts.length && !ed.loraOn;
   $("e-lora-note").textContent = opts.length ? "Draws their posts in an artist style you trained."
     : `No ${LABEL[ed.medium].toLowerCase()} styles trained yet (Trained styles, on the dashboard).`;
@@ -1397,6 +1404,8 @@ function renderLora() {
   setPressed("e-lora-on", ed.loraOn, "On", "Off");
   $("e-lora-box").hidden = !ed.loraOn;
   $("e-strength-v").textContent = (+$("e-strength").value).toFixed(2);
+  $("e-art-box").hidden = !$("e-art").value;
+  $("e-art-strength-v").textContent = (+$("e-art-strength").value).toFixed(2);
 }
 function renderRanges() {
   $("e-weight-v").textContent = `${+$("e-weight").value}×`;
@@ -1404,7 +1413,7 @@ function renderRanges() {
 }
 document.querySelectorAll("#e-medium button").forEach(b => b.onclick = () => { ed.medium = b.dataset.m; renderMedium(); });
 $("e-lora-on").onclick = () => { ed.loraOn = !ed.loraOn; renderMedium(); };
-$("e-strength").oninput = renderLora;
+$("e-strength").oninput = renderLora; $("e-art").onchange = renderLora; $("e-art-strength").oninput = renderLora;
 $("e-weight").oninput = renderRanges; $("e-video").oninput = renderRanges;
 $("e-paused").onclick = () => { ed.paused = !ed.paused; setPressed("e-paused", ed.paused, "Yes", "No"); };
 
@@ -1432,14 +1441,22 @@ function openEditor(p, asNew = false) {
   $("e-handle-note").hidden = !ed.isNew;
   $("e-bio").value = c.bio || ""; $("e-note").value = c.based_on || "";
   $("e-look").value = c.look || ""; $("e-chars").value = (c.characters || []).join("\n"); $("e-avatar").value = c.avatar || "";
-  $("e-outfits").value = (c.outfits || []).join("\n"); $("e-partners").value = (c.partners || []).join("\n"); $("e-settings").value = (c.settings || []).join("\n");
+  $("e-outfits").value = (c.outfits || []).join("\n"); $("e-partners").value = (c.partners || []).join("\n"); $("e-girlfriends").value = (c.girlfriends || []).join("\n"); $("e-settings").value = (c.settings || []).join("\n");
   $("e-emoji").value = (c.emoji || []).join(" "); $("e-tags").value = (c.hashtags || []).join(" "); $("e-neg").value = c.negative || "";
-  $("e-more").open = !!(c.outfits?.length || c.partners?.length || c.settings?.length || c.negative);
+  $("e-more").open = !!(c.outfits?.length || c.partners?.length || c.girlfriends?.length || c.settings?.length || c.negative);
   $("e-weight").value = c.weight ?? 1; $("e-video").value = c.video_share ?? 0.2; renderRanges();
   ed.paused = !!c.paused; setPressed("e-paused", ed.paused, "Yes", "No");
   ed.medium = c.medium || "anime"; ed.loraOn = !!c.lora?.enabled;
   $("e-strength").value = c.lora?.strength ?? 0.8; $("e-female").checked = !!c.lora?.female_only;
+  $("e-art-strength").value = c.art?.strength ?? 0.5; $("e-art").value = "";
   renderMedium();
+  if (c.art?.style) {
+    if (![...$("e-art").options].some(o => o.value === c.art.style)) {
+      const o = el("option", null, c.art.style + " (file missing)"); o.value = c.art.style; $("e-art").append(o);
+    }
+    $("e-art").value = c.art.style;
+  }
+  renderLora();
   if (c.lora?.style) {
     if (![...$("e-style").options].some(o => o.value === c.lora.style)) {   // trained file missing right now
       const o = el("option", null, c.lora.style + " (file missing)"); o.value = c.lora.style; $("e-style").append(o);
@@ -1476,11 +1493,12 @@ function collect() {
     handle: $("e-handle").value.trim().toLowerCase(), name: $("e-name").value.trim(), medium: ed.medium,
     bio: $("e-bio").value.trim(), based_on: $("e-note").value.trim(), look: $("e-look").value.trim(),
     characters: lines($("e-chars").value), avatar: $("e-avatar").value.trim(),
-    outfits: lines($("e-outfits").value), partners: lines($("e-partners").value), settings: lines($("e-settings").value),
+    outfits: lines($("e-outfits").value), partners: lines($("e-partners").value), girlfriends: lines($("e-girlfriends").value), settings: lines($("e-settings").value),
     emoji: words($("e-emoji").value), hashtags: words($("e-tags").value), negative: $("e-neg").value.trim(),
     weight: +$("e-weight").value, video_share: +$("e-video").value, paused: ed.paused, posts, voice: $("e-voice").value,
     lora: (ed.loraOn || ed.cur.lora) && $("e-style").value ? { style: $("e-style").value, strength: +$("e-strength").value,
                                  female_only: $("e-female").checked, enabled: ed.loraOn } : null,
+    art: ed.loraOn && $("e-art").value ? { style: $("e-art").value, strength: +$("e-art-strength").value } : null,
   };
 }
 $("e-form").onsubmit = e => { e.preventDefault(); $("e-save").click(); };

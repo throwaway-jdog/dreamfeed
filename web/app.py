@@ -339,7 +339,7 @@ def cancel(req: dict) -> dict:
 # written, so a bad edit is refused here instead of breaking the nightly run.
 EDIT_LOCK = threading.Lock()
 TEXT_FIELDS = {"name": 60, "bio": 300, "look": 1000, "avatar": 500, "negative": 500, "based_on": 200}
-LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "partners": (30, 200), "settings": (40, 200), "emoji": (10, 16),
+LIST_FIELDS = {"characters": (30, 300), "outfits": (40, 200), "partners": (30, 200), "girlfriends": (30, 200), "settings": (40, 200), "emoji": (10, 16),
                "hashtags": (10, 40)}
 MAX_POST_KINDS = 12
 NEW_FILE = {"_note": "Private. Fictional posters for the dreamfeed timeline, edited from the dashboard or by hand. "
@@ -400,7 +400,10 @@ def persona_config() -> dict:
     for entry in raw["personas"]:
         p = checked.get(entry.get("handle"))
         lo = entry.get("lora") or None
+        art = entry.get("art") or None
         out["personas"].append(entry | {
+            "art": art and {"style": str(art.get("file", "")).removeprefix("style-").removesuffix(".safetensors"),
+                            "strength": art.get("strength", 0.5), "enabled": art.get("enabled", True) is not False},
             "strict": bool(p and p.strict), "has_avatar": entry.get("handle") in avatars,
             "lora": lo and {"style": str(lo.get("file", "")).removeprefix("style-").removesuffix(".safetensors"),
                             "strength": lo.get("strength", 0.8), "female_only": bool(lo.get("female_only")),
@@ -477,6 +480,12 @@ def _apply(entry: dict, src: dict) -> dict:
         entry["lora"] = _lora(entry.get("lora"), src["lora"], entry.get("medium"))
         if not entry["lora"]:
             entry.pop("lora")
+    if "art" in src:   # the artist's style, with a character LoRA in "lora"
+        entry["art"] = _lora(entry.get("art"), src["art"], entry.get("medium"))
+        if entry["art"]:
+            entry["art"].pop("female_only", None)
+        else:
+            entry.pop("art")
     return entry
 
 

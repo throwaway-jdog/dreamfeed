@@ -78,32 +78,36 @@ class Comfy:
 
     def txt2img(self, checkpoint: str, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, extra_negative: str = "", strict: bool = False,
-                lora: tuple[str, float] | None = None, init: Path | None = None, denoise: float = 1.0) -> Path:
-        """lora: (file in models/loras, strength), applied to the model and text encoder.
+                lora=None, init: Path | None = None, denoise: float = 1.0) -> Path:
+        """lora: (file in models/loras, strength), or a list of them, applied in turn to the model
+        and text encoder.
         init: start from this picture instead of noise (img2img), keeping 1 - denoise of it."""
         p = presets.for_checkpoint(checkpoint)
+        loras = [lora] if isinstance(lora, tuple) else list(lora or [])
+        last = f"lora{len(loras) - 1}" if loras else "ckpt"
         positive, negative = safety.prompts(medium, p.positive_prefix + prompt,
                                             p.negative + (", " + extra_negative if extra_negative else ""), strict)
         workflow = {
             "ckpt": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
             "clip": {"class_type": "CLIPSetLastLayer",
-                     "inputs": {"clip": ["lora", 1] if lora else ["ckpt", 1], "stop_at_clip_layer": -p.clip_skip}},
+                     "inputs": {"clip": [last, 1], "stop_at_clip_layer": -p.clip_skip}},
             "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": positive}},
             "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": negative}},
             "latent": {"class_type": "EmptyLatentImage",
                        "inputs": {"width": p.width, "height": p.height, "batch_size": 1}},
             "sample": {"class_type": "KSampler", "inputs": {
-                "model": ["lora", 0] if lora else ["ckpt", 0], "positive": ["pos", 0], "negative": ["neg", 0],
+                "model": [last, 0], "positive": ["pos", 0], "negative": ["neg", 0],
                 "latent_image": ["latent", 0], "seed": seed, "steps": p.steps, "cfg": p.cfg,
                 "sampler_name": p.sampler, "scheduler": p.scheduler, "denoise": denoise if init else 1.0}},
             "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["ckpt", 2]}},
             "save": {"class_type": "SaveImage",
                      "inputs": {"images": ["decode", 0], "filename_prefix": f"{subdir}/{name}"}},
         }
-        if lora:
-            workflow["lora"] = {"class_type": "LoraLoader", "inputs": {
-                "model": ["ckpt", 0], "clip": ["ckpt", 1], "lora_name": lora[0],
-                "strength_model": lora[1], "strength_clip": lora[1]}}
+        for n, (file, strength) in enumerate(loras):
+            prev = f"lora{n - 1}" if n else "ckpt"
+            workflow[f"lora{n}"] = {"class_type": "LoraLoader", "inputs": {
+                "model": [prev, 0], "clip": [prev, 1], "lora_name": file,
+                "strength_model": strength, "strength_clip": strength}}
         self.start()
         if init:
             workflow["init"] = {"class_type": "LoadImage", "inputs": {"image": self.upload(init)}}

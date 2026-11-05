@@ -1,8 +1,9 @@
 """A character LoRA from a trained style's pictures of one character.
 
-    python -m dreamfeed character-prep NAME --from STYLE --look "red hair, green eyes"
+    python -m dreamfeed character-prep NAME --from STYLE[,STYLE...] --look "red hair, green eyes"
                                        --traits "red hair, green eyes, freckles, ..."
-                                       [--closeups PARTS] [--train STEPS]
+                                       [--closeups PARTS] [--solo] [--tagged STYLE,...]
+                                       [--train STEPS]
 
 Some artists mostly draw one character. Their style LoRA learns her a little, but it learns
 from everything they draw. This keeps only the style's training pictures that show her:
@@ -80,11 +81,12 @@ def _closeup(vision, img, tag: str, sizes):
     return best
 
 
-def _closeups(cfg: Config, vision, keep: list[Path], out: Path, name: str, parts: list[str],
+def _closeups(cfg: Config, vision, keep: list[Path], full: Path, out: Path, name: str, parts: list[str],
               traits: set[str], medium: str) -> dict:
     """Close-ups of each part, into their own folder (fewer repeats). Every one is checked
-    again like the pictures; data/lora/NAME/closeups.json lists what was kept and why the
-    rest weren't."""
+    again like the pictures, and a picture with a close-up the checks flag is left out
+    altogether, with all its close-ups. data/lora/NAME/closeups.json lists what was kept and
+    why the rest weren't."""
     from PIL import Image
     from .checks import drop_reason
     log, counts = [], {}
@@ -94,7 +96,7 @@ def _closeups(cfg: Config, vision, keep: list[Path], out: Path, name: str, parts
         for txt in keep:
             if n >= len(keep):   # no more close-ups of one part than whole pictures
                 break
-            entry = {"part": part, "picture": txt.with_suffix(".png").name}
+            entry = {"part": part, "picture": f"{txt.parent.parent.parent.name}/{txt.with_suffix('.png').name}"}
             log.append(entry)
             if solo_only and "solo" not in _tags(txt):
                 entry["why"] = "not a solo picture"
@@ -126,45 +128,86 @@ def _closeups(cfg: Config, vision, keep: list[Path], out: Path, name: str, parts
         for e in dropped:
             if e["why"].startswith(("check", "someone")):
                 print(f"  {e['picture']}: {e['why']}", flush=True)
+    flagged = {e["picture"] for e in log if e.get("why", "").startswith("check")}
+    for n, txt in enumerate(keep):
+        if f"{txt.parent.parent.parent.name}/{txt.with_suffix('.png').name}" in flagged:
+            for f in full.glob(f"{n:04d}.*"):
+                f.unlink()
+    for e in log:
+        if e["picture"] in flagged:
+            if "kept" in e:
+                for f in out.glob(f"{e.pop('kept')}.*"):
+                    f.unlink()
+                counts[e["part"]] -= 1
+            e.setdefault("why", "its picture was left out (a close-up failed the checks)")
+    if flagged:
+        print(f"character-prep: {len(flagged)} pictures left out because a close-up failed the checks: "
+              + ", ".join(sorted(flagged)), flush=True)
     (out.parent.parent / "closeups.json").write_text(json.dumps(log, indent=1))
     return counts
 
 
-def prepare(cfg: Config, name: str, style: str, look: list[str], traits: set[str],
-            closeups: list[str] | None = None) -> dict:
+def prepare(cfg: Config, name: str, styles: list[str], look: list[str], traits: set[str],
+            closeups: list[str] | None = None, solo: bool = False, tagged: set[str] = frozenset()) -> dict:
+    """styles: the trained (or checked) sources to take her pictures from, best first: of two
+    copies of one picture, the first source's is used. solo: only pictures of her alone (the
+    artist's style LoRA draws everyone else). tagged: sources whose pictures are all of her
+    (a booru's character tag), which skip the look filter."""
     from PIL import Image
     from .vision import Vision
-    src = cfg.data_dir / "lora" / style
-    prep = json.loads((src / "prep.json").read_text())
-    medium = prep["medium"]
+    mediums = {json.loads((cfg.data_dir / "lora" / s / "prep.json").read_text())["medium"] for s in styles}
+    if len(mediums) != 1:
+        raise RuntimeError(f"the sources are of different mediums: {sorted(mediums)}")
+    medium = mediums.pop()
     picks = []
-    for txt in sorted(src.glob("dataset/*/*.txt")):
-        tags = set(_tags(txt))
-        if set(look) <= tags and not tags & CROWD and txt.with_suffix(".png").is_file():
-            picks.append(txt)
-    print(f"character-prep: {len(picks)} of the {style} pictures show {', '.join(look)}", flush=True)
+    for style in styles:
+        found = []
+        for txt in sorted((cfg.data_dir / "lora" / style).glob("dataset/*/*.txt")):
+            tags = set(_tags(txt))
+            if ((style in tagged or set(look) <= tags) and not tags & CROWD and (not solo or "solo" in tags)
+                    and txt.with_suffix(".png").is_file()):
+                found.append(txt)
+        print(f"character-prep: {len(found)} of the {style} pictures show her"
+              + (" alone" if solo else ""), flush=True)
+        picks += found
     vision = Vision(cfg.models_dir)
     try:
         embs = []
         for txt in picks:
             with Image.open(txt.with_suffix(".png")) as im:
                 embs.append(vision.embed([im.convert("RGB")])[0])
+        picks, embs = _unique(picks, embs)
         keep, out, base = _copy(cfg, name, picks, embs, traits)
         if closeups:
             crops = out.parent / f"{CLOSEUP_REPEATS}_{name}"
             crops.mkdir()
-            extra = _closeups(cfg, vision, keep, crops, name, closeups, traits, medium)
+            extra = _closeups(cfg, vision, keep, out, crops, name, closeups, traits, medium)
         else:
             extra = {}
     finally:
         vision.close()
-    stats = {"kept": len(keep), "closeups": extra, "trigger": name, "medium": medium, "from": style, "look": look}
+    kept = sum(1 for _ in out.glob("*.png"))
+    stats = {"kept": kept, "closeups": extra, "trigger": name, "medium": medium, "from": styles, "look": look}
     (base / "prep.json").write_text(json.dumps(stats))
     # No "source": it isn't downloaded, so the dashboard offers no retrain from a page.
-    (base / "source.json").write_text(json.dumps({"source": None, "medium": medium, "from": style}))
-    write_status(base, phase="prepared", kept=len(keep) + sum(extra.values()), message=None)
+    (base / "source.json").write_text(json.dumps({"source": None, "medium": medium, "from": styles}))
+    write_status(base, phase="prepared", kept=kept + sum(extra.values()), message=None)
     print(f"character-prep: {name} {stats}", flush=True)
     return stats
+
+
+DUPLICATE = 0.95   # CLIP likeness of two copies of one picture (resized, recompressed)
+
+
+def _unique(picks: list[Path], embs: list) -> tuple[list[Path], list]:
+    """One copy of each picture: the first source's."""
+    out_p, out_e = [], []
+    for txt, e in zip(picks, embs):
+        if all(float(e @ o) < DUPLICATE for o in out_e):
+            out_p.append(txt)
+            out_e.append(e)
+    print(f"character-prep: {len(picks) - len(out_p)} duplicates left out, {len(out_p)} pictures", flush=True)
+    return out_p, out_e
 
 
 def _copy(cfg: Config, name: str, picks: list[Path], embs: list, traits: set[str]):
@@ -200,14 +243,18 @@ def train(cfg: Config, name: str, medium: str, steps: int) -> None:
 def main(args: list[str]) -> None:
     ap = argparse.ArgumentParser(prog="dreamfeed character-prep")
     ap.add_argument("name", help="the character's name: the trigger word and the file style-NAME")
-    ap.add_argument("--from", dest="style", required=True, help="the trained style whose pictures to use")
+    ap.add_argument("--from", dest="style", required=True,
+                    help="the trained styles whose pictures to use, comma separated, best first")
     ap.add_argument("--look", required=True, help="tags every picture of her has, comma separated")
     ap.add_argument("--traits", default="", help="her tags to leave out of captions (the trigger learns them)")
     ap.add_argument("--closeups", metavar="PARTS",
                     help="close-ups of these, comma separated: " + ", ".join(PARTS))
+    ap.add_argument("--solo", action="store_true", help="only pictures of her alone")
+    ap.add_argument("--tagged", default="", help="sources (of --from) whose pictures are all of her: no look filter")
     ap.add_argument("--train", type=int, metavar="STEPS", help="then ask the trainer for this many steps")
     a = ap.parse_args(args)
-    if not a.name.replace("_", "").isalnum() or not a.style.replace("_", "").isalnum():
+    styles = [s.strip() for s in a.style.split(",") if s.strip()]
+    if not a.name.replace("_", "").isalnum() or not styles or not all(s.replace("_", "").isalnum() for s in styles):
         sys.exit("character-prep: bad name")
     split = lambda s: [t.strip() for t in s.split(",") if t.strip()]
     look = split(a.look)
@@ -215,6 +262,7 @@ def main(args: list[str]) -> None:
     parts = split(a.closeups or "")
     if set(parts) - set(PARTS):
         sys.exit(f"character-prep: unknown parts {sorted(set(parts) - set(PARTS))}; known: {', '.join(PARTS)}")
-    stats = prepare(cfg, a.name, a.style, look, set(look) | set(split(a.traits)), parts)
+    stats = prepare(cfg, a.name, styles, look, set(look) | set(split(a.traits)), parts,
+                    solo=a.solo, tagged=set(split(a.tagged)))
     if a.train:
         train(cfg, a.name, stats["medium"], a.train)
