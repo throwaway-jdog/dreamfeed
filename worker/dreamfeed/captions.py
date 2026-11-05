@@ -50,7 +50,8 @@ SYSTEM = (
     "habits of their past posts, but never reuse their sentences. Every character is an adult. "
     "Never name any character, series, game or real person: where their posts say [name], write "
     "she, he, they or a short description instead. Never mention "
-    "ages, school, or anything young. No @mentions, links or hashtags. Reply with the caption only.")
+    "ages, school, or anything young. No @mentions, links or hashtags. Don't list or name the "
+    "picture's tags: say what the owner would say about the moment. Reply with the caption only.")
 
 
 # ---- which words are names -----------------------------------------------------------------
@@ -135,14 +136,23 @@ def build_voice(base: Path) -> int:
     return len(out)
 
 
+def _voice_file(cfg, name: str) -> dict:
+    try:
+        return json.loads((cfg.data_dir / "lora" / name / "voice.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def voice(cfg, name: str) -> list[str]:
     """A style's voice: its character's lines from speech bubbles when there are any
     (speech.py), otherwise the artist's own post texts."""
-    try:
-        data = json.loads((cfg.data_dir / "lora" / name / "voice.json").read_text())
-    except (OSError, ValueError):
-        return []
+    data = _voice_file(cfg, name)
     return data.get("speech") or data.get("posts") or []
+
+
+def spoken(cfg, name: str) -> bool:
+    """Whether the voice is a character's speech-bubble lines rather than post texts."""
+    return bool(_voice_file(cfg, name).get("speech"))
 
 
 # ---- checking what the model wrote -----------------------------------------------------------
@@ -174,6 +184,23 @@ def problem(text: str, examples: list[str], allowed: set[str]) -> str | None:
             return "copied"
         if difflib.SequenceMatcher(None, text.lower(), ex.lower()).ratio() > 0.8:
             return "copied"
+    return None
+
+
+JARGON_BELOW = 3.0   # wordfreq zipf: tag words rarer than this are booru jargon (ahoge, paizuri)
+
+
+def _lists_tags(text: str, tags: list[str]) -> str | None:
+    """The picture's tags read back ("ahoge, cum, red hair") instead of a caption."""
+    from wordfreq import zipf_frequency
+    tagset = {t.lower() for t in tags}
+    parts = [p.strip(" .!?~").lower() for p in re.sub(r"[^\w\s,.!?~'-]", "", text).split(",")]
+    if sum(p in tagset for p in parts) >= 2:
+        return "lists the tags"
+    used = {w.lower() for w in WORD.findall(text)}
+    jargon = {w for t in tags for w in WORD.findall(t.lower()) if zipf_frequency(w, "en") < JARGON_BELOW}
+    if used & jargon:
+        return "tag jargon: " + ", ".join(sorted(used & jargon))
     return None
 
 
@@ -233,7 +260,7 @@ class Writer:
         return self.tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
 
     def write(self, persona, examples: list[str], tags: list[str], rating: str, rng: random.Random,
-              recent: list[str] = ()) -> tuple[str | None, list[str]]:
+              recent: list[str] = (), spoken: bool = False) -> tuple[str | None, list[str]]:
         """A checked caption (or None) and why the rejected tries were rejected."""
         allowed = {w.lower() for w in WORD.findall(persona.name)}
         words = sorted(len(WORD.findall(e)) for e in examples) or [8]
@@ -245,13 +272,16 @@ class Writer:
                     + (f" Bio: {persona.bio}" if persona.bio else "")
                     + (f"\nEmoji they like (use one or two at most, or none): {' '.join(persona.emoji)}"
                        if persona.emoji else "")
-                    + "\n\nTheir past posts:\n" + "\n".join(f"- {e}" for e in shown)
+                    + ("\n\nThings this character says (their way of talking, not captions):\n" if spoken
+                       else "\n\nTheir past posts:\n") + "\n".join(f"- {e}" for e in shown)
                     + ("\n\nTheir latest captions (say something different, with other words):\n"
                        + "\n".join(f"- {r}" for r in recent) if recent else "")
                     + f"\n\nThe new picture ({rating}): {', '.join(tags)}"
-                    + f"\nWrite the caption, about {target} words.")
+                    + (f"\nWrite one thing they'd say posting this picture: first person, a whole "
+                       f"sentence to their followers, about {max(target, 6)} words, not a description."
+                       if spoken else f"\nWrite the caption, about {target} words."))
             text = self.ask(SYSTEM, user)
-            reason = problem(text, examples, allowed) or _repeats(text, recent)
+            reason = problem(text, examples, allowed) or _lists_tags(text, tags) or _repeats(text, recent)
             if not reason:
                 return text, why
             why.append(reason)
@@ -283,8 +313,12 @@ def write_all(cfg, conn, night: str, posts: list[tuple[int, str, list[str]]], pr
             row = conn.execute("SELECT prompt FROM generations WHERE id = ?", (gid,)).fetchone()
             if not p or not row or not tags:
                 continue
-            examples = (voice(cfg, p.voice) if p.voice else []) or [c for k in p.posts for c in k.captions]
-            text, why = writer.write(p, examples, tags, rating_of(row[0]), rng, recent[handle][:RECENT])
+            # The persona's own captions always count: a style's voice can be thin or noisy
+            # (speech bubbles), and those were written for this account.
+            own = [c for k in p.posts for c in k.captions]
+            examples = (voice(cfg, p.voice) if p.voice else []) + own
+            text, why = writer.write(p, examples, tags, rating_of(row[0]), rng, recent[handle][:RECENT],
+                                     spoken=bool(p.voice) and spoken(cfg, p.voice))
             if text is None:
                 failed += 1
                 print(f"captions: gave up on #{gid} (@{handle}): {'; '.join(why)}", flush=True)
