@@ -58,6 +58,15 @@ SIDE_ON_NEGATIVE = "(pov:1.3), (from below:1.3), (from front:1.2), close-up, cro
 SIDE_TAGS = {"from side", "profile"}   # the tagger must see one of these in a side-on shot
 SHOT_CANDIDATES_SIDE = 6
 TAG_SURE = 0.35
+# What he does in each position. The act LoRAs learned mostly POV clips where he barely
+# moves, so without this only she does.
+HIS_MOTION = {
+    "missionary": "he thrusts his hips into her hard and fast, his whole body moving",
+    "doggy": "he grips her hips and slams his hips into her from behind, his body moving with each thrust",
+    "cowgirl": "he thrusts his hips up into her from below to meet each bounce, his hands on her hips",
+    "reverse cowgirl": "he thrusts his hips up into her from below to meet each bounce, his hands on her hips",
+    "blowjob": "his hips push forward into her mouth, his hand on her head",
+}
 OPENERS = ("missionary", "blowjob")
 MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl")
 
@@ -70,6 +79,48 @@ PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", 
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
 PARTNER_LOOKS = ("dark-skinned male", "tan skin", "muscular male, dark skin")   # not grey: reads as fur   # one per scene
 CROP = 0.04   # off the top and bottom of each shot: style LoRAs learn the artist's signature strip
+
+# Her body, read off the post's picture and put in every shot: otherwise each picture draws
+# its own (chubby in one, skinny in the next). One breast size, the most likely; build tags
+# that pass. Each has the opposites to keep out of the picture.
+BREASTS = {"flat chest": "large breasts, huge breasts", "small breasts": "large breasts, huge breasts",
+           "medium breasts": "flat chest, huge breasts", "large breasts": "flat chest, small breasts",
+           "huge breasts": "flat chest, small breasts, medium breasts",
+           "gigantic breasts": "flat chest, small breasts, medium breasts"}
+BUILD = {"plump": "skinny, slim", "chubby": "skinny, slim", "fat": "skinny, slim", "curvy": "skinny",
+         "thick thighs": "skinny", "wide hips": "skinny", "voluptuous": "skinny",
+         "slim": "plump, chubby, fat", "skinny": "plump, chubby, fat, thick thighs",
+         "muscular female": "", "toned": "", "narrow waist": "", "short stack": "tall female"}
+
+
+def _split(tags: str) -> list[str]:
+    return [t.strip() for t in tags.split(",") if t.strip()]
+
+
+def character_body(persona, prompt: str) -> list[str]:
+    """Her build from the persona's character the post was made from (its other tags all in the
+    post's prompt), as the persona file has it now: older posts may have a vaguer one."""
+    have = set(_split(prompt))
+    for c in (persona.characters if persona else []):
+        tags = _split(c)
+        core = [t for t in tags if t not in BREASTS and t not in BUILD]
+        if core and set(core) <= have and "female" in core:
+            return [t for t in tags if t in BREASTS or t in BUILD]
+    return []
+
+
+def body_tags(prompt_body: list[str], general: dict[str, float]) -> tuple[list[str], str]:
+    """(her body tags, what to keep out): the character's build, and what the tagger reads off
+    the post's picture where that says nothing (a breast size it can see; build tags)."""
+    tags = list(prompt_body)
+    if not BREASTS.keys() & set(tags):
+        sizes = [(s, t) for t, s in general.items() if t in BREASTS and s >= TAG_SURE]
+        tags += [max(sizes)[1]] if sizes else []
+    tags += [t for t, s in sorted(general.items(), key=lambda kv: -kv[1])
+             if t in BUILD and s >= TAG_SURE and t not in tags]
+    avoid = {x.strip() for t in tags for x in (BREASTS.get(t) or BUILD.get(t) or "").split(",") if x.strip()}
+    return tags, ", ".join(sorted(avoid - set(tags)))
+
 
 # Tags that belong to what's happening, not to who and where: dropped from the post's own
 # tags to get the cast and setting.
@@ -163,15 +214,27 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     from .checks import drop_reason
     from .generate import _feral
     from .vision import Vision
+    # The post first: its likeness to score candidates by, and her body for every shot.
+    vision = Vision(cfg.models_dir)
+    try:
+        with Image.open(post["file"]) as im:
+            seen_post = vision.analyze([im.convert("RGB")])
+    finally:
+        vision.close()
+    base = seen_post.embedding.astype(np.float32)
+    body, avoid = body_tags(character_body(persona, post["prompt"]), seen_post.general)
     cast = cast_tags(post["prompt"], rng.choice(PARTNER_LOOKS))
-    print(f"scene: cast and setting: {cast}", flush=True)
+    if body:   # her build once, weighted, in place of whatever the post's prompt said
+        cast = ", ".join(t for t in _split(cast) if t not in BREASTS and t not in BUILD)
+        cast += ", " + ", ".join(f"({t}:1.2)" for t in body)
+    print(f"scene: cast and setting: {cast}; keeping out: {avoid}", flush=True)
     lora = persona.lora_for(post["prompt"]) if persona else None
     negative = persona.negative if persona else ""
     cands: list[list[Path]] = []
     try:
         for i, shot in enumerate(shots):
             side_on = shot.act not in (None, "blowjob")
-            neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, "" if shot.cum else NO_CUM,
+            neg = ", ".join(n for n in (negative, SCENE_NEGATIVE, avoid, "" if shot.cum else NO_CUM,
                                         SIDE_ON_NEGATIVE if side_on else "") if n)
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
@@ -182,8 +245,6 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     vision = Vision(cfg.models_dir)
     out = []
     try:
-        with Image.open(post["file"]) as im:
-            base = vision.analyze([im.convert("RGB")]).embedding.astype(np.float32)
         for shot, paths in zip(shots, cands):
             scored = []
             for p in paths:
@@ -207,7 +268,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     (need is None or (need[0] <= seen and bool(need[1] & seen)))
                 # Then side-on, for penetration: from below, Wan loses the penis at the edge.
                 side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
-                fits = (fits and not (FURRY_PARTNER & seen), side)
+                same_body = sum(t in seen for t in body)   # the tagger reads her as the post's build
+                fits = (fits and not (FURRY_PARTNER & seen), side, same_body)
                 scored.append((fits, float(a.embedding.astype(np.float32) @ base), p))
             best = max(scored, key=lambda s: s[:2]) if scored else None
             for p in paths:
@@ -215,7 +277,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     p.unlink(missing_ok=True)
             if best:
                 _crop(best[2])
-            out.append((best[2], f"{'' if best[0][0] else 'act not seen, '}{'' if best[0][1] else 'not side-on, '}look {best[1]:.2f}") if best
+            out.append((best[2], f"{'' if best[0][0] else 'act not seen, '}{'' if best[0][1] else 'not side-on, '}body {best[0][2]}/{len(body)}, look {best[1]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
@@ -284,7 +346,8 @@ def preview(args: list[str]) -> None:
 def _shot_prompt(writer, cast: str, shot: Shot, act) -> str | None:
     """A written, checked description of the shot's motion for its point in the scene."""
     where = (f"This is one shot of a longer scene: {shot.pace}. The clip loops, so the motion is a "
-             f"repeating cycle that ends where it started.")
+             f"repeating cycle that ends where it started. Both of them move: "
+             f"{HIS_MOTION.get(shot.act, 'he moves with her')}.")
     return motion.describe(writer, [t.strip() for t in f"{cast}, {shot.tags}".split(",")], act, context=where)
 
 
@@ -335,6 +398,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
             clip_act = used[-1] if used else None
             body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
+            body = ", ".join(p for p in (body, HIS_MOTION.get(shot.act, "")) if p)
             prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
                                            body, MOTION[post["medium"]]) if p)
             frames = None
