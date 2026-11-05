@@ -53,18 +53,22 @@ POSITIONS = {
 }
 # Penetration shots are drawn side-on with both bodies whole: from below, it sits on the
 # picture's bottom edge and Wan makes the penis vanish instead of moving it.
-SIDE_ON = "full body, (from side:1.2)"
-SIDE_ON_NEGATIVE = "pov, from below, close-up, cropped, out of frame, head out of frame"
+SIDE_ON = "(from side:1.4), (full body:1.2), profile, his whole body"
+SIDE_ON_NEGATIVE = "(pov:1.3), (from below:1.3), (from front:1.2), close-up, cropped, out of frame, head out of frame"
+SIDE_TAGS = {"from side", "profile"}   # the tagger must see one of these in a side-on shot
+SHOT_CANDIDATES_SIDE = 6
+TAG_SURE = 0.35
 OPENERS = ("missionary", "blowjob")
 MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl")
 
 NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejaculation, cum string"
 # Every shot: the partner mustn't turn into a second copy of her, and no artist text.
 SCENE_NEGATIVE = ("2girls, multiple girls, twins, watermark, signature, text, logo, patreon username, "
-                  "comic, multiple views, panels, split screen, inset")
+                  "comic, multiple views, panels, split screen, inset, furry male")
+FURRY_PARTNER = {"furry male", "rabbit boy"}   # he's drawn as a second animal; a worse pick
 PANELS = {"comic", "multiple views", "split screen", "inset", "4koma", "2koma", "panel"}   # a shot is one picture
 PARTNER = "faceless male"   # how artists often draw him; keeps him from borrowing her tags
-PARTNER_LOOKS = ("dark-skinned male", "grey skin", "tan skin", "muscular male, dark skin")   # one per scene
+PARTNER_LOOKS = ("dark-skinned male", "tan skin", "muscular male, dark skin")   # not grey: reads as fur   # one per scene
 CROP = 0.04   # off the top and bottom of each shot: style LoRAs learn the artist's signature strip
 
 # Tags that belong to what's happening, not to who and where: dropped from the post's own
@@ -128,10 +132,10 @@ def plan(rng: random.Random) -> list[Shot]:
     return [
         Shot(f"opening: {opener}", f"{pos(opener)}, blush, half-closed eyes", act(opener), False,
              "slow and gentle, just starting"),
-        Shot(f"{a}", f"{pos(a, 'full body, three-quarter view')}, blush, open mouth", act(a), False,
+        Shot(f"{a}", f"{pos(a)}, blush, open mouth", act(a), False,
              "a steady rhythm"),
         # No "close-up" here: in this kind of art it draws inset panels.
-        Shot(f"{a}, from the side", f"{pos(a, 'full body, (from side:1.3)')}, blush, open mouth, sweat, "
+        Shot(f"{a}, from the side", f"{pos(a, '(from side:1.3), (three-quarter view:1.1), (full body:1.2)')}, blush, open mouth, sweat, "
              "heavy breathing", act(a), False, "faster, she's lost in it"),
         Shot(f"{b}", f"{pos(b)}, open mouth, sweat, heavy breathing, motion lines", act(b), False,
              "fast and intense, building toward climax"),
@@ -172,7 +176,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], f"{cast}, {shot.tags}",
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora)
-                          for c in range(SHOT_CANDIDATES)])
+                          for c in range(SHOT_CANDIDATES_SIDE if side_on else SHOT_CANDIDATES)])
     finally:
         comfy.stop()
     vision = Vision(cfg.models_dir)
@@ -190,13 +194,20 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     continue
                 if PANELS & set(captions.picture(a.general)):
                     continue
-                tags = set(captions.picture(a.general))
-                act = motion.act_for(list(tags))
+                # Every tag the tagger is sure of: its top-tags list cuts off "penis" and the view.
+                seen = {t for t, sc in a.general.items() if sc >= TAG_SURE}
+                shows = {act.name for act in motion.ACTS if seen & set(act.tags)}
+                # Side-on, the tagger can't tell which way she faces on top.
+                if shot.act == "reverse cowgirl" and "cowgirl" in shows:
+                    shows.add("reverse cowgirl")
                 # Showing the intended act matters more than looking like the post: the position,
                 # and the penis actually in it (a cowgirl on his lap with nothing inside isn't).
                 need = ORAL if shot.act == "blowjob" else PENETRATION if shot.act else None
-                fits = (act.name if act else None) == shot.act and \
-                    (need is None or (need[0] <= tags and bool(need[1] & tags)))
+                fits = (shot.act is None or shot.act in shows) and \
+                    (need is None or (need[0] <= seen and bool(need[1] & seen)))
+                # Then side-on, for penetration: from below, Wan loses the penis at the edge.
+                side = shot.act in (None, "blowjob") or bool(SIDE_TAGS & seen)
+                fits = (fits and not (FURRY_PARTNER & seen), side)
                 scored.append((fits, float(a.embedding.astype(np.float32) @ base), p))
             best = max(scored, key=lambda s: s[:2]) if scored else None
             for p in paths:
@@ -204,7 +215,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     p.unlink(missing_ok=True)
             if best:
                 _crop(best[2])
-            out.append((best[2], f"{'' if best[0] else 'act not seen, '}look {best[1]:.2f}") if best
+            out.append((best[2], f"{'' if best[0][0] else 'act not seen, '}{'' if best[0][1] else 'not side-on, '}look {best[1]:.2f}") if best
                        else (None, f"all {len(paths)} failed the checks"))
     finally:
         vision.close()
