@@ -266,10 +266,14 @@ dreamfeed/
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,
   `data/liked/`, `state/`, `.env`, and the source folders.
-- **Excluded** in `backup/excludes.txt`: `models/` (re-downloadable; trained styles can be
-  retrained from `data/lora/`), `data/generated/`, and `logs/`. `LORA_DATA_DIR` is
-  only backed up if it's inside a backed-up folder; outside one, losing it means
-  downloading a style's images again before retraining it, and its voice is rebuilt then.
+- **Kept from `models/`:** only the LoRAs trained here (`models/loras/style-*`, `video-*`):
+  they take hours of GPU time to make again.
+- **Excluded:** the rest of `models/`, `data/generated/` and `logs/`. Motion LoRAs from
+  Civitai are listed in `models.json` with their hashes; `python3 fetch-models.py`
+  downloads any that are missing (`--check` only lists them; needs `CIVITAI_API_KEY`).
+  `LORA_DATA_DIR`'s pictures aren't kept (they download again), but each source's small
+  files are: settings (`source.json`), what was kept, voices (`voice.json`) and download
+  archives.
 
 ## Caddy
 

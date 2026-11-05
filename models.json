@@ -1,0 +1,173 @@
+{
+ "_note": "LoRAs that can be downloaded again: python3 fetch-models.py. Trained ones (style-*, video-*) are in the backup instead.",
+ "loras": {
+  "wan2.2-i2v-creampie-high.safetensors": {
+   "civitai_version": 2197409,
+   "civitai_model": 1941545,
+   "what": "Creampie (Anime Inspired) (Vaginal/Anal/Oral) WAN 2.2 I2V 14B (v1.1 I2V - High Noise)",
+   "sha256": "67fb7a9ca4fbc8750221c6f39ebf50a394285e99ffcbe99d70c7069335db4128"
+  },
+  "wan2.2-i2v-creampie-low.safetensors": {
+   "civitai_version": 2215731,
+   "civitai_model": 1941545,
+   "what": "Creampie (Anime Inspired) (Vaginal/Anal/Oral) WAN 2.2 I2V 14B (v1.1 I2V - Low Noise)",
+   "sha256": "e29e720b3574eabbd5955758c793ebf527b8965db9f84845805c301b41337225"
+  },
+  "wan2.2-i2v-cumshot-high.safetensors": {
+   "civitai_version": 2176450,
+   "civitai_model": 1922973,
+   "what": "F4C3SPL4SH Cumshot - I2V Wan 2.2 Video LoRa - K3NK (High noise - v1.0)",
+   "sha256": "a68ee10bb0f3162bf947a892591dfc65a111d7e85c3f73ff6db24887b79a0b05"
+  },
+  "wan2.2-i2v-cumshot-low.safetensors": {
+   "civitai_version": 2178869,
+   "civitai_model": 1922973,
+   "what": "F4C3SPL4SH Cumshot - I2V Wan 2.2 Video LoRa - K3NK (Low noise - v1.0)",
+   "sha256": "683d6a84430b7f1c7aa1d24a7b74981fe4bdb233a06006f0f0f613e61ccd483e"
+  },
+  "wan2.2-i2v-cunnilingus-high.safetensors": {
+   "civitai_version": 2212384,
+   "civitai_model": 1954774,
+   "what": "Cunnilingus - Pussy licking Lora I2V - Wan2.2 - K3NK (High Noise - v1.0)",
+   "sha256": "7d8afeffb8d8a04a76b656ebd8c1ae43f0ebc66e68c08881f7c1b70b178c0d38"
+  },
+  "wan2.2-i2v-cunnilingus-low.safetensors": {
+   "civitai_version": 2212394,
+   "civitai_model": 1954774,
+   "what": "Cunnilingus - Pussy licking Lora I2V - Wan2.2 - K3NK (Low Noise - v1.0)",
+   "sha256": "d8ce432a5f1220d4c2f6c26f5ad11bf009cfcd02f8e2d4932a59d0b1b6ff0b4d"
+  },
+  "wan2.2-i2v-dildo-high.safetensors": {
+   "civitai_version": 3293672,
+   "civitai_model": 2903074,
+   "what": "Dildoing (WAN22-HIGH)",
+   "sha256": "230fd82e83309b4a6342013771febd754ca2801b76cbdb735a1e900b2a35c23c"
+  },
+  "wan2.2-i2v-dildo-low.safetensors": {
+   "civitai_version": 3293675,
+   "civitai_model": 2903074,
+   "what": "Dildoing (WAN22-LOW)",
+   "sha256": "5753f2e0678989ff44ad3b42501d3fe4ff8c7c2220f6453c96377e47bd71e267"
+  },
+  "wan2.2-i2v-dr34ml4y-high.safetensors": {
+   "civitai_version": 2553151,
+   "civitai_model": 1811313,
+   "what": "DR34ML4Y - All-In-One NSFW (H3/WAN/LTX2) (DR34ML4Y_I2V_14B_HIGH_v2)",
+   "sha256": "d9931756c202bd8d4946c0d163c1269231a6352b51bb4235f6a19894c9ad8c68"
+  },
+  "wan2.2-i2v-dr34ml4y-low.safetensors": {
+   "civitai_version": 2553271,
+   "civitai_model": 1811313,
+   "what": "DR34ML4Y - All-In-One NSFW (H3/WAN/LTX2) (DR34ML4Y_I2V_14B_LOW_v2)",
+   "sha256": "066ee4bfafb685c85f08174c8283cd11bc6d36f4845347f20d633ab44581601f"
+  },
+  "wan2.2-i2v-facial-high.safetensors": {
+   "civitai_version": 3112727,
+   "civitai_model": 1962545,
+   "what": "Cum/Facial - Wan2.2 (v3.0 - High)",
+   "sha256": "6dbf6748b81d789d7ccbc9133ac8956109623f3e9db603cd8ef0d4a719c70854"
+  },
+  "wan2.2-i2v-facial-low.safetensors": {
+   "civitai_version": 3112726,
+   "civitai_model": 1962545,
+   "what": "Cum/Facial - Wan2.2 (v3.0 - Low)",
+   "sha256": "27ed69bf37f32f37601ad13cc04c902b374ab20b56577dada5ded14c7b23cc7c"
+  },
+  "wan2.2-i2v-fingering-high.safetensors": {
+   "civitai_version": 2272024,
+   "civitai_model": 2007360,
+   "what": "Fingering Pussy (v1.0-i2v-A14B-Hi)",
+   "sha256": "2c71d5f38ffbfb6245c3202d051921ca15796ca015db9671333bd3c00f48b0a3"
+  },
+  "wan2.2-i2v-fingering-low.safetensors": {
+   "civitai_version": 2272102,
+   "civitai_model": 2007360,
+   "what": "Fingering Pussy (v1.0-i2v-A14B-Lo)",
+   "sha256": "3994ae349b057e8f231a7e4a3ed6cda1b3a79d82187c163f8a9745f04249794c"
+  },
+  "wan2.2-i2v-lightx2v-4step-high.safetensors": {
+   "civitai_version": 2506845,
+   "civitai_model": 2226769,
+   "what": "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1 (Seko_lora_high noise)",
+   "sha256": "d176c808d6fc461999b68e321efcb7501b20b8c3797523ed0df14f7d1deff11e"
+  },
+  "wan2.2-i2v-lightx2v-4step-low.safetensors": {
+   "civitai_version": 2506898,
+   "civitai_model": 2226769,
+   "what": "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1 (Seko_lora_low_noise)",
+   "sha256": "024f21de095bc8fad9809ded3e9e49a2e170dcf27075da8145ba7d60d8aab7f9"
+  },
+  "wan2.2-i2v-pegging-high.safetensors": {
+   "civitai_version": 2710056,
+   "civitai_model": 2410338,
+   "what": "WAN 2.2 I2V - Pegging (v1.0 high)",
+   "sha256": "7998b16d0681e23c15515c0af5fbd493a2e810e4ec80cfc03ddc4a7690204bd8"
+  },
+  "wan2.2-i2v-pegging-low.safetensors": {
+   "civitai_version": 2710070,
+   "civitai_model": 2410338,
+   "what": "WAN 2.2 I2V - Pegging (v1.0 low)",
+   "sha256": "e04a3d9eebf5abe9e7808931dbe81cf43a39db324cd33358eeab11776f6c0ffc"
+  },
+  "wan2.2-i2v-revcowgirl-high.safetensors": {
+   "civitai_version": 2156392,
+   "civitai_model": 1428098,
+   "what": "WAN COWGIRL + REVERSE COWGIRL -- T2V & I2V LoRa (wan2.2-I2V-14B-HIGH v1)",
+   "sha256": "e39e4567ed9b5793321313bf0d74dc1a5c65ae98ee479072e78a7aae91d02f8e"
+  },
+  "wan2.2-i2v-revcowgirl-low.safetensors": {
+   "civitai_version": 2156435,
+   "civitai_model": 1428098,
+   "what": "WAN COWGIRL + REVERSE COWGIRL -- T2V & I2V LoRa (wan2.2 - I2V-14B-LOW v1)",
+   "sha256": "445c3de529557c1299fdf043d1c804ae7138be56cf6a0e20537cee6bba7a8e02"
+  },
+  "wan2.2-i2v-rimming-high.safetensors": {
+   "civitai_version": 2613904,
+   "civitai_model": 2323540,
+   "what": "Rimming | Wan 2.2 I2V (Anilingus) (WAN 2.2 IV2 High noise)",
+   "sha256": "780ae6aa939250105857f791de6b3d6fca178ee53f8bdf5a6907a7bb40cbfe91"
+  },
+  "wan2.2-i2v-rimming-low.safetensors": {
+   "civitai_version": 2613882,
+   "civitai_model": 2323540,
+   "what": "Rimming | Wan 2.2 I2V (Anilingus) (WAN 2.2 IV2 Low noise)",
+   "sha256": "8a199ddce52b15661003f13d900f705a60a78f9a077f108a03878a9af2095d12"
+  },
+  "wan2.2-i2v-scissoring-high.safetensors": {
+   "civitai_version": 2671154,
+   "civitai_model": 654646,
+   "what": "Scissor/Tribadism (WAN2.2/Pony/Illustrious/Hunyuan) (WAN 2.2 T2V - HIGH)",
+   "sha256": "d4a9e161210d6b9ad9ebf756eb6b09293966611e7bbb29e36635cd63264d4e5e"
+  },
+  "wan2.2-i2v-scissoring-low.safetensors": {
+   "civitai_version": 2671257,
+   "civitai_model": 654646,
+   "what": "Scissor/Tribadism (WAN2.2/Pony/Illustrious/Hunyuan) (WAN 2.2 T2V - LOW)",
+   "sha256": "56ecd72c07d43e54297ac90908fc6f1321385758d39a309a5a7656a214091b32"
+  },
+  "wan2.2-i2v-squirt-high.safetensors": {
+   "civitai_version": 2830762,
+   "civitai_model": 2518574,
+   "what": "Female SQUIRT V2 - I2V Wan 2.2 Video LoRa - K3NK (High noise - v1.0)",
+   "sha256": "8ce6d738910e6ced76d41ed5793434affc676a725ce8a603f27bfe285d76866d"
+  },
+  "wan2.2-i2v-squirt-low.safetensors": {
+   "civitai_version": 2833242,
+   "civitai_model": 2518574,
+   "what": "Female SQUIRT V2 - I2V Wan 2.2 Video LoRa - K3NK (Low noise - v1.0)",
+   "sha256": "b67495ef2e94c5a98800bf1479eddc0ece51f22ec39de43b8c9875b005da96f6"
+  },
+  "wan2.2-i2v-standing-high.safetensors": {
+   "civitai_version": 2475548,
+   "civitai_model": 2198636,
+   "what": "Upright sex (Wan2.2 14B I2V HIGH v1.0)",
+   "sha256": "b084c89dc576a735ac34170963c9f4405ac5630055b949fdb4ab20a232839fd8"
+  },
+  "wan2.2-i2v-standing-low.safetensors": {
+   "civitai_version": 2475551,
+   "civitai_model": 2198636,
+   "what": "Upright sex (Wan2.2 14B I2V LOW v1.0)",
+   "sha256": "0608b4aa1b4529de6de3e74a0cae3094c8f5699d958dbd664578a40bf329265f"
+  }
+ }
+}
