@@ -80,9 +80,11 @@ class Comfy:
                 subdir: str, name: str, extra_negative: str = "", strict: bool = False,
                 lora=None, init: Path | None = None, denoise: float = 1.0, regions=None) -> Path:
         """lora: (file in models/loras, strength), or a list of them, applied in turn to the model
-        and text encoder. regions: [(tags, x from, x to)], each added for its own vertical strip
-        (shares of the width) on top of prompt for the whole picture: two characters each
-        described again in their own part don't trade looks.
+        and text encoder. regions: [(tags, x from, x to)] or [(tags, x from, x to, lora)], each
+        added for its own vertical strip (shares of the width) on top of prompt for the whole
+        picture: two characters each described again in their own part don't trade looks. A
+        region's lora (file, strength) is used only for that part (a ComfyUI hook), so one
+        character's LoRA doesn't turn the other into them.
         init: start from this picture instead of noise (img2img), keeping 1 - denoise of it."""
         p = presets.for_checkpoint(checkpoint)
         loras = [lora] if isinstance(lora, tuple) else list(lora or [])
@@ -111,10 +113,17 @@ class Comfy:
                 "model": [prev, 0], "clip": [prev, 1], "lora_name": file,
                 "strength_model": strength, "strength_clip": strength}}
         self.start()
-        for n, (tags, x0, x1) in enumerate(regions or []):
+        for n, (tags, x0, x1, *own) in enumerate(regions or []):
             if safety.blocked(tags):
                 raise ValueError(f"blocked tags in a region: {', '.join(safety.blocked(tags))}")
-            workflow[f"rpos{n}"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": tags}}
+            clip = ["clip", 0]
+            if own and own[0]:
+                workflow[f"rhook{n}"] = {"class_type": "CreateHookLora", "inputs": {
+                    "lora_name": own[0][0], "strength_model": own[0][1], "strength_clip": own[0][1]}}
+                workflow[f"rclip{n}"] = {"class_type": "SetClipHooks", "inputs": {
+                    "clip": ["clip", 0], "apply_to_conds": True, "schedule_clip": False, "hooks": [f"rhook{n}", 0]}}
+                clip = [f"rclip{n}", 0]
+            workflow[f"rpos{n}"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": clip, "text": tags}}
             workflow[f"rarea{n}"] = {"class_type": "ConditioningSetAreaPercentage", "inputs": {
                 "conditioning": [f"rpos{n}", 0], "width": round(x1 - x0, 3), "height": 1.0,
                 "x": round(x0, 3), "y": 0.0, "strength": 1.0}}
