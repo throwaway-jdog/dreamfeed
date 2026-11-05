@@ -134,6 +134,7 @@ def prepare(cfg: Config, name: str, limit: int, download_first: bool = True) -> 
     out.mkdir()
     trigger = trigger_for(name)
     # Descriptions need the text model, which doesn't share the GPU with the checks: after them.
+    write_status(base, video_phase="describing", video_done=0, video_total=len(kept))
     plans = motion.plan(cfg, list(enumerate(t for _, t in kept)))
     count = 0
     for i, (path, tags) in enumerate(kept):
@@ -167,6 +168,84 @@ def for_style(cfg: Config, style_file: str) -> tuple[str, str, str] | None:
     except (OSError, ValueError, KeyError):
         trigger = trigger_for(name)
     return files[0], files[1], trigger
+
+
+# ---- from the dashboard ---------------------------------------------------------------------
+
+PICKUP_SECONDS = 120          # the video-trainer service checks for requests every few seconds
+SECONDS_PER_STEP = 8          # per half, on a 12 GB GPU; only for the time limit
+TRAIN_SLACK = 2 * 3600        # model loading and caching, twice
+
+
+class Stopped(Exception):
+    pass
+
+
+def run_job(cfg: Config, conn, job_id: int, params: dict) -> None:
+    """A "video_style" job: {"name", "limit", "steps"}. video-prep (download, check, describe)
+    in a child process, so its GPU memory is freed; then a request for the video-trainer
+    service, which trains both halves while this waits. data/lora/NAME/video-cancel stops it."""
+    import time
+    from .styles import free_gpu
+    name, limit, steps = params["name"], int(params["limit"]), int(params["steps"])
+    base = cfg.data_dir / "lora" / name
+    (base / "video-cancel").unlink(missing_ok=True)
+    with conn:
+        conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,))
+    write_status(base, video_phase="downloading", video_done=0, video_total=0, video_message=None,
+                 video_steps=steps, video_limit=limit)
+    status, message = "failed", None
+    try:
+        proc = subprocess.Popen([sys.executable, "-m", "dreamfeed", "video-prep", name, "--limit", str(limit)])
+        while proc.poll() is None:
+            if (base / "video-cancel").exists():
+                proc.kill()
+                proc.wait()
+                raise Stopped()
+            time.sleep(2)
+        if proc.returncode:
+            raise RuntimeError(f"preparing the clips failed (exit {proc.returncode}); see the worker log")
+        kept = json.loads((base / "video-prep.json").read_text())["kept"]
+        if kept < MIN_CLIPS:
+            raise RuntimeError(f"only {kept} clips passed the checks; at least {MIN_CLIPS} are needed")
+        free_gpu(cfg)
+        write_status(base, video_phase="waiting", video_done=0, video_total=steps,
+                     video_message="waiting for the video trainer")
+        req = base / "video-train-request.json"
+        req.write_text(json.dumps({"steps": steps}))
+        start, limit_s = time.time(), 2 * steps * SECONDS_PER_STEP + TRAIN_SLACK
+        while True:
+            time.sleep(5)
+            phase = json.loads((base / "status.json").read_text()).get("video_phase")
+            if phase == "trained":
+                break
+            if phase == "train-failed":
+                raise RuntimeError(json.loads((base / "status.json").read_text()).get("video_message")
+                                   or "training failed")
+            if phase == "cancelled":
+                raise Stopped()
+            if req.exists() and (base / "video-cancel").exists():
+                req.unlink(missing_ok=True)
+                raise Stopped()
+            if req.exists() and time.time() - start > PICKUP_SECONDS:
+                req.unlink(missing_ok=True)
+                raise RuntimeError("the video trainer didn't pick up the request; is dreamfeed-video-trainer running?")
+            if time.time() - start > limit_s:
+                raise RuntimeError(f"training took over {limit_s // 3600} hours; giving up")
+        status, message = "done", f"{kept} clips trained"
+        write_status(base, video_phase="done", video_message=message)
+    except Stopped:
+        status, message = "cancelled", "cancelled"
+        write_status(base, video_phase="cancelled", video_message=message)
+    except Exception as e:
+        message = str(e)[:300]
+        write_status(base, video_phase="failed", video_message=message)
+        print(f"video-style: {name} failed: {message}", flush=True)
+    finally:
+        (base / "video-cancel").unlink(missing_ok=True)
+        with conn:
+            conn.execute("UPDATE jobs SET status = ?, message = ?, finished_at = datetime('now') WHERE id = ?",
+                         (status, message, job_id))
 
 
 def main(args: list[str]) -> None:

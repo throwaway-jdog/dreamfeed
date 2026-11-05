@@ -181,10 +181,13 @@ slow disk is fine) in `VIDEO_TRAIN_MODELS`:
     umt5-xxl-enc-bf16.pth (models_t5_umt5-xxl-enc-bf16.pth) and wan2.1_vae.pth (Wan2.1_VAE.pth)
         from Wan-AI/Wan2.1-I2V-14B-720P
 
-Then, for a style that's already trained (it uses the style's source page and medium):
+Then, on the dashboard, open a trained style's **Video LoRA** row and pick **Train video**
+(how many videos to download, and how long to train). It uses the style's source page and
+medium, and shows progress through both halves; **Stop** cancels it. One video LoRA trains at
+a time, and not while that style's own training runs. By hand, the same steps are:
 
     docker compose exec worker python -m dreamfeed video-prep NAME
-    docker compose --profile video-training run --rm video-trainer NAME both
+    docker compose run --rm video-trainer NAME both
 
 `video-prep` downloads the artist's videos into `data/lora/NAME/video_raw/`, checks at least
 16 frames of each with the same checks as style images (one flagged frame drops the whole

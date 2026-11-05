@@ -9,4 +9,5 @@ RUN git clone https://github.com/kohya-ss/musubi-tuner.git /musubi \
 WORKDIR /musubi
 ENV HOME=/tmp PYTHONUNBUFFERED=1
 COPY train.sh /train.sh
-ENTRYPOINT ["sh", "/train.sh"]
+COPY watch.py /watch.py
+ENTRYPOINT ["python", "/watch.py"]

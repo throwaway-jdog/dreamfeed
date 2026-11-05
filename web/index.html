@@ -284,6 +284,11 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 .srow .prog { grid-column: 1 / -1; display: grid; gap: 6px; font-size: 13px; }
 .srow .prog.bad { color: #d64545; }
 .srow .linkish { justify-self: end; }
+.srow.vid { padding-top: 0; }
+.srow.vid .nm { font-weight: 500; font-size: 14px; }
+.vform { grid-column: 1 / -1; display: grid; gap: 10px; padding: 4px 0 6px; }
+.vform .seg { grid-template-columns: repeat(3, 1fr); }
+.vform .form-actions { margin: 0; }
 .form-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
 .form-actions .primary { min-height: var(--tap); font-size: 15px; }
 [hidden] { display: none !important; }
@@ -1138,12 +1143,18 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) refr
 
 
 /* ---------- trained styles ---------- */
-const styleState = { list: [], busy: false, medium: "anime", limit: 300, steps: 2000 };
+const styleState = { list: [], busy: false, medium: "anime", limit: 300, steps: 2000,
+  video: null, vLimit: 300, vSteps: 1500 };   // video: the style whose "Train video" form is open
+const VIDEO_PHASE = { downloading: "Downloading clips", checking: "Checking clips", describing: "Describing the motion",
+  prepared: "Clips ready", waiting: "Waiting for the video trainer", "training-high": "Training motion (half 1 of 2)",
+  "training-low": "Training detail (half 2 of 2)", trained: "Finishing", done: "Done", failed: "Failed",
+  "train-failed": "Failed", cancelled: "Cancelled" };
+const VIDEO_SIZES = { limits: [[100, "100"], [300, "300"], [600, "600"]], steps: [[1000, "Quick"], [1500, "Normal"], [2000, "Long"]] };
 const STYLE_PHASE = { downloading: "Downloading", checking: "Checking images", waiting: "Waiting for the trainer",
   training: "Training", trained: "Finishing", done: "Done", failed: "Failed", "train-failed": "Failed", cancelled: "Cancelled" };
 async function loadStyles() {
   try { styleState.list = (await api("api/styles")).styles; } catch { return; }
-  styleState.busy = styleState.list.some(s => s.job);
+  styleState.busy = styleState.list.some(s => s.job || s.video?.job);
   renderStyles();
 }
 function renderStyles() {
@@ -1182,9 +1193,80 @@ function renderStyles() {
       }
       row.append(prog);
     }
-    li.append(row); list.append(li);
+    li.append(row);
+    if (s.trained) li.append(videoRow(s));
+    list.append(li);
   }
-  $("s-new").disabled = styleState.busy;
+  $("s-new").disabled = styleState.list.some(s => s.job);
+}
+function videoRow(s) {
+  const v = s.video || {}, row = el("div", "srow vid"), mid = el("div");
+  mid.append(el("div", "nm", "Video LoRA"));
+  const sub = el("div", "sub");
+  if (v.trained) sub.append(el("span", null, `trained ${clock(new Date(v.trained * 1000).toISOString())}`));
+  else if (!v.job) sub.append(el("span", null, "not trained: clips use the image style only"));
+  if (v.clips != null) sub.append(el("span", null, `${v.clips} clips`));
+  mid.append(sub); row.append(mid);
+  const otherVideo = styleState.list.some(o => o.video?.job && o.name !== s.name);
+  if (v.job) {
+    const stop = el("button", "linkish", "Stop"); stop.type = "button";
+    stop.onclick = async () => { stop.disabled = true; try { await api("api/styles/video-cancel", { name: s.name }); toast("Stopping…"); } catch (e) { toast(e.message); } refreshDash(); };
+    row.append(stop);
+  } else if (styleState.video !== s.name) {
+    const go = el("button", "linkish", v.trained ? "Retrain video" : "Train video"); go.type = "button";
+    go.disabled = !!s.job || otherVideo;
+    if (otherVideo) go.title = "Another video LoRA is training";
+    go.onclick = () => { styleState.video = s.name; styleState.vLimit = v.limit || 300; styleState.vSteps = v.steps || 1500; renderStyles(); };
+    row.append(go);
+  } else row.append(el("span"));
+  const st = v.job && v.job.status === "queued" ? { phase: "queued" } : v.status;
+  if (st) {
+    const prog = el("div", "prog" + (/failed/.test(st.phase) ? " bad" : ""));
+    let text = st.phase === "queued" ? "Waiting to start" : VIDEO_PHASE[st.phase] || st.phase;
+    const counted = ["checking", "describing", "training-high", "training-low"].includes(st.phase);
+    if (counted && st.total) text += ` · ${st.done || 0} of ${st.total}` + (st.phase.startsWith("training") ? " steps" : "");
+    if (st.message && !v.job) text += `: ${st.message}`;
+    prog.append(el("span", null, text));
+    if (v.job && counted) {
+      const meter = el("div", "meter"), bar = el("i"); bar.style.width = `${st.total ? Math.round(100 * (st.done || 0) / st.total) : 3}%`;
+      meter.append(bar); prog.append(meter);
+    }
+    row.append(prog);
+  }
+  if (styleState.video === s.name && !v.job) row.append(videoForm(s));
+  return row;
+}
+function videoForm(s) {
+  const box = el("div", "vform");
+  box.append(el("p", "note", "Downloads the artist's animations from the style's page, drops any clip with a frame the " +
+    "adult checks flag, describes the motion, then trains both halves of the video model. Nightly posts and scenes wait while it trains."));
+  const seg = (label, key, opts) => {
+    const f = el("div", "field"); f.append(el("span", null, label));
+    const g = el("div", "seg"); g.setAttribute("role", "group"); g.setAttribute("aria-label", label);
+    for (const [n, text] of opts) {
+      const b = el("button", null, text); b.type = "button"; b.setAttribute("aria-pressed", String(styleState[key] === n));
+      b.onclick = () => { styleState[key] = n; renderStyles(); };
+      g.append(b);
+    }
+    f.append(g); return f;
+  };
+  box.append(seg("Videos to download (at most)", "vLimit", VIDEO_SIZES.limits), seg("Training length", "vSteps", VIDEO_SIZES.steps));
+  // About 8 s a step per half on a 12 GB GPU, plus loading; downloading and checking ~5 s a clip.
+  const hours = (2 * styleState.vSteps * 8 + styleState.vLimit * 5 + 1800) / 3600;
+  box.append(el("p", "note", `About ${Math.round(hours)} hours. You can leave this page.`));
+  const err = el("div", "ed-err"); err.setAttribute("role", "alert");
+  const acts = el("div", "form-actions"), no = el("button", "secondary", "Cancel"), go = el("button", "primary", "Download and train");
+  no.type = go.type = "button";
+  no.onclick = () => { styleState.video = null; renderStyles(); };
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      await api("api/styles/video", { name: s.name, limit: styleState.vLimit, steps: styleState.vSteps });
+      styleState.video = null; toast("Queued. Progress shows here."); refreshDash();
+    } catch (e) { err.textContent = e.message; go.disabled = false; }
+  };
+  acts.append(no, go); box.append(err, acts);
+  return box;
 }
 function renderStyleForm() {
   document.querySelectorAll("#s-medium button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.m === styleState.medium)));

@@ -366,6 +366,9 @@ def run_job(cfg: Config, job_id: int) -> None:
     if params.get("kind") == "persona_draft":
         from . import builder
         return builder.run(cfg, conn, job_id, params)
+    if params.get("kind") == "video_style":
+        from . import videolora
+        return videolora.run_job(cfg, conn, job_id, params)
     if params.get("kind") == "style":
         from . import styles
         return styles.run(cfg, conn, job_id, params)

@@ -567,14 +567,32 @@ def new_avatar(req: dict) -> dict:
 # anything the adults-only checks flag are dropped), then the trainer service trains.
 STYLE_LIMITS = (100, 300, 600)
 STYLE_STEPS = (1000, 2000, 3000)
+VIDEO_LIMITS = (100, 300, 600)        # videos to download from the artist's page
+VIDEO_STEPS = (1000, 1500, 2000)      # per half of Wan 2.2
+
+
+def _jobs(kind: str) -> dict[str, dict]:
+    """Queued and running jobs of one kind, by style name."""
+    with db() as conn:
+        return {json.loads(r["params"]).get("name"): dict(r) for r in conn.execute(
+            "SELECT id, params, status FROM jobs WHERE status IN ('queued', 'running')"
+            " AND params LIKE ?", (f'%"kind": "{kind}"%',))}
+
+
+def _video(d: Path, st: dict, job: dict | None) -> dict:
+    """A style's video LoRA: when both halves were trained, the clips, and progress."""
+    halves = [LORA_DIR / f"video-{d.name}-{part}.safetensors" for part in ("high", "low")]
+    prep = read_json(d / "video-prep.json")
+    live = {k.removeprefix("video_"): v for k, v in st.items() if k.startswith("video_")}
+    return {"trained": int(min(f.stat().st_mtime for f in halves)) if all(f.is_file() for f in halves) else None,
+            "clips": prep.get("kept"), "limit": live.get("limit"), "steps": live.get("steps"),
+            "job": job and {"status": job["status"]},
+            "status": live if job or live.get("phase") in ("failed", "cancelled") else None}
 
 
 def style_list() -> dict:
     lora = DATA / "lora"
-    with db() as conn:
-        jobs = {json.loads(r["params"]).get("name"): dict(r) for r in conn.execute(
-            "SELECT id, params, status FROM jobs WHERE status IN ('queued', 'running')"
-            " AND params LIKE '%\"kind\": \"style\"%'")}
+    jobs, video_jobs = _jobs("style"), _jobs("video_style")
     try:
         users = {}
         for p in read_personas()["personas"]:
@@ -595,8 +613,10 @@ def style_list() -> dict:
                     "used_by": users.get(file.name, []),
                     "job": job and {"status": job["status"]},
                     # status.json is only live while a job runs; otherwise it is the last result
-                    "status": st if job or st.get("phase") in ("failed", "cancelled") else None})
-    return {"styles": out, "limits": STYLE_LIMITS, "steps": STYLE_STEPS}
+                    "status": st if job or st.get("phase") in ("failed", "cancelled") else None,
+                    "video": _video(d, st, video_jobs.get(d.name))})
+    return {"styles": out, "limits": STYLE_LIMITS, "steps": STYLE_STEPS,
+            "video_limits": VIDEO_LIMITS, "video_steps": VIDEO_STEPS}
 
 
 MAX_DESCRIPTION = 2000
@@ -677,6 +697,46 @@ def cancel_style(req: dict) -> dict:
                 (DATA / "lora" / name / "cancel").touch()   # the worker and trainer watch for this
             return {"ok": True}
     raise LookupError("nothing is running for that style")
+
+
+def queue_video(req: dict) -> dict:
+    """Train a video LoRA for a trained style from the artist's own animations."""
+    name = str(req.get("name", ""))
+    if not HANDLE.match(name):
+        raise ValueError("bad name")
+    try:
+        limit, steps = int(req.get("limit", 300)), int(req.get("steps", 1500))
+    except (TypeError, ValueError):
+        raise ValueError("bad numbers")
+    if limit not in VIDEO_LIMITS or steps not in VIDEO_STEPS:
+        raise ValueError("pick one of the offered sizes")
+    style = next((s for s in style_list()["styles"] if s["name"] == name), None)
+    if not style or not style["trained"] or not style["source"]:
+        raise ValueError("train the style first: video training uses its artist's page")
+    if style["job"]:
+        raise ValueError("wait for the style's own training to finish")
+    if _jobs("video_style"):
+        raise ValueError("a video LoRA is already being trained; one at a time")
+    with db() as conn:
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
+            {"kind": "video_style", "name": name, "limit": limit, "steps": steps}),)).lastrowid
+    return {"job": jid}
+
+
+def cancel_video(req: dict) -> dict:
+    name = str(req.get("name", ""))
+    if not HANDLE.match(name):
+        raise ValueError("bad name")
+    job = _jobs("video_style").get(name)
+    if not job:
+        raise LookupError("no video training is running for that style")
+    if job["status"] == "queued":
+        with db() as conn:
+            conn.execute("UPDATE jobs SET status = 'cancelled', finished_at = datetime('now') WHERE id = ?",
+                         (job["id"],))
+    else:
+        (DATA / "lora" / name / "video-cancel").touch()   # the worker and video trainer watch for this
+    return {"ok": True}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -794,6 +854,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/animate": request_animation, "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
+                   "/api/styles/video": queue_video, "/api/styles/video-cancel": cancel_video,
                    "/api/personas/draft": queue_draft}
         if path not in actions:
             return self.send(404, {"error": "not found"})

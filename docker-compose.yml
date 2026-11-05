@@ -128,13 +128,15 @@ services:
     logging:
       options: { max-size: 10m, max-file: "3" }
 
-  # Video-LoRA training (Wan 2.2 I2V), from clips prepared by `dreamfeed video-prep NAME`.
-  # Not started with the stack; run by hand, one half of Wan at a time:
-  #   docker compose run --rm video-trainer NAME high|low [STEPS]
+  # Video-LoRA training (Wan 2.2 I2V). Waits for requests from the dashboard's "Train video"
+  # on a trained style (the worker downloads and checks the clips first); idle it holds no
+  # GPU memory. By hand, one half of Wan at a time or both:
+  #   docker compose run --rm video-trainer NAME high|low|both [STEPS]
   video-trainer:
     build: ./video-trainer
     image: dreamfeed-video-trainer:local
-    profiles: [video-training]
+    container_name: dreamfeed-video-trainer
+    restart: unless-stopped
     user: "${PUID}:${PGID}"
     shm_size: 4g
     # RAM cap with no swap: if training doesn't fit, only it is killed, never other services.
