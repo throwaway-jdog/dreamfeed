@@ -102,7 +102,8 @@ YURI_MOTION = {
 }
 YURI_STILL = "they hold each other: gentle breathing, small shifts; nobody new appears"
 YURI_BOTH = {"2girls", "yuri"}                                 # one of these: both are there
-YURI_NOT = {"1boy", "penis", "testicles", "multiple boys", "3girls", "multiple girls"}   # nobody else
+# Nobody else. (Not "multiple girls": the tagger always adds it to 2girls.)
+YURI_NOT = {"1boy", "penis", "testicles", "multiple boys", "3girls", "4girls"}
 YURI_NEGATIVE = "1boy, penis, testicles, multiple boys, 3girls"
 NO_TOYS = "dildo, strap-on, sex toy"
 YURI_ONLY = re.compile(r"\b(kiss\w*|french kiss|fingering|cunnilingus|tribadism|scissoring|hug\w*|"
@@ -428,6 +429,7 @@ class Kind:
     cast: str                                  # who and where, the same in every shot
     avoid: str                                 # kept out of every shot
     regions: list | None                       # each character again in her own half
+    halves: callable = lambda shot: True       # shot -> whether to use regions in it
     negative: callable                         # shot -> its negative prompt
     candidates: callable                       # shot -> how many pictures to draw
     fits: callable                             # (shot, seen, analysis) -> sortable tuple, best first
@@ -515,7 +517,9 @@ def _girl_girl(persona, post: dict, seen_post, rng: random.Random) -> Kind:
                 lambda shot: SHOT_CANDIDATES_SIDE if shot.act not in (None, "kissing") else SHOT_CANDIDATES,
                 fits,
                 lambda f: f"{'' if f[0] else 'not just the two of them, '}{'' if f[1] else 'act not seen, '}"
-                          f"their looks {f[2]}/{len(traits)}")
+                          f"their looks {f[2]}/{len(traits)}",
+                # Halves stand them side by side, upright: only where that's the pose.
+                halves=lambda shot: shot.act in (None, "kissing"))
 
 
 def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
@@ -560,7 +564,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0],
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora,
-                                        regions=kind.regions)
+                                        regions=kind.regions if kind.halves(shot) else None)
                           for c in range(kind.candidates(shot))])
     finally:
         comfy.stop()
@@ -593,7 +597,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
         vision.close()
     try:
         if plate:
-            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng, regions=kind.regions)
+            into_room(cfg, comfy, post, plate, out, asks, lora, subdir, name, rng,
+                      regions=[kind.regions if kind.halves(s) else None for s in shots])
     finally:
         if plate and keep_room:
             plate.replace(keep_room)
@@ -606,7 +611,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
 
 
 def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, subdir: str, name: str,
-              rng: random.Random, regions=None) -> None:
+              rng: random.Random, regions: list | None = None) -> None:
     """Each winning shot's characters, cut out and pasted onto the scene's room, then a light
     pass of the image model to blend the edges and light, with the room's own pixels put back
     everywhere away from them. A shot whose blended picture fails a check keeps its own room."""
@@ -639,7 +644,7 @@ def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, 
             blended = comfy.txt2img(post["checkpoint"], post["medium"], asks[i][0], rng.randrange(2 ** 32),
                                     subdir, f"{name}-shot{i}-blend", extra_negative=asks[i][1],
                                     strict=post["strict"], lora=lora, init=comp_path, denoise=BLEND_DENOISE,
-                                    regions=regions)
+                                    regions=regions[i] if regions else None)
             comp_path.unlink(missing_ok=True)
             with Image.open(blended) as im:
                 final = cutout.keep_room(room, im.convert("RGB"), mask)
