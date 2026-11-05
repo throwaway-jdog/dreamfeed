@@ -60,6 +60,9 @@ keeps the previous version as `data/personas.json.bak`. The format, from
   handles: that persona appears as themselves, each described again in their own half of the
   picture with both their LoRAs on; girl-girl scenes can be made from such posts). The captions are examples of how
   the persona writes (below).
+- `must_show`: traits every post must show, each a list of tags any of which counts (e.g.
+  `[["red hair"], ["hairclip", "hair ornament"]]`); a post the tagger doesn't see one in is
+  drawn again, like one with a watermark (up to twice). With a `{friend}`, theirs count too.
 - `voice`: the name of a trained style; the persona's captions then sound like that
   artist's own posts instead of its example captions.
 

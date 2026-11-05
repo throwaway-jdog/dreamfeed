@@ -77,6 +77,7 @@ class Persona:
     partners: list[str] = field(default_factory=list)
     girlfriends: list[str] = field(default_factory=list)
     friends: list[str] = field(default_factory=list)   # other personas' handles, for {friend}
+    must_show: list[set] = field(default_factory=list)  # traits a post must show: any tag of each set
     cast: dict = field(default_factory=dict, repr=False)   # every persona by handle (parse sets it)
     settings: list[str] = field(default_factory=list)
     characters: list[str] = field(default_factory=list)
@@ -118,6 +119,14 @@ class Persona:
         f = self.cast[handle]
         look = ", ".join(t for t in f.look.split(", ") if t.strip() != "1girl")
         return ", ".join(t for t in (f.trigger, look) if t)
+
+    def off_model(self, seen: set[str], prompt: str) -> list[str]:
+        """Their must_show traits (and a friend's, when one is in the post) the tagger didn't see."""
+        groups = list(self.must_show)
+        friend = self.friend_in(prompt)
+        if friend:
+            groups += friend.must_show
+        return [" or ".join(sorted(g)) for g in groups if not g & seen]
 
     def friend_in(self, prompt: str):
         """The friend (a Persona) this prompt shows, or None."""
@@ -237,14 +246,16 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         handle=handle, name=str(p.get("name") or handle), medium=p["medium"], bio=str(p.get("bio", "")),
         look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
         posts=posts, outfits=list(p.get("outfits", [])), partners=list(p.get("partners", [])),
-        girlfriends=list(p.get("girlfriends", [])), friends=[str(f) for f in p.get("friends", [])], settings=list(p.get("settings", [])),
+        girlfriends=list(p.get("girlfriends", [])), friends=[str(f) for f in p.get("friends", [])],
+        must_show=[{str(t).strip() for t in g if str(t).strip()} for g in p.get("must_show", []) if g], settings=list(p.get("settings", [])),
         characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
         hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
         weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),
         paused=bool(p.get("paused", False)), voice=str(p.get("voice") or ""))
     if persona.voice and not HANDLE.match(persona.voice):
         raise Invalid(f"{where}: voice must be the name of a trained style")
-    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.partners, *persona.girlfriends, *persona.settings, *persona.characters,
+    text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.partners, *persona.girlfriends,
+                     *(t for g in persona.must_show for t in g), *persona.settings, *persona.characters,
                      *(k.prompt for k in posts)])
     bad = safety.blocked(text)
     if bad:

@@ -448,6 +448,11 @@ def _apply(entry: dict, src: dict) -> dict:
             entry[k] = _list(src[k], n, limit, k)
             if not entry[k]:
                 entry.pop(k)
+    if "must_show" in src:   # traits, each a list of tags any of which counts
+        groups = [_list(g, 6, 60, "must show") for g in (src["must_show"] or [])[:8] if isinstance(g, list)]
+        entry["must_show"] = [g for g in groups if g]
+        if not entry["must_show"]:
+            entry.pop("must_show")
     if "medium" in src:
         entry["medium"] = src["medium"]
     if "weight" in src:

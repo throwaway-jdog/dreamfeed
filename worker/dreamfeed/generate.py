@@ -190,10 +190,12 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
 
 
 # The tagger's tags for an artist's watermark, which style LoRAs learn from their pictures: a
-# post where any of them scores this high is drawn again (up to WATERMARK_REDRAWS times).
+# post where any of them scores this high is drawn again (up to WATERMARK_REDRAWS times), and
+# so is one that doesn't show a trait the persona's must_show lists (off-model).
 WATERMARK_TAGS = ("watermark", "patreon logo", "patreon username", "artist name", "web address")
 WATERMARK_MAX = 0.25
 WATERMARK_REDRAWS = 2
+TAG_SEEN = 0.35   # the tagger is this sure of a must_show trait
 
 
 def _watermark(a) -> tuple[str, str] | None:
@@ -219,20 +221,23 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int, redraw=None) -> dic
 
 
 def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> list[int]:
-    """Check every post drawn since the last check; the ids of those thrown out for a watermark."""
+    """Check every post drawn since the last check; the ids of those thrown out for a watermark
+    or for being off-model, to draw again."""
     from PIL import Image
+    from . import personas as people
     from .checks import problem
     from .vision import Vision
     marked = []
+    cast = {p.handle: p for p in people.load(cfg.personas_path)}
     rows = conn.execute(
-        "SELECT g.id, g.medium, g.file, g.kind, g.persona, coalesce(p.strict, 1) FROM generations g"
+        "SELECT g.id, g.medium, g.file, g.kind, g.persona, coalesce(p.strict, 1), g.prompt FROM generations g"
         " LEFT JOIN personas p ON p.handle = g.persona"
         " WHERE g.night = ? AND g.status = 'generated' AND g.kind IN ('image', 'avatar')", (night,)).fetchall()
     if rows:
         _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
         like, skip = _taste_matrices(conn)
-        for n, (gid, medium, file, kind, handle, strict) in enumerate(rows, 1):
+        for n, (gid, medium, file, kind, handle, strict, prompt) in enumerate(rows, 1):
             if n % 5 == 0:
                 _progress(conn, night, "checking", n, len(rows))
             path = out_dir / file
@@ -251,6 +256,10 @@ def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> lis
                 _use_avatar(conn, out_dir, gid, handle, path, img)
                 continue
             mark = _watermark(a)
+            p = cast.get(handle)
+            if not mark and p and p.must_show:
+                missing = p.off_model({t for t, s in a.general.items() if s >= TAG_SEEN}, prompt or "")
+                mark = ("off-model", "no " + ", ".join(missing)) if missing else None
             if mark:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{mark[0]}: {mark[1]}")
