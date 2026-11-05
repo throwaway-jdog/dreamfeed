@@ -78,9 +78,11 @@ class Comfy:
 
     def txt2img(self, checkpoint: str, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, extra_negative: str = "", strict: bool = False,
-                lora=None, init: Path | None = None, denoise: float = 1.0) -> Path:
+                lora=None, init: Path | None = None, denoise: float = 1.0, regions=None) -> Path:
         """lora: (file in models/loras, strength), or a list of them, applied in turn to the model
-        and text encoder.
+        and text encoder. regions: [(tags, x from, x to)], each added for its own vertical strip
+        (shares of the width) on top of prompt for the whole picture: two characters each
+        described again in their own part don't trade looks.
         init: start from this picture instead of noise (img2img), keeping 1 - denoise of it."""
         p = presets.for_checkpoint(checkpoint)
         loras = [lora] if isinstance(lora, tuple) else list(lora or [])
@@ -109,6 +111,16 @@ class Comfy:
                 "model": [prev, 0], "clip": [prev, 1], "lora_name": file,
                 "strength_model": strength, "strength_clip": strength}}
         self.start()
+        for n, (tags, x0, x1) in enumerate(regions or []):
+            if safety.blocked(tags):
+                raise ValueError(f"blocked tags in a region: {', '.join(safety.blocked(tags))}")
+            workflow[f"rpos{n}"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": tags}}
+            workflow[f"rarea{n}"] = {"class_type": "ConditioningSetAreaPercentage", "inputs": {
+                "conditioning": [f"rpos{n}", 0], "width": round(x1 - x0, 3), "height": 1.0,
+                "x": round(x0, 3), "y": 0.0, "strength": 1.0}}
+            workflow[f"rmix{n}"] = {"class_type": "ConditioningCombine", "inputs": {
+                "conditioning_1": [f"rmix{n - 1}" if n else "pos", 0], "conditioning_2": [f"rarea{n}", 0]}}
+            workflow["sample"]["inputs"]["positive"] = [f"rmix{n}", 0]
         if init:
             workflow["init"] = {"class_type": "LoadImage", "inputs": {"image": self.upload(init)}}
             workflow["latent"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["init", 0], "vae": ["ckpt", 2]}}

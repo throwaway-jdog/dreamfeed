@@ -132,8 +132,9 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                 " VALUES (?,?,?,?,?,?,?,?, 'queued')",
                 (night, p.medium, ckpt, prompt, seed, p.handle, caption, kind)).lastrowid
         try:
-            path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}", strict=p.strict,
-                                 lora=lora, extra_negative=p.negative if kind == "image" else "")
+            path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}",
+                                 strict=p.strict, lora=lora, extra_negative=p.negative if kind == "image" else "",
+                                 regions=p.regions(prompt, rng) if kind == "image" else None)
         except ValueError as e:   # safety.prompts refused it
             _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
             return
@@ -164,7 +165,18 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
     finally:
         comfy.stop()
 
-    stats = check_and_rank(cfg, conn, night, keep)
+    def redraw(gids: list[int]) -> None:
+        """Posts the checks threw out for an artist's watermark, drawn again with a new seed."""
+        try:
+            for gid in gids:
+                handle, kind, prompt, caption = conn.execute(
+                    "SELECT persona, kind, prompt, caption FROM generations WHERE id = ?", (gid,)).fetchone()
+                if handle in by_handle and not _cancel_requested(conn, night):
+                    make(by_handle[handle], kind, prompt, caption)
+        finally:
+            comfy.stop()
+
+    stats = check_and_rank(cfg, conn, night, keep, redraw=None if cancelled else redraw)
     if not cancelled and not ignore_window and gen.videos_per_night:
         sources = pick_sources(conn, gen.videos_per_night, night)
         if sources:
@@ -175,18 +187,45 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
     return status
 
 
-def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
+# The tagger's tags for an artist's watermark, which style LoRAs learn from their pictures: a
+# post where any of them scores this high is drawn again (up to WATERMARK_REDRAWS times).
+WATERMARK_TAGS = ("watermark", "patreon logo", "patreon username", "artist name", "web address")
+WATERMARK_MAX = 0.25
+WATERMARK_REDRAWS = 2
+
+
+def _watermark(a) -> tuple[str, str] | None:
+    score, tag = max((a.general.get(t, 0.0), t) for t in WATERMARK_TAGS)
+    return ("watermark", f"{tag} {score:.2f}") if score >= WATERMARK_MAX else None
+
+
+def check_and_rank(cfg: Config, conn, night: str, keep: int, redraw=None) -> dict:
+    """Check what was drawn (redraw: draws given posts again, for those thrown out for a
+    watermark), then keep the best per persona and caption them."""
+    out_dir = cfg.data_dir / "generated"
+    rng = random.Random()
+    tags = {}   # what the tagger saw in each post, for its caption
+    for round_ in range(WATERMARK_REDRAWS + 1):
+        marked = _check(cfg, conn, night, out_dir, rng, tags)
+        if not marked or not redraw or round_ == WATERMARK_REDRAWS:
+            break
+        print(f"generate: drawing {len(marked)} posts again (watermark)", flush=True)
+        redraw(marked)
+    _rank(cfg, conn, night, keep, out_dir, rng, tags)
+    return dict(conn.execute("SELECT status, count(*) FROM generations WHERE night = ? GROUP BY status",
+                             (night,)).fetchall())
+
+
+def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> list[int]:
+    """Check every post drawn since the last check; the ids of those thrown out for a watermark."""
     from PIL import Image
     from .checks import drop_reason
     from .vision import Vision
-
-    out_dir = cfg.data_dir / "generated"
+    marked = []
     rows = conn.execute(
         "SELECT g.id, g.medium, g.file, g.kind, g.persona, coalesce(p.strict, 1) FROM generations g"
         " LEFT JOIN personas p ON p.handle = g.persona"
         " WHERE g.night = ? AND g.status = 'generated' AND g.kind IN ('image', 'avatar')", (night,)).fetchall()
-    rng = random.Random()
-    tags = {}   # what the tagger saw in each post, for its caption
     if rows:
         _progress(conn, night, "checking", 0, len(rows))
         vision = Vision(cfg.models_dir)
@@ -209,6 +248,12 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
             if kind == "avatar":
                 _use_avatar(conn, out_dir, gid, handle, path, img)
                 continue
+            mark = _watermark(a)
+            if mark:
+                path.unlink(missing_ok=True)
+                _set(conn, gid, status="dropped", reason=f"{mark[0]}: {mark[1]}")
+                marked.append(gid)
+                continue
             emb = a.embedding.astype(np.float32)
             likes = like.get(handle) if handle in like else like.get(medium)
             skips = skip.get(handle) if handle in skip else skip.get(medium)
@@ -219,7 +264,10 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
             tags[gid] = captions.picture(a.general)
             _set(conn, gid, status="scored", score=score, embedding=a.embedding.tobytes(), tags=", ".join(tags[gid]))
         vision.close()
+    return marked
 
+
+def _rank(cfg: Config, conn, night: str, keep: int, out_dir: Path, rng, tags: dict) -> None:
     _progress(conn, night, "ranking", 0, 0)
     # Keep the best per persona, in proportion to how many posts each one made.
     scored = conn.execute("SELECT id, persona, file, score FROM generations WHERE night = ? AND status = 'scored'",
@@ -247,9 +295,6 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int) -> dict:
         extra = {"caption": written[gid]} if gid in written else {}
         _set(conn, gid, status="feed", file=full, thumb=thumb, posted_at=posted.strftime("%Y-%m-%d %H:%M:%S"),
              **extra)
-
-    return dict(conn.execute("SELECT status, count(*) FROM generations WHERE night = ? GROUP BY status",
-                             (night,)).fetchall())
 
 
 def _feral(a) -> tuple[str, str] | None:

@@ -102,6 +102,22 @@ class Persona:
         parts = [p for p in (self.trigger, self.art_trigger, look, body) if p]
         return RATINGS[post.rating] + ", ".join(parts)
 
+    def regions(self, prompt: str, rng: random.Random):
+        """For a post with one of their partners or girlfriends: [(her tags, x from, x to), (the
+        other's tags, x from, x to)], each repeated for their own part of the picture (shares of
+        its width, overlapping in the middle) on top of the whole prompt, so the two don't trade
+        looks. (Without the whole prompt, she loses her look.) None for anything else."""
+        tags = [t.strip() for t in prompt.split(",") if t.strip()]
+        have = set(tags)
+        other = next((x for x in self.partners + self.girlfriends
+                      if x and {t.strip() for t in x.split(",") if t.strip()} <= have), None)
+        if not other or not self.look:
+            return None
+        her = [t for t in [self.trigger] + [t.strip() for t in self.look.split(",")] if t and t in have]
+        left, right = (0.0, 0.6), (0.4, 1.0)
+        mine, theirs = (left, right) if rng.random() < 0.5 else (right, left)
+        return [(", ".join(her), *mine), (other, *theirs)]
+
     def lora_for(self, prompt: str) -> list[tuple[str, float]]:
         """The LoRAs for a prompt: the persona's own, unless the prompt's character is male and it
         is marked female-only (trained mostly on women, it would turn men into women), then the
