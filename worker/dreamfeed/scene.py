@@ -429,11 +429,11 @@ class Kind:
     cast: str                                  # who and where, the same in every shot
     avoid: str                                 # kept out of every shot
     regions: list | None                       # each character again in her own half
-    halves: callable = lambda shot: True       # shot -> whether to use regions in it
     negative: callable                         # shot -> its negative prompt
     candidates: callable                       # shot -> how many pictures to draw
     fits: callable                             # (shot, seen, analysis) -> sortable tuple, best first
     note: callable                             # (fits) -> what the winner lacks, for the log
+    halves: callable = lambda shot: True       # shot -> whether to use regions in it
 
 
 def _straight(persona, post: dict, seen_post, rng: random.Random) -> Kind:
