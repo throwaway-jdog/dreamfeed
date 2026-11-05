@@ -50,6 +50,7 @@ POSITIONS = {
     "cowgirl": ("cowgirl position, girl on top, straddling, sex, vaginal, penis", "cowgirl"),
     "reverse cowgirl": ("reverse cowgirl position, girl on top, from behind, sex, vaginal, penis", "reverse cowgirl"),
     "blowjob": ("fellatio, oral, penis, kneeling, looking up", "blowjob"),
+    "standing": ("standing sex, sex from behind, standing, against wall, sex, vaginal, penis", "standing"),
 }
 # Penetration shots are drawn side-on with both bodies whole: from below, it sits on the
 # picture's bottom edge and Wan makes the penis vanish instead of moving it.
@@ -65,10 +66,11 @@ HIS_MOTION = {
     "doggy": "he grips her hips and slams his hips into her from behind, his body moving with each thrust",
     "cowgirl": "he thrusts his hips up into her from below to meet each bounce, his hands on her hips",
     "reverse cowgirl": "he thrusts his hips up into her from below to meet each bounce, his hands on her hips",
+    "standing": "he stands behind her and thrusts his hips into her hard, his whole body moving",
     "blowjob": "his hips push forward into her mouth, his hand on her head",
 }
 OPENERS = ("missionary", "blowjob")
-MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl")
+MIDDLE = ("doggy", "cowgirl", "missionary", "reverse cowgirl", "standing")
 
 NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejaculation, cum string"
 # Every shot: the partner mustn't turn into a second copy of her, and no artist text.
@@ -171,11 +173,14 @@ def cast_tags(prompt: str, partner: str = "") -> str:
     return ", ".join(rating + ["duo", PARTNER] + ([partner] if partner else []) + rest)
 
 
-def plan(rng: random.Random) -> list[Shot]:
-    """Opener, a position, a close-up in it, another position, the climax in that one, after."""
+def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
+    """Opener, a position, a close-up in it, another position, the climax in that one, after.
+    positions: the two middle positions, to test them (default: picked at random)."""
     opener = rng.choice(OPENERS)
     a = rng.choice([p for p in MIDDLE if p != opener])
     b = rng.choice([p for p in MIDDLE if p not in (a, opener)] or [p for p in MIDDLE if p != a])
+    if positions:
+        a, b = positions
     act = lambda name: POSITIONS[name][1]
 
     def pos(name: str, view: str = SIDE_ON) -> str:
@@ -324,14 +329,18 @@ def preview(args: list[str]) -> None:
     ap = argparse.ArgumentParser(prog="dreamfeed scene-preview")
     ap.add_argument("post", type=int)
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--positions", help=f"the two middle positions, e.g. doggy,standing ({', '.join(MIDDLE)})")
     a = ap.parse_args(args)
+    picked = a.positions.split(",") if a.positions else None
+    if picked and (len(picked) != 2 or set(picked) - set(MIDDLE)):
+        sys.exit(f"scene-preview: --positions takes two of {', '.join(MIDDLE)}")
     cfg = Config()
     gen = cfg.generation()
     conn = db.connect(cfg.db_path)
     post = load_post(cfg, conn, a.post)
     persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
     rng = random.Random(a.seed)
-    shots = plan(rng)
+    shots = plan(rng, picked)
     out_dir = cfg.data_dir / "generated"
     subdir = f"scene-preview-{a.post}"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)

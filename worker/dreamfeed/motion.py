@@ -35,6 +35,11 @@ ACTS = (
         lora="wan2.2-i2v-revcowgirl"),
     Act("cowgirl", "c0wg1rl", ("cowgirl position", "girl on top", "straddling"),
         "she rides him, her hips bouncing up and down in a steady rhythm, breasts bouncing"),
+    # Its trigger is the sentence it was trained on.
+    Act("standing", "standing sex, the man is standing behind the woman and penetrating her. He is thrusting his hip up and down",
+        ("standing sex", "standing split", "against wall"),
+        "he stands behind her and thrusts his hips into her hard, her body bouncing with each thrust",
+        lora="wan2.2-i2v-standing", strength=1.0),
     Act("doggy", "d0gg1e", ("doggystyle", "sex from behind", "top-down bottom-up", "from behind", "all fours"),
         "he thrusts into her from behind in a steady rhythm, her body rocking forward with each thrust"),
     Act("missionary", "m15510n4ry", ("missionary", "on back", "spread legs", "lying"),
@@ -73,7 +78,7 @@ def act_for(tags: list[str]) -> Act | None:
         if not hit:
             continue
         # Positions only count with sex in the picture (lying on her back alone is a pinup).
-        if act.trigger in ("r3v3rs3_c0wg1rl", "c0wg1rl", "d0gg1e", "m15510n4ry") and not have & SEX:
+        if act.name in ("reverse cowgirl", "cowgirl", "standing", "doggy", "missionary") and not have & SEX:
             continue
         return act
     return None
