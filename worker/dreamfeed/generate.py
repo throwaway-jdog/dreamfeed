@@ -221,7 +221,7 @@ def check_and_rank(cfg: Config, conn, night: str, keep: int, redraw=None) -> dic
 def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> list[int]:
     """Check every post drawn since the last check; the ids of those thrown out for a watermark."""
     from PIL import Image
-    from .checks import drop_reason
+    from .checks import problem
     from .vision import Vision
     marked = []
     rows = conn.execute(
@@ -242,7 +242,7 @@ def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> lis
                 _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
                 continue
             a = vision.analyze([img])
-            reason = drop_reason(a, medium, [img], cfg, strict=bool(strict)) or _feral(a)
+            reason = problem(a, medium, [img], cfg, strict=bool(strict))
             if reason:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
@@ -297,12 +297,6 @@ def _rank(cfg: Config, conn, night: str, keep: int, out_dir: Path, rng, tags: di
         extra = {"caption": written[gid]} if gid in written else {}
         _set(conn, gid, status="feed", file=full, thumb=thumb, posted_at=posted.strftime("%Y-%m-%d %H:%M:%S"),
              **extra)
-
-
-def _feral(a) -> tuple[str, str] | None:
-    from . import safety
-    hits = safety.feral_hits(a.general)
-    return ("feral", ", ".join(f"{h} {a.general[h]:.2f}" for h in hits)) if hits else None
 
 
 def _use_avatar(conn, out_dir: Path, gid: int, handle: str, path: Path, img) -> None:
@@ -553,19 +547,19 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
 
 def _check_frames(cfg: Config, frames: list, medium: str, strict: bool) -> tuple[str, str] | None:
     """The clip checks on some frames, for one shot of a scene before it's used."""
-    from .checks import drop_reason
+    from .checks import problem
     from .vision import Vision
     vision = Vision(cfg.models_dir)
     try:
         a = vision.analyze(frames)
     finally:
         vision.close()
-    return drop_reason(a, medium, frames, cfg, strict=strict) or _feral(a)
+    return problem(a, medium, frames, cfg, strict=strict)
 
 
 def check_videos(cfg: Config, conn, night: str) -> dict:
     from . import media
-    from .checks import drop_reason
+    from .checks import problem
     from .vision import Vision
     out_dir = cfg.data_dir / "generated"
     rows = conn.execute("SELECT g.id, g.medium, g.file, s.score, coalesce(p.strict, 1) FROM generations g"
@@ -584,7 +578,7 @@ def check_videos(cfg: Config, conn, night: str) -> dict:
                 _set(conn, gid, status="dropped", reason=f"unreadable: {e}"[:200])
                 continue
             a = vision.analyze(frames)
-            reason = drop_reason(a, medium, frames, cfg, strict=bool(strict)) or _feral(a)
+            reason = problem(a, medium, frames, cfg, strict=bool(strict))
             if reason:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")

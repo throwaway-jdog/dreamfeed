@@ -38,7 +38,7 @@ from pathlib import Path
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import personas as people   # the worker's own persona rules (see Dockerfile)
+from dreamfeed import personas as people, safety   # the worker's own persona rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -271,11 +271,6 @@ def queue_generation(req: dict) -> dict:
 
 
 MAX_PROMPT = 500
-# Quick check so a refused prompt fails here, visibly. The worker enforces the full list
-# (worker/dreamfeed/safety.py) on every prompt regardless.
-BLOCKED_WORDS = re.compile(r"\b(child|children|kid|kids|toddler|baby|babies|loli|lolicon|shota|shotacon|teen|"
-                           r"teens|teenage|teenager|underage|minor|minors|young|cub|preteen|schoolgirl|"
-                           r"schoolboy|school uniform|petite|flat chest)\b", re.I)
 
 
 def request_animation(req: dict) -> dict:
@@ -307,7 +302,7 @@ def request_animation(req: dict) -> dict:
             text = " ".join(str(req.get("prompt") or "").split())
             if len(text) > MAX_PROMPT:
                 raise ValueError(f"keep the description under {MAX_PROMPT} characters")
-            bad = sorted({m.group(0).lower() for m in BLOCKED_WORDS.finditer(text)})
+            bad = safety.request_blocked(text)   # the worker checks every prompt again regardless
             if bad:
                 raise ValueError(f"the description can't include: {', '.join(bad)}")
             params = {"kind": "animate", "ids": [gid]}

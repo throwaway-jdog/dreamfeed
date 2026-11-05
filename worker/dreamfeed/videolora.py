@@ -18,9 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import motion, safety
+from . import motion
 from .config import Config
-from .lora import TAG_MIN, _photo, write_status
+from .lora import TAG_MIN, write_status
 
 VIDEO_FILTER = "extension in ('mp4', 'webm', 'mov', 'm4v')"
 CHECK_FRAMES = 16        # per clip, at least; more for long clips (media.frame_count)
@@ -83,7 +83,7 @@ def _convert(src: Path, dst: Path) -> bool:
 def check(cfg: Config, base: Path, medium: str) -> tuple[list[tuple[Path, list[str]]], dict]:
     """Clips that pass every check, with their tags. Failing clips are deleted."""
     from . import media
-    from .checks import drop_reason
+    from .checks import problem
     from .vision import Vision
     files = sorted(p for p in (base / "video_raw").iterdir() if p.is_file() and media.kind(p) == "video")
     vision = Vision(cfg.models_dir)
@@ -100,14 +100,8 @@ def check(cfg: Config, base: Path, medium: str) -> tuple[list[tuple[Path, list[s
                     frames, reason = None, ("unreadable", str(e))
                 if frames:
                     a = vision.analyze(frames)
-                    reason = _photo(a) or drop_reason(a, medium, frames, cfg, strict=True)
-                    hits = safety.feral_hits(a.general)
-                    if not reason and hits:
-                        reason = ("feral", ", ".join(hits))
+                    reason = problem(a, medium, frames, cfg, training=True)
                     tags = [t for t, s in sorted(a.general.items(), key=lambda kv: -kv[1]) if s >= TAG_MIN]
-                    bad = safety.blocked(", ".join(tags))
-                    if not reason and bad:
-                        reason = ("blocked-tag", ", ".join(bad))
             if reason:
                 dropped[reason[0]] = dropped.get(reason[0], 0) + 1
                 path.unlink(missing_ok=True)

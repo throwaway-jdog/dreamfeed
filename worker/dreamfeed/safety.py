@@ -1,4 +1,26 @@
-"""Adults-only rules for prompts, generated posts and LoRA training images. Not configurable."""
+"""Every adults-only and content rule in one place. Not configurable, except the two
+thresholds in .env (AGE_THRESHOLD, YOUTH_TAG_THRESHOLD) and PHOTO_MIN_AGE.
+
+Where they apply:
+1. Written by people
+   - personas file (personas.py):  no blocked tag anywhere in a persona (blocked); their
+     LoRA trigger words too; strict mode for looks models draw young (needs_strict), which a
+     file can switch on but never off; a strict persona can't be another one's {friend}.
+   - persona builder (builder.py): descriptions with youth words are refused (YOUTH_TAGS,
+     CAPTION_NEVER); blocked hashtags are dropped.
+   - dashboard animation requests (web/app.py): request_blocked.
+2. Every prompt sent to the image or video model (comfy.py): prompts() refuses blocked tags
+   and adds the adult terms (ADULT_POSITIVE, YOUTH_NEGATIVE, and STRICT_* for strict
+   personas); each region of a two-character picture is checked too.
+3. Every picture and clip, before it's kept (checks.problem): youth tags, age (CLIP, and
+   the agecheck service's face estimate for photos), feral; for training data also photos
+   and blocked tags, always at the strict threshold. Applied to posts, avatars, clips, each
+   shot of a scene and the finished scene, style and video training data, character
+   close-ups (where a picture with one failing close-up is left out whole) and bootstrapped
+   pictures. A dropped file is deleted.
+4. Written text: generated captions and motion descriptions (caption_blocked), and artist
+   posts and speech-bubble lines used as a voice (captions.clean).
+"""
 import re
 
 # Any of these on a generated post, clip or training image (danbooru names from the WD
@@ -131,6 +153,32 @@ AGE_PROMPTS = {
 # posts and LoRA training images with any of these at FERAL_THRESHOLD are dropped.
 FERAL_TAGS = {"bestiality", "zoophilia", "animal focus", "pokemon (creature)", "feral"}
 FERAL_THRESHOLD = 0.25
+
+
+# Training data is drawn art only. A picture is a photo when CLIP's share for "photo" or the
+# tagger's photorealistic tag is this high.
+PHOTO_SHARE = 0.35
+PHOTO_TAGS = {"photorealistic"}
+PHOTO_TAG_MIN = 0.4
+
+# A tagger tag counts as seen in a picture (for the blocked-tag check on training data) at this.
+SEEN = 0.35
+
+
+def photo_signs(scores: dict[str, float], medium_probs: dict[str, float]) -> str | None:
+    share = medium_probs.get("photo", 0.0)
+    tags = [t for t in PHOTO_TAGS if scores.get(t, 0.0) >= PHOTO_TAG_MIN]
+    return f"{share:.2f} {' '.join(tags)}".strip() if share >= PHOTO_SHARE or tags else None
+
+
+# Words a person may not use in a request typed on the dashboard (on top of caption_blocked).
+REQUEST_NEVER = re.compile(r"\b(child|children|kid|kids|toddler|baby|babies|loli|lolicon|shota|shotacon|teen|"
+                           r"teens|teenage|teenager|underage|minor|minors|young|cub|preteen|schoolgirl|"
+                           r"schoolboy|school uniform|petite|flat chest)\b", re.I)
+
+
+def request_blocked(text: str) -> list[str]:
+    return sorted({m.group(0).lower() for m in REQUEST_NEVER.finditer(text)} | set(caption_blocked(text)))
 
 
 def feral_hits(scores: dict[str, float]) -> list[str]:

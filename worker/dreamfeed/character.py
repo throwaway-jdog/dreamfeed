@@ -88,7 +88,7 @@ def _closeups(cfg: Config, vision, keep: list[Path], full: Path, out: Path, name
     altogether, with all its close-ups. data/lora/NAME/closeups.json lists what was kept and
     why the rest weren't."""
     from PIL import Image
-    from .checks import drop_reason
+    from .checks import problem
     log, counts = [], {}
     for part in parts:
         tag, sizes, others, solo_only = PARTS[part]
@@ -111,7 +111,7 @@ def _closeups(cfg: Config, vision, keep: list[Path], full: Path, out: Path, name
             if seen & others:
                 entry["why"] = "someone else in it: " + ", ".join(sorted(seen & others))
                 continue
-            reason = drop_reason(a, medium, [crop], cfg, strict=True)
+            reason = problem(a, medium, [crop], cfg, training=True)
             if reason:
                 entry["why"] = "check: " + " ".join(reason)
                 continue

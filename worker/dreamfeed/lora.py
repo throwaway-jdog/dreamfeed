@@ -17,7 +17,6 @@ import shutil
 import sys
 import time
 
-from . import safety
 from .config import Config
 
 # Text, watermark and signature tags stay in the captions on purpose: tagged, the LoRA learns
@@ -27,11 +26,7 @@ SKIP_TAGS = {"commentary", "translated", "character name"}
 TAG_MIN = 0.35
 MAX_TAGS = 40
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
-# A training image that looks like a photograph is dropped (CLIP share for "photo", or the
-# tagger's photo tags). Deliberately low: a drawn style never needs a photo.
-PHOTO_SHARE = 0.35
-PHOTO_TAGS = {"photorealistic"}
-PHOTO_TAG_MIN = 0.4
+# Every training image goes through checks.problem(training=True): see safety.py.
 
 
 def write_status(base, **fields) -> None:
@@ -47,17 +42,9 @@ def write_status(base, **fields) -> None:
     os.replace(tmp, path)
 
 
-def _photo(a) -> tuple[str, str] | None:
-    share = a.medium_probs.get("photo", 0.0)
-    tags = [t for t in PHOTO_TAGS if a.general.get(t, 0.0) >= PHOTO_TAG_MIN]
-    if share >= PHOTO_SHARE or tags:
-        return "photo", f"{share:.2f} {' '.join(tags)}".strip()
-    return None
-
-
 def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> dict:
     from PIL import Image
-    from .checks import drop_reason
+    from .checks import problem
     from .vision import Vision
 
     base = cfg.data_dir / "lora" / name
@@ -75,13 +62,7 @@ def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> 
             stats["unreadable"] += 1
             continue
         a = vision.analyze([img])
-        reason = _photo(a) or drop_reason(a, medium, [img], cfg, strict=True)
-        hits = safety.feral_hits(a.general)
-        if not reason and hits:
-            reason = ("feral", ", ".join(hits))
-        blocked = safety.blocked(", ".join(t for t, s in a.general.items() if s >= TAG_MIN))
-        if not reason and blocked:   # e.g. flat chest, petite: the style shouldn't learn them
-            reason = ("blocked-tag", ", ".join(blocked))
+        reason = problem(a, medium, [img], cfg, training=True)
         if reason:
             stats["dropped"][reason[0]] = stats["dropped"].get(reason[0], 0) + 1
             path.unlink(missing_ok=True)

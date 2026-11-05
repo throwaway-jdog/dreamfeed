@@ -351,8 +351,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     winners are cropped (CROP). The empty room they start from is deleted too, or moved to
     keep_room."""
     from . import captions
-    from .checks import drop_reason
-    from .generate import _feral
+    from .checks import problem
     from .vision import Vision
     # The post first: its likeness to score candidates by, and her body for every shot.
     vision = Vision(cfg.models_dir)
@@ -416,7 +415,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                 with Image.open(p) as im:
                     img = im.convert("RGB")
                 a = vision.analyze([img])
-                if drop_reason(a, post["medium"], [img], cfg, strict=post["strict"]) or _feral(a):
+                if problem(a, post["medium"], [img], cfg, strict=post["strict"]):
                     continue
                 if PANELS & set(captions.picture(a.general)):
                     continue
@@ -473,8 +472,7 @@ def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, 
     pass of the image model to blend the edges and light, with the room's own pixels put back
     everywhere away from them. A shot whose blended picture fails a check keeps its own room."""
     from . import cutout
-    from .checks import drop_reason
-    from .generate import _feral
+    from .checks import problem
     from .vision import Vision
     with Image.open(plate) as im:
         room = im.convert("RGB")
@@ -519,7 +517,7 @@ def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, 
             with Image.open(final_path) as im:
                 img = im.convert("RGB")
             a = vision.analyze([img])
-            if drop_reason(a, post["medium"], [img], cfg, strict=post["strict"]) or _feral(a):
+            if problem(a, post["medium"], [img], cfg, strict=post["strict"]):
                 final_path.unlink(missing_ok=True)
                 out[i] = (out[i][0], out[i][1] + ", own room (the pasted one failed a check)")
                 continue
@@ -727,11 +725,11 @@ def _check_shots(cfg, clips: dict[int, np.ndarray], post: dict) -> dict[int, tup
 
 def _check_shot(cfg, frames: np.ndarray, post: dict, vision) -> tuple[str, str] | None:
     """The clip checks, and that no frame drifts away from the first (a morph)."""
-    from .checks import drop_reason
-    from .generate import VIDEO_CHECK_FRAMES, _feral
+    from .checks import problem
+    from .generate import VIDEO_CHECK_FRAMES
     sample = _sample(frames, VIDEO_CHECK_FRAMES)
     a = vision.analyze(sample)
-    reason = drop_reason(a, post["medium"], sample, cfg, strict=post["strict"]) or _feral(a)
+    reason = problem(a, post["medium"], sample, cfg, strict=post["strict"])
     if reason:
         return reason
     embs = vision.embed([Image.fromarray(frames[0])] + _sample(frames, DRIFT_FRAMES))

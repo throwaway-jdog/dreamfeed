@@ -50,10 +50,9 @@ def _sheet(paths, out) -> None:
 
 def run(cfg: Config, handle: str, count: int, keep: int) -> dict:
     from PIL import Image
-    from . import personas, safety
-    from .checks import drop_reason
+    from . import personas
+    from .checks import problem
     from .comfy import Comfy
-    from .generate import _feral
     from .vision import Vision
 
     p = {x.handle: x for x in personas.load(cfg.personas_path)}.get(handle)
@@ -98,12 +97,10 @@ def run(cfg: Config, handle: str, count: int, keep: int) -> dict:
         for path, prompt in drawn:
             img = Image.open(path).convert("RGB")
             a = vision.analyze([img])
-            reason = drop_reason(a, p.medium, [img], cfg, strict=True) or _feral(a)
+            reason = problem(a, p.medium, [img], cfg, training=True)
             seen = {t for t, v in a.general.items() if v >= TAG_MIN}
             if reason:
                 why[reason[0]] = why.get(reason[0], 0) + 1
-            elif safety.blocked(", ".join(seen)):
-                why["blocked-tag"] = why.get("blocked-tag", 0) + 1
             elif not all(g & seen for g in require):
                 why["not her"] = why.get("not her", 0) + 1
             elif seen & avoid:
