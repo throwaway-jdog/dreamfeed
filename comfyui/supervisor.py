@@ -44,7 +44,9 @@ CMD = [
 # Extra ComfyUI options per kind of job. Video: drop each node's output as soon as nothing
 # needs it, so the text encoder and the first Wan half leave RAM before the second loads
 # (otherwise all three are held at once). Images keep the cache: one checkpoint serves the night.
-MODES = {"image": [], "video": ["--cache-none"]}
+# Video also uses SageAttention: Wan spends most of its time in attention, and this does it
+# about twice as fast with no visible change.
+MODES = {"image": [], "video": ["--cache-none", "--use-sage-attention"]}
 
 lock = threading.Lock()
 proc: subprocess.Popen | None = None

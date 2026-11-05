@@ -12,6 +12,8 @@ ARG COMFYUI_GGUF_COMMIT=6ea2651e7df66d7585f6ffee804b20e92fb38b8a
 RUN git clone https://github.com/city96/ComfyUI-GGUF.git /app/ComfyUI/custom_nodes/ComfyUI-GGUF \
     && git -C /app/ComfyUI/custom_nodes/ComfyUI-GGUF checkout ${COMFYUI_GGUF_COMMIT} \
     && pip install --no-cache-dir -r /app/ComfyUI/custom_nodes/ComfyUI-GGUF/requirements.txt
+# SageAttention: a faster attention kernel (triton, no compiling), used for video jobs.
+RUN pip install --no-cache-dir sageattention==1.0.6
 COPY extra_model_paths.yaml supervisor.py /app/
 WORKDIR /app
 ENV HOME=/tmp PYTHONUNBUFFERED=1

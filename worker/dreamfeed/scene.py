@@ -622,93 +622,112 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                 texts[i] = _shot_prompt(writer, cast, shot, clip_act)
         finally:
             writer.close()
-    notes, writer = [], None
-    try:
-        for i, (shot, pic) in enumerate(zip(shots, pictures)):
-            if cancelled():
-                notes.append("cancelled")
-                break
-            if pic is None:
-                notes.append("no picture")
-                continue
-            # The position's motion LoRA, plus the climax's on a climax shot.
-            used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
-            with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
-            with_lora = [(a, l) for a, l in with_lora if l]
-            # The shared act LoRA at ACT_STRENGTH; an act's own LoRA at the strength it's made for.
-            scale = STACK_SCALE if len(with_lora) > 1 else 1.0
-            with_lora = [(a, (l[0], l[1], round(scale * (act_strength if act_strength is not None
-                                                          else l[2] if a.lora else ACT_STRENGTH), 2)))
-                         for a, l in with_lora]
-            style_s = STYLE_STRENGTH if style_strength is None else style_strength
-            loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
-            clip_act = used[-1] if used else None
-            body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
-            body = ", ".join(p for p in (body, HIS_MOTION.get(shot.act, "")) if p)
-            prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
-                                           body, MOTION[post["medium"]]) if p)
-            frames = None
-            for attempt in range(SHOT_TRIES):
-                try:
-                    path = comfy.img2vid("wan", pic, post["medium"], prompt,
+    # Each shot's motion LoRAs and prompt.
+    jobs: dict[int, tuple] = {}
+    for i, (shot, pic) in enumerate(zip(shots, pictures)):
+        if pic is None:
+            continue
+        # The position's motion LoRA, plus the climax's on a climax shot.
+        used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
+        with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
+        with_lora = [(a, l) for a, l in with_lora if l]
+        # The shared act LoRA at ACT_STRENGTH; an act's own LoRA at the strength it's made for.
+        scale = STACK_SCALE if len(with_lora) > 1 else 1.0
+        with_lora = [(a, (l[0], l[1], round(scale * (act_strength if act_strength is not None
+                                                      else l[2] if a.lora else ACT_STRENGTH), 2)))
+                     for a, l in with_lora]
+        style_s = STYLE_STRENGTH if style_strength is None else style_strength
+        loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
+        clip_act = used[-1] if used else None
+        body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
+        body = ", ".join(p for p in (body, HIS_MOTION.get(shot.act, "")) if p)
+        prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
+                                       body, MOTION[post["medium"]]) if p)
+        jobs[i] = (pic, prompt, loras, "ok " + " + ".join(l[0].split("-high")[0] for _, l in with_lora))
+    # Every shot, then all the checks (loading their models once), then again for the ones
+    # that failed. ComfyUI restarts after each clip: kept running, Wan's models pile up in RAM
+    # and the second clip runs the server out of memory.
+    clips: dict[int, np.ndarray] = {}
+    pending, made = sorted(jobs), 0
+    for attempt in range(SHOT_TRIES):
+        if not pending or cancelled():
+            break
+        paths: dict[int, Path] = {}
+        try:
+            for i in pending:
+                if cancelled():
+                    break
+                pic, prompt, loras, _ = jobs[i]
+                paths[i] = comfy.img2vid("wan", pic, post["medium"], prompt,
                                          seed if seed is not None else rng.randrange(2 ** 32), out.parent.name,
                                          f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
-                                         end=None if shot.climax else pic, wan=SCENE_WAN | (wan or {}))
-                finally:
-                    comfy.stop()
-                frames = _frames(path)
-                path.unlink(missing_ok=True)
-                reason = _check_shot(cfg, frames, post)
-                if not reason:
-                    break
+                                         end=None if shots[i].climax else pic, wan=SCENE_WAN | (wan or {}))
+                comfy.stop()
+                made += 1
+                if progress:
+                    progress(min(made, len(jobs)), len(jobs))
+        finally:
+            comfy.stop()
+        frames = {}
+        for i, path in paths.items():
+            frames[i] = _frames(path)
+            path.unlink(missing_ok=True)
+        for i, reason in _check_shots(cfg, frames, post).items():
+            if reason:
                 print(f"scene: shot {i + 1} try {attempt + 1} dropped ({reason[0]}: {reason[1]})", flush=True)
-                frames = None
-            if frames is None:
-                notes.append(f"dropped after {SHOT_TRIES} tries")
-                continue
-            if writer is None:
-                h, w = frames.shape[1:3]
-                writer = subprocess.Popen(
-                    ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
-                     "-r", str(WAN["fps"]), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
-                     "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
-            cycle = (frames if shot.climax else frames[:-1]).tobytes()   # a loop's last frame is its first
-            for _ in range(shot.loops):
+            else:
+                clips[i] = frames[i]
+                print(f"scene: shot {i + 1} {shots[i].name}: {jobs[i][3]}", flush=True)
+        pending = [i for i in pending if i not in clips]
+    notes = []
+    for i, shot in enumerate(shots):
+        notes.append(jobs[i][3] if i in clips else "no picture" if i not in jobs else
+                     "cancelled" if cancelled() else f"dropped after {SHOT_TRIES} tries")
+    if not clips:
+        return None, notes
+    h, w = next(iter(clips.values())).shape[1:3]
+    writer = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+         "-r", str(WAN["fps"]), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+         "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
+    try:
+        for i in sorted(clips):
+            cycle = (clips[i] if shots[i].climax else clips[i][:-1]).tobytes()   # a loop's last frame is its first
+            for _ in range(shots[i].loops):
                 writer.stdin.write(cycle)
-            notes.append("ok " + " + ".join(l[0].split("-high")[0] for _, l in with_lora))
-            print(f"scene: shot {i + 1} {shot.name}: {notes[-1]}", flush=True)
-            if progress:
-                progress(i + 1, len(shots))
-        if writer is None:
-            return None, notes
         writer.stdin.close()
         if writer.wait() != 0:
             raise RuntimeError("ffmpeg couldn't join the shots")
-        writer = None
         return out, notes
     except BaseException:
-        if writer:
-            writer.kill()
-            writer.wait()
+        writer.kill()
+        writer.wait()
         out.unlink(missing_ok=True)
         raise
 
 
-def _check_shot(cfg, frames: np.ndarray, post: dict) -> tuple[str, str] | None:
+def _check_shots(cfg, clips: dict[int, np.ndarray], post: dict) -> dict[int, tuple[str, str] | None]:
+    """_check_shot for several clips, loading the models once."""
+    from .vision import Vision
+    if not clips:
+        return {}
+    vision = Vision(cfg.models_dir)
+    try:
+        return {i: _check_shot(cfg, frames, post, vision) for i, frames in clips.items()}
+    finally:
+        vision.close()
+
+
+def _check_shot(cfg, frames: np.ndarray, post: dict, vision) -> tuple[str, str] | None:
     """The clip checks, and that no frame drifts away from the first (a morph)."""
     from .checks import drop_reason
     from .generate import VIDEO_CHECK_FRAMES, _feral
-    from .vision import Vision
-    vision = Vision(cfg.models_dir)
-    try:
-        sample = _sample(frames, VIDEO_CHECK_FRAMES)
-        a = vision.analyze(sample)
-        reason = drop_reason(a, post["medium"], sample, cfg, strict=post["strict"]) or _feral(a)
-        if reason:
-            return reason
-        embs = vision.embed([Image.fromarray(frames[0])] + _sample(frames, DRIFT_FRAMES))
-    finally:
-        vision.close()
+    sample = _sample(frames, VIDEO_CHECK_FRAMES)
+    a = vision.analyze(sample)
+    reason = drop_reason(a, post["medium"], sample, cfg, strict=post["strict"]) or _feral(a)
+    if reason:
+        return reason
+    embs = vision.embed([Image.fromarray(frames[0])] + _sample(frames, DRIFT_FRAMES))
     low = float((embs[1:] @ embs[0]).min())
     return ("drift", f"a frame is only {low:.2f} like the first") if low < DRIFT_MIN else None
 
