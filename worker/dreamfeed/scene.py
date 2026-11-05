@@ -30,7 +30,10 @@ from PIL import Image, ImageDraw
 
 from . import motion
 
-SHOT_CANDIDATES = 3
+SHOT_CANDIDATES = 4
+# What the tagger must see for a shot's picture to show its act, beyond the position.
+PENETRATION = ({"penis"}, {"vaginal", "sex", "penetration"})
+ORAL = ({"penis"}, {"fellatio", "oral"})
 SHOT_TRIES = 3         # a shot whose clip fails a check is made again, then left out
 
 # What a position looks like in a picture (booru tags for the image model), and the act
@@ -172,9 +175,13 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
                     continue
                 if PANELS & set(captions.picture(a.general)):
                     continue
-                act = motion.act_for(captions.picture(a.general))
-                # Showing the intended act matters more than looking like the post.
-                fits = (act.name if act else None) == shot.act
+                tags = set(captions.picture(a.general))
+                act = motion.act_for(list(tags))
+                # Showing the intended act matters more than looking like the post: the position,
+                # and the penis actually in it (a cowgirl on his lap with nothing inside isn't).
+                need = ORAL if shot.act == "blowjob" else PENETRATION if shot.act else None
+                fits = (act.name if act else None) == shot.act and \
+                    (need is None or (need[0] <= tags and bool(need[1] & tags)))
                 scored.append((fits, float(a.embedding.astype(np.float32) @ base), p))
             best = max(scored, key=lambda s: s[:2]) if scored else None
             for p in paths:
@@ -256,7 +263,9 @@ def _shot_prompt(writer, cast: str, shot: Shot, act) -> str | None:
 
 
 def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None], out: Path,
-           rng: random.Random, progress=None, cancelled=lambda: False) -> tuple[Path | None, list[str]]:
+           rng: random.Random, progress=None, cancelled=lambda: False, act_strength: float | None = None,
+           style_strength: float | None = None, wan: dict | None = None,
+           seed: int | None = None) -> tuple[Path | None, list[str]]:
     """Animate each shot's picture into a 5-second loop (Wan, first and last frame the same
     picture), check it, play it shot.loops times, and cut to the next. Returns the scene file
     (None if no shot passed) and a note per shot."""
@@ -294,7 +303,10 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
             with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
             with_lora = [(a, l) for a, l in with_lora if l]
-            loras = [l for _, l in with_lora] + ([(own[0], own[1], gen.video_style_strength)] if own else [])
+            if act_strength is not None:
+                with_lora = [(a, (l[0], l[1], act_strength)) for a, l in with_lora]
+            style_s = gen.video_style_strength if style_strength is None else style_strength
+            loras = [l for _, l in with_lora] + ([(own[0], own[1], style_s)] if own and style_s > 0 else [])
             clip_act = used[-1] if used else None
             body = texts[i] or ", ".join(p for p in (clip_act.motion if clip_act else "", shot.pace) if p)
             prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
@@ -302,9 +314,10 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
             frames = None
             for attempt in range(SHOT_TRIES):
                 try:
-                    path = comfy.img2vid("wan", pic, post["medium"], prompt, rng.randrange(2 ** 32), out.parent.name,
+                    path = comfy.img2vid("wan", pic, post["medium"], prompt,
+                                         seed if seed is not None else rng.randrange(2 ** 32), out.parent.name,
                                          f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
-                                         end=None if shot.climax else pic)
+                                         end=None if shot.climax else pic, wan=wan)
                 finally:
                     comfy.stop()
                 frames = _frames(path)
@@ -354,6 +367,13 @@ def render_preview(args: list[str]) -> None:
     ap = argparse.ArgumentParser(prog="dreamfeed scene-render")
     ap.add_argument("post", type=int)
     ap.add_argument("--shots", help="which shots, e.g. 4,5 (default all)")
+    ap.add_argument("--act-strength", type=float)
+    ap.add_argument("--style-strength", type=float, help="0 turns the style video LoRA off")
+    ap.add_argument("--motion-steps", type=int, help="steps without the speed-up LoRA (WAN motion_steps)")
+    ap.add_argument("--high-steps", type=int, help="steps on the high-noise expert (WAN high_steps)")
+    ap.add_argument("--size", help="WxH, e.g. 576x848")
+    ap.add_argument("--seed", type=int, help="the same seed for every try, to compare settings")
+    ap.add_argument("--out", default="scene.mp4")
     a = ap.parse_args(args)
     cfg = Config()
     gen = cfg.generation()
@@ -369,7 +389,15 @@ def render_preview(args: list[str]) -> None:
         pick = [int(x) - 1 for x in a.shots.split(",")]
         shots, pics = [shots[i] for i in pick], [pics[i] for i in pick]
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
-    path, notes = render(cfg, comfy, post, shots, pics, subdir / "scene.mp4", random.Random())
+    wan = {}
+    if a.motion_steps is not None:
+        wan["motion_steps"] = a.motion_steps
+    if a.high_steps is not None:
+        wan["high_steps"] = a.high_steps
+    if a.size:
+        wan["width"], wan["height"] = (int(x) for x in a.size.lower().split("x"))
+    path, notes = render(cfg, comfy, post, shots, pics, subdir / a.out, random.Random(),
+                         act_strength=a.act_strength, style_strength=a.style_strength, wan=wan or None, seed=a.seed)
     print(f"scene-render: {path} {notes}", flush=True)
 
 

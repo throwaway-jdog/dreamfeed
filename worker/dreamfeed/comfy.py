@@ -43,16 +43,18 @@ class Comfy:
 
     def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, strict: bool = False,
-                loras: list[tuple[str, str, float]] = (), end: Path | None = None) -> Path:
+                loras: list[tuple[str, str, float]] = (), end: Path | None = None,
+                wan: dict | None = None) -> Path:
         """Animate a (generated, already checked) image into a ~5 second clip. loras: Wan video
         LoRAs as (high-noise file, low-noise file, strength), e.g. a sex act's motion LoRA and
         the persona's style video LoRA, applied in order. Wan only: end makes the clip finish on
-        that image (the same image as the start makes a seamless loop)."""
+        that image (the same image as the start makes a seamless loop). wan: settings that
+        replace WAN's for this clip (e.g. width, height, motion_steps)."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start("video")
         if engine == "wan":
             workflow = _wan_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
-                                     end=self.upload(end) if end else None)
+                                     end=self.upload(end) if end else None, settings=wan)
         else:
             workflow = _ltx_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}")
         return self._run(workflow, timeout=1800)
@@ -152,9 +154,10 @@ def _save_video(images: list, fps: float, prefix: str) -> dict:
 
 
 def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: str,
-                  loras: list[tuple[str, str, float]] = (), end: str | None = None) -> dict:
+                  loras: list[tuple[str, str, float]] = (), end: str | None = None,
+                  settings: dict | None = None) -> dict:
     """source: the uploaded first frame; end: an uploaded last frame (first-last-frame mode)."""
-    w = WAN
+    w = WAN | (settings or {})
     nodes = {
         "text": {"class_type": "CLIPLoader", "inputs": {"clip_name": w["text"], "type": "wan"}},
         "vae": {"class_type": "VAELoader", "inputs": {"vae_name": w["vae"]}},
