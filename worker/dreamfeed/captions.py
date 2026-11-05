@@ -266,6 +266,9 @@ class Writer:
         words = sorted(len(WORD.findall(e)) for e in examples) or [8]
         target = max(2, words[len(words) // 2])
         why = []
+        # Booru jargon (ahoge, multicolored) gets read back, so the model doesn't see it.
+        from wordfreq import zipf_frequency
+        plain = [t for t in tags if all(zipf_frequency(w, "en") >= JARGON_BELOW for w in WORD.findall(t.lower()))]
         for _ in range(TRIES):
             shown = rng.sample(examples, min(EXAMPLES, len(examples)))
             user = (f"Account: {persona.name}, a {persona.medium} account."
@@ -276,7 +279,7 @@ class Writer:
                        else "\n\nTheir past posts:\n") + "\n".join(f"- {e}" for e in shown)
                     + ("\n\nTheir latest captions (say something different, with other words):\n"
                        + "\n".join(f"- {r}" for r in recent) if recent else "")
-                    + f"\n\nThe new picture ({rating}): {', '.join(tags)}"
+                    + f"\n\nThe new picture ({rating}): {', '.join(plain)}"
                     + (f"\nWrite one thing they'd say posting this picture: first person, a whole "
                        f"sentence to their followers, about {max(target, 6)} words, not a description."
                        if spoken else f"\nWrite the caption, about {target} words."))
