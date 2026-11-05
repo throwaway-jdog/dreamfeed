@@ -80,18 +80,34 @@ YURI_POSITIONS = {
     "fingering": ("fingering, lying on back, spread legs, hand between legs, nude, full body", {"fingering"}),
     "cunnilingus": ("cunnilingus, oral, spread legs, head between thighs, nude, full body", {"cunnilingus"}),
     "scissoring": ("tribadism, scissoring, legs intertwined, nude, full body, from side", {"tribadism"}),
+    "rimming": ("anilingus, licking ass, face in ass, all fours, ass, nude, full body", {"anilingus"}),
+    "69": ("69, cunnilingus, mutual oral, lying, nude, full body", {"69"}),
+    "toy": ("dildo, sex toy, vaginal object insertion, holding dildo, spread legs, lying on back, nude, full body",
+            {"dildo", "vaginal object insertion", "object insertion"}),
+    "strap-on": ("strap-on, sex from behind, doggystyle, all fours, nude, full body, from side", {"strap-on"}),
 }
+YURI_MIDDLE = ("fingering", "cunnilingus", "rimming", "69", "toy")
+YURI_PEAK = ("scissoring", "strap-on")     # the last act, where the climax happens
+YURI_TOYS = {"toy", "strap-on"}            # shots where toys aren't kept out
+# Which motion.ACTS act (its LoRA) animates each, where the names differ.
+YURI_CLIP_ACT = {"69": "cunnilingus"}
 YURI_MOTION = {
     "kissing": "they kiss deeply and slowly, their hands moving over each other's backs",
     "fingering": "one girl's fingers move in and out between the other's legs, her hips rising to meet them",
     "cunnilingus": "one girl licks between the other's thighs, her head moving, the other's hips rocking",
     "scissoring": "they grind their hips together in a steady rhythm, legs intertwined, bodies rocking",
+    "rimming": "one girl licks her partner's ass, her tongue moving, her face pressed between her cheeks",
+    "69": "they lick each other at the same time, heads moving, hips rocking",
+    "toy": "one girl slides a dildo in and out of the other in a steady rhythm, her hips rising to meet it",
+    "strap-on": "the girl wearing the strap-on thrusts her hips in a steady rhythm, her partner's body rocking",
 }
 YURI_STILL = "they hold each other: gentle breathing, small shifts; nobody new appears"
 YURI_BOTH = {"2girls", "yuri"}                                 # one of these: both are there
 YURI_NOT = {"1boy", "penis", "testicles", "multiple boys", "3girls", "multiple girls"}   # nobody else
-YURI_NEGATIVE = "1boy, penis, testicles, multiple boys, 3girls, dildo, strap-on, sex toy"
+YURI_NEGATIVE = "1boy, penis, testicles, multiple boys, 3girls"
+NO_TOYS = "dildo, strap-on, sex toy"
 YURI_ONLY = re.compile(r"\b(kiss\w*|french kiss|fingering|cunnilingus|tribadism|scissoring|hug\w*|"
+                       r"anilingus|69|dildo|strap-on|sex toy|object insertion|mutual oral|"
                        r"embrac\w*|cheek-to-cheek|selfie|holding phone|smile)\b", re.I)
 
 
@@ -364,9 +380,13 @@ def plan(rng: random.Random, positions: list[str] | None = None) -> list[Shot]:
     ]
 
 
-def plan_yuri(rng: random.Random) -> list[Shot]:
-    """Kissing, two of fingering and cunnilingus, scissoring, the climax in it, cuddling after."""
-    a, b = rng.sample(["fingering", "cunnilingus"], 2)
+def plan_yuri(rng: random.Random, picks: list[str] | None = None) -> list[Shot]:
+    """Kissing, two of YURI_MIDDLE, one of YURI_PEAK and the climax in it, cuddling after.
+    picks: the two middle acts and the peak, to test them."""
+    a, b = rng.sample(YURI_MIDDLE, 2)
+    peak = rng.choice(YURI_PEAK)
+    if picks:
+        a, b, peak = picks
     pos = lambda name: YURI_POSITIONS[name][0]
     return [
         Shot("opening: kissing", f"{pos('kissing')}, blush, half-closed eyes", "kissing", False,
@@ -374,10 +394,10 @@ def plan_yuri(rng: random.Random) -> list[Shot]:
         Shot(a, f"{pos(a)}, blush, open mouth", a, False, "a steady rhythm", yuri=True),
         Shot(b, f"{pos(b)}, blush, open mouth, sweat, heavy breathing", b, False,
              "faster, she's lost in it", yuri=True),
-        Shot("scissoring", f"{pos('scissoring')}, open mouth, sweat, heavy breathing", "scissoring", False,
+        Shot(peak, f"{pos(peak)}, open mouth, sweat, heavy breathing", peak, False,
              "fast and intense, building toward climax", yuri=True),
-        Shot("climax: scissoring", f"{pos('scissoring')}, orgasm, (female ejaculation:1.2), squirting, "
-             "trembling, arched back, pussy juice, open mouth, sweat", "scissoring", True,
+        Shot(f"climax: {peak}", f"{pos(peak)}, orgasm, (female ejaculation:1.2), squirting, "
+             "trembling, arched back, pussy juice, open mouth, sweat", peak, True,
              "the climax: both shuddering as they squirt, holding each other", loops=1, climax="squirt", yuri=True),
         Shot("aftermath", "after sex, lying together, cuddling, hug, nude, smile, sweat, half-closed eyes",
              None, False, "slow, catching their breath", loops=1, yuri=True),
@@ -559,6 +579,7 @@ def _draw_yuri(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, 
         for i, shot in enumerate(shots):
             # (cum means squirting here: NO_CUM would keep "ejaculation" out of the climax.)
             neg = ", ".join(n for n in (negative, no_twins, "" if shot.cum else NO_CUM,
+                                        "" if shot.act in YURI_TOYS else NO_TOYS,
                                         "close-up, cropped, out of frame, head out of frame") if n)
             asks.append((f"{cast}, {shot.tags}", neg))
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0], rng.randrange(2 ** 32),
@@ -777,7 +798,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
         writer = Writer(cfg.caption_model)
         try:
             for i, shot in enumerate(shots):
-                clip_act = motion.CLIMAXES.get(shot.climax) or acts.get(shot.act)
+                clip_act = motion.CLIMAXES.get(shot.climax) or acts.get(YURI_CLIP_ACT.get(shot.act, shot.act))
                 texts[i] = _shot_prompt(writer, cast, shot, clip_act)
         finally:
             writer.close()
@@ -787,7 +808,8 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
         if pic is None:
             continue
         # The position's motion LoRA, plus the climax's on a climax shot.
-        used = [a for a in (acts.get(shot.act), motion.CLIMAXES.get(shot.climax)) if a]
+        own_act = acts.get(YURI_CLIP_ACT.get(shot.act, shot.act)) if shot.yuri else acts.get(shot.act)
+        used = [a for a in (own_act, motion.CLIMAXES.get(shot.climax)) if a]
         with_lora = [(a, motion.lora_for(a, gen.act_lora, cfg.models_dir)) for a in used]
         with_lora = [(a, l) for a, l in with_lora if l]
         # The shared act LoRA at ACT_STRENGTH; an act's own LoRA at the strength it's made for.

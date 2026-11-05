@@ -39,6 +39,17 @@ ACTS = (
     Act("scissoring", "", ("tribadism",),
         "they grind their hips together in a steady rhythm, legs intertwined, bodies rocking",
         lora="wan2.2-i2v-scissoring", strength=0.6),
+    # Rimming 2323540 (I2V; its trigger is a sentence, here about two women), Dildoing 2903074
+    # (made for T2V, tried at less strength), Pegging 2410338 (I2V, a woman with a strap-on).
+    Act("rimming", "a woman performing rimming on a woman, licking her anus", ("anilingus",),
+        "one girl licks her partner's ass, her tongue moving, her face pressed between her cheeks",
+        lora="wan2.2-i2v-rimming", strength=0.8),
+    Act("strap-on", "", ("strap-on",),
+        "she thrusts her hips in a steady rhythm, the strap-on sliding in and out, her partner's body rocking",
+        lora="wan2.2-i2v-pegging", strength=0.7),
+    Act("toy", "pumping a dildo inside her vagina", ("dildo", "vaginal object insertion", "object insertion"),
+        "the dildo slides in and out of her pussy in a steady rhythm, her hips rising to meet it",
+        lora="wan2.2-i2v-dildo", strength=0.6),
     Act("blowjob", "bl0wj0b", ("fellatio", "irrumatio", "deepthroat", "licking penis"),
         "she sucks his penis, her head bobbing up and down in a steady rhythm"),
     Act("reverse cowgirl", "r3v3rs3_c0wg1rl", ("reverse cowgirl position",),
