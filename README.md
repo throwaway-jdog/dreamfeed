@@ -285,7 +285,7 @@ lines are checked like captions, and must be consensual (`safety.story_blocked`)
 until deleted; they aren't in the feed and don't expire.
 
 **Importing** a black-and-white comic with a colour cover (the same tab; `colorize.py`): paste
-the gallery's link (anything gallery-dl reads), say whether it's furry or anime, and optionally
+the gallery's link (anything gallery-dl reads, and multporn comics), say whether it's furry or anime, and optionally
 which page is the cover (else the most colourful page is). Every page gets the strict
 adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
 imported. Each black-and-white page is matched, patch by patch, to the colour pages (DINOv2
@@ -293,7 +293,8 @@ features in grey, with surroundings and brightness) and takes their colours as a
 model redraws the hint held to the page's own lines (ControlNet Union, line-art mode); then the
 page goes back on top, so lines, shading and lettering are exactly the artist's, bubbles and
 margins stay white, and bare paper (skin and fur in black and white) takes the colour. Coloured
-pages are checked again (a failing one stays as drawn). The reader can switch between colour and
+pages are checked again (a failing one stays as drawn). One seed for the whole comic, so its
+pages are drawn alike. The reader can switch between colour and
 the original. About 30 seconds a page. Tuned on a page of ours turned grey: about 90% of its
 coloured parts get the right colour (75-80% when hard-inked, with no greys).
 `python -m dreamfeed colorize --cover C.png PAGE.png... --out DIR` tries it on files.

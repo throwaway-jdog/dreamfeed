@@ -27,6 +27,7 @@ import argparse
 import datetime as dt
 import json
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 COLOUR = 0.12          # mean HSV saturation above which a page is in colour
+MAX_PAGES = 200
 MAX_DROPPED = 0.2      # share of pages that may fail the checks before the import stops
 PIXELS = 1024 * 1024   # the size pages are coloured at
 LINES = 0.85           # ControlNet strength: the drawing stays the artist's
@@ -169,7 +171,7 @@ def _guided(guide: np.ndarray, src: np.ndarray, r: int, eps: float = 1e-3) -> np
 
 
 def colour_page(comfy, checkpoint: str, page: Image.Image, hint: Image.Image, prompt: str, medium: str,
-                subdir: str, name: str, rng: random.Random) -> Image.Image:
+                subdir: str, name: str, seed: int) -> Image.Image:
     """page in colour: the image model's redrawing of the hint, the page laid over it."""
     size = _size(page)
     tmp = Path(tempfile.mkdtemp(prefix="lines-"))
@@ -177,7 +179,7 @@ def colour_page(comfy, checkpoint: str, page: Image.Image, hint: Image.Image, pr
         lines_path, init = tmp / "lines.png", tmp / "hint.png"
         line_art(page, size).save(lines_path)
         hint.resize(size, Image.LANCZOS).save(init)
-        path = comfy.txt2img(checkpoint, medium, prompt, rng.randrange(2 ** 32), subdir, name,
+        path = comfy.txt2img(checkpoint, medium, prompt, seed, subdir, name,
                              strict=True, extra_negative=NEGATIVE, init=init, denoise=DENOISE,
                              control=(lines_path, LINES), size=size)
     finally:
@@ -218,13 +220,15 @@ def _download(url: str, folder: Path) -> list[Path]:
     """The gallery's images, in its order."""
     from .styles import COOKIES, COOKIE_HOSTS
     folder.mkdir(parents=True, exist_ok=True)
+    host = url.split("/")[2].lower() if url.count("/") >= 2 else ""
+    if host.removeprefix("www.") == "multporn.net":
+        return _multporn(url, folder)
     conf = {"extractor": {"directory": [], "base-directory": str(folder), "filename": "{num:>04}_{filename}.{extension}",
                           "cookies-update": False}, "downloader": {"part-directory": str(folder / ".part")}}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(conf, f)
-    cmd = ["gallery-dl", "--config-ignore", "--config", f.name, "--range", "1-200",
+    cmd = ["gallery-dl", "--config-ignore", "--config", f.name, "--range", f"1-{MAX_PAGES}",
            "--filter", "extension in ('jpg', 'jpeg', 'png', 'webp')"]
-    host = url.split("/")[2].lower() if url.count("/") >= 2 else ""
     if host.removeprefix("www.").removeprefix("mobile.") in COOKIE_HOSTS and COOKIES.is_file():
         cmd += ["--cookies", str(COOKIES)]
     subprocess.run(cmd + [url], capture_output=True, text=True, timeout=3600)
@@ -233,8 +237,45 @@ def _download(url: str, folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.suffix.lower() in IMAGES)
 
 
+MULTPORN_PAGES = re.compile(r'configUrl":"([^"]+)"')
+MULTPORN_IMAGE = re.compile(r'imageURL="([^"]+)"')
+AGENT = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"}   # the site turns away scripts' own
+
+
+def _multporn(url: str, folder: Path) -> list[Path]:
+    """A multporn comic (gallery-dl has no extractor for it): the comic page names its pages'
+    gallery list (Juicebox XML), in order; each page's full size is its preview's address
+    without the resizing style."""
+    import html
+    import urllib.parse
+    import urllib.request
+    get = lambda u: urllib.request.urlopen(urllib.request.Request(u, headers=AGENT), timeout=60).read()
+    found = MULTPORN_PAGES.search(get(url).decode("utf-8", "replace"))
+    if not found:
+        raise RuntimeError("no comic pages on that multporn page")
+    listing = urllib.parse.urljoin(url, found.group(1).replace("\\/", "/"))
+    previews = [html.unescape(u) for u in MULTPORN_IMAGE.findall(get(listing).decode("utf-8", "replace"))][:MAX_PAGES]
+    out = []
+    for n, preview in enumerate(previews, 1):
+        full = re.sub(r"/styles/[^/]+/public/", "/", preview.split("?")[0])
+        name = Path(urllib.parse.urlparse(full).path).name
+        if Path(name).suffix.lower() not in IMAGES:
+            continue
+        for u in (full, preview):          # the preview if the full size isn't there
+            try:
+                data = get(u)
+                break
+            except OSError:
+                data = None
+        if data:
+            dest = folder / f"{n:04d}_{name}"
+            dest.write_bytes(data)
+            out.append(dest)
+    return out
+
+
 def colorize(cfg, pages: list[Path], medium: str, folder: Path, cover_index: int | None = None,
-             progress=lambda phase, done, total: None) -> dict:
+             progress=lambda phase, done, total: None, seed: int | None = None) -> dict:
     """Check pages, pick the cover, colour the black-and-white ones. Returns the comic's meta
     (paths under generated/): {"pages": in order, coloured where it was black and white,
     "originals", "cover", "dropped"}. The tagger and the image model take turns on the GPU."""
@@ -243,7 +284,8 @@ def colorize(cfg, pages: list[Path], medium: str, folder: Path, cover_index: int
     from .vision import Vision
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
-    rng = random.Random()
+    if seed is None:
+        seed = random.Random().randrange(2 ** 32)   # one for the whole comic: its pages are drawn alike
     # 1. Checks and tags.
     kept, dropped = [], 0      # (path, saturation, tags)
     vision = Vision(cfg.models_dir)
@@ -295,7 +337,7 @@ def colorize(cfg, pages: list[Path], medium: str, folder: Path, cover_index: int
                 progress("colouring", n, len(bw))
                 with Image.open(p) as im, Image.open(tmp / f"{n}.png") as hint:
                     out = colour_page(comfy, gen.checkpoints[medium], im.convert("RGB"), hint.convert("RGB"),
-                                      page_prompt(general), medium, str(folder.relative_to(out_dir)), f"col-{p.stem}", rng)
+                                      page_prompt(general), medium, str(folder.relative_to(out_dir)), f"col-{p.stem}", seed)
                 dest = p.with_name(f"{p.stem}-colour.jpg")
                 out.save(dest, quality=92)
                 coloured[p] = dest
@@ -318,7 +360,7 @@ def colorize(cfg, pages: list[Path], medium: str, folder: Path, cover_index: int
         vision.close()
     rel = lambda p: str(p.relative_to(out_dir))
     return {"pages": [rel(coloured.get(p, p)) for p, _, _ in kept], "originals": [rel(p) for p, _, _ in kept],
-            "cover": rel(cover[0]), "dropped": dropped}
+            "cover": rel(cover[0]), "dropped": dropped, "seed": seed}
 
 
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
@@ -368,6 +410,7 @@ def main(args: list[str]) -> None:
     ap.add_argument("--cover", required=True)
     ap.add_argument("--medium", default="furry")
     ap.add_argument("--out", required=True, help="a folder under data/generated")
+    ap.add_argument("--seed", type=int)
     a = ap.parse_args(args)
     cfg = Config()
     folder = Path(a.out)
@@ -377,6 +420,6 @@ def main(args: list[str]) -> None:
         dest = folder / f"{i:04d}_{Path(p).stem}{Path(p).suffix}"
         shutil.copy(p, dest)
         pages.append(dest)
-    meta = colorize(cfg, pages, a.medium, folder, cover_index=1)
+    meta = colorize(cfg, pages, a.medium, folder, cover_index=1, seed=a.seed)
     print(json.dumps(meta, indent=1))
     sys.exit(0)
