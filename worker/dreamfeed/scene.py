@@ -39,7 +39,9 @@ SHOT_TRIES = 3         # a shot whose clip fails a check is made again, then lef
 # step without the speed-up LoRA so the motion keeps its detail.
 ACT_STRENGTH = 1.0
 STYLE_STRENGTH = 0.3
-SCENE_WAN = {"motion_steps": 3}
+# 4-second clips (65 frames): 14% faster than 5, with no loss compared side by side; one less
+# motion step was faster still but looked worse.
+SCENE_WAN = {"motion_steps": 3, "frames": 65}
 
 # What a position looks like in a picture (booru tags for the image model), and the act
 # the tagger should then find in it (motion.ACTS names; None when no act LoRA covers it).

@@ -358,7 +358,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 
     <div class="panel">
       <h2>Video</h2>
-      <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, or make a minute-long scene from it.</p>
+      <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, or make a scene of about 40 seconds from it.</p>
       <div class="field">
         <span>How many clips</span>
         <div class="seg" id="a-count" role="group" aria-label="How many clips">
@@ -465,7 +465,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <fieldset class="lengths" id="motion-len">
       <legend>Make</legend>
       <label><input type="radio" name="len" value="clip" checked><span>Clip · 5 s</span></label>
-      <label><input type="radio" name="len" value="scene"><span>Scene · ~1 min</span></label>
+      <label><input type="radio" name="len" value="scene"><span>Scene · ~40 s</span></label>
     </fieldset>
     <small id="motion-time">Takes about 5 minutes.</small>
     <div class="scene-acts" id="scene-acts" hidden></div>
@@ -979,7 +979,7 @@ function showMotionTime() {
   showSceneActs();
   $("motion-text").disabled = scene;
   $("motion-time").textContent = scene
-    ? "A scene of about a minute: 6 new drawings of these characters, each a looping shot, building to a climax. Needs a post with two characters. About 35 minutes."
+    ? "A scene of about 40 seconds: 6 new drawings of these characters, each a looping shot, building to a climax. Needs a post with two characters. About 30 minutes."
     : "Takes about 5 minutes.";
 }
 $("motion-len").onchange = showMotionTime;
@@ -996,7 +996,7 @@ $("motion").onsubmit = async e => {
     closeMotion();
     $("v-animate").querySelector("span").textContent = "Animate again";
     const ab = it.el?.querySelector(".act.anim span"); if (ab) ab.textContent = "Again";
-    toast(scene ? "Making a scene. It takes about 35 minutes and shows up in the feed when it's done."
+    toast(scene ? "Making a scene. It takes about 30 minutes and shows up in the feed when it's done."
       : "Animating. The clip shows up in the feed in a few minutes.");
   } catch (err) { toast(err.message); }
   go.disabled = false;

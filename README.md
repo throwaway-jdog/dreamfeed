@@ -132,8 +132,8 @@ image-to-video clip:
 
 Every clip is checked on at least 8 frames, like images, before it reaches the feed.
 
-From a post with two characters, the viewer's Animate can also make a **scene** of about a
-minute (`worker/dreamfeed/scene.py`), cut together the way animators do it: a few looping shots,
+From a post with two characters, the viewer's Animate can also make a **scene** of about 40
+seconds (`worker/dreamfeed/scene.py`), cut together the way animators do it: a few looping shots,
 each a new drawing, building to a climax. Wan makes ~5 seconds at a time and drifts when clips are
 chained, so each shot is its own clip:
 
@@ -150,7 +150,7 @@ chained, so each shot is its own clip:
    position's motion LoRA with a climax LoRA and plays once. Every clip is checked; one that fails
    3 times is left out.
 
-About 35 minutes a scene. To judge a plan before any video: `python -m dreamfeed scene-preview
+About 30 minutes a scene (4-second shots, each played twice). To judge a plan before any video: `python -m dreamfeed scene-preview
 POST_ID` draws the shots and a contact sheet, `scene-render POST_ID [--shots 4,5]` animates them.
 
 Acts can have their own motion LoRA (`motion.ACTS` / `motion.CLIMAXES`, files
