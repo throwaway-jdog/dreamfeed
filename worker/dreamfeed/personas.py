@@ -134,6 +134,9 @@ class Persona:
         if friend:
             groups += friend.must_show
             never |= set(friend.must_not_show)
+            # Not what's either one's own (Scar's "grey fur" is Loona's look in a post with her).
+            own = {re.sub(r"^\((.*):[\d.]+\)$", r"\1", t.strip()) for p in (self, friend) for t in p.look.split(",")}
+            never -= own | {t for g in groups for t in g}
         return ["no " + " or ".join(sorted(g)) for g in groups if not g & seen] + \
             sorted(f"has {t}" for t in never & seen)
 

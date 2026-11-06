@@ -134,8 +134,11 @@ def run(cfg: Config, night: str | None = None, images: int | None = None, keep: 
                 " VALUES (?,?,?,?,?,?,?,?, 'queued')",
                 (night, p.medium, ckpt, prompt, seed, p.handle, caption, kind)).lastrowid
         try:
+            clothed = kind == "image" and captions.rating_of(prompt) != "explicit"
+            negative = ", ".join(n for n in (p.negative if kind == "image" else "",
+                                             CLOTHED_NEGATIVE if clothed else "") if n)
             path = comfy.txt2img(ckpt, p.medium, prompt, seed, night, f"{kind}-{p.handle}-{gid}",
-                                 strict=p.strict, lora=lora, extra_negative=p.negative if kind == "image" else "",
+                                 strict=p.strict, lora=lora, extra_negative=negative,
                                  regions=regions)
         except ValueError as e:   # safety.prompts refused it
             _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
@@ -196,6 +199,10 @@ WATERMARK_TAGS = ("watermark", "patreon logo", "patreon username", "artist name"
 WATERMARK_MAX = 0.25
 WATERMARK_REDRAWS = 2
 TAG_SEEN = 0.35   # the tagger is this sure of a must_show trait
+# A post that isn't explicit (a clothed selfie, a hug) keeps her top on: kept out of its prompt,
+# and drawn again when the tagger sees them anyway (a shirt on with the breasts out looks wrong).
+CLOTHED_NEGATIVE = "(nipples:1.2), breasts out, nipple slip, topless"
+NOT_CLOTHED = ("nipples", "breasts out", "nipple slip")
 
 
 def _watermark(a) -> tuple[str, str] | None:
@@ -260,6 +267,9 @@ def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> lis
             if not mark and p:
                 missing = p.off_model({t for t, s in a.general.items() if s >= TAG_SEEN}, prompt or "")
                 mark = ("off-model", ", ".join(missing)) if missing else None
+            if not mark and captions.rating_of(prompt or "") != "explicit" and \
+                    max(a.general.get(t, 0.0) for t in NOT_CLOTHED) >= TAG_SEEN:
+                mark = ("off-model", "breasts out on a clothed post")
             if mark:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{mark[0]}: {mark[1]}")
