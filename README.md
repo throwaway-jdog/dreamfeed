@@ -57,8 +57,8 @@ keeps the previous version as `data/personas.json.bak`. The format, from
   who draw different people), and `{partner}` (one of `partners`, so duo posts don't always
   show the same man; a faceless male when there are none), `{girlfriend}` (one of
   `girlfriends`, for girl-girl posts) and `{friend}` (one of `friends`, other personas'
-  handles: that persona appears as themselves, each described again in their own half of the
-  picture with both their LoRAs on; girl-girl scenes can be made from such posts). The captions are examples of how
+  handles: that persona appears as themselves, with both their character LoRAs on and no artist
+  style, which keeps both right; girl-girl scenes can be made from such posts). The captions are examples of how
   the persona writes (below).
 - `must_show`: traits every post must show, each a list of tags any of which counts (e.g.
   `[["red hair"], ["hairclip", "hair ornament"]]`); a post the tagger doesn't see one in is
