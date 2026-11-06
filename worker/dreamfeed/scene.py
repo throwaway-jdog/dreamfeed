@@ -218,6 +218,9 @@ BG_WEIGHT = 0.6      # of a candidate's score: background colours against likene
 DRIFT_MIN = 0.9
 DRIFT_FRAMES = 16
 STACK_SCALE = 0.8    # each LoRA's strength when a climax stacks two: at full strength they fight
+# LTX-2.3's LoRAs (Civitai): DR34ML4Y's LTX version (1811313, the same trigger words as on Wan)
+# and a multi-purpose sex LoRA trained with furry (2310920).
+LTX2_LORAS = {"act": "ltx2.3-dr34ml4y.safetensors", "furry": "ltx2.3-nsfw-furry.safetensors"}
 
 
 def _edges(img: Image.Image) -> np.ndarray:
@@ -767,10 +770,11 @@ def _shot_prompt(writer, cast: str, shot: Shot, act) -> str | None:
 def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None], out: Path,
            rng: random.Random, progress=None, cancelled=lambda: False, act_strength: float | None = None,
            style_strength: float | None = None, wan: dict | None = None,
-           seed: int | None = None) -> tuple[Path | None, list[str]]:
-    """Animate each shot's picture into a 5-second loop (Wan, first and last frame the same
-    picture), check it, play it shot.loops times, and cut to the next. Returns the scene file
-    (None if no shot passed) and a note per shot."""
+           seed: int | None = None, engine: str = "wan") -> tuple[Path | None, list[str]]:
+    """Animate each shot's picture into a 5-second loop (first and last frame the same picture),
+    check it, play it shot.loops times, and cut to the next. Returns the scene file (None if no
+    shot passed) and a note per shot. engine: "wan" (Wan 2.2) or "ltx2" (LTX-2.3, being tried:
+    its own LoRAs, LTX2_LORAS)."""
     import subprocess
     from . import personas as people, videolora
     from .comfy import WAN
@@ -814,7 +818,11 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
         body = ", ".join(p for p in (body, _motion_of(shot)) if p)
         prompt = ", ".join(p for p in (own[2] if own else "", *(a.trigger for a, _ in with_lora),
                                        body, MOTION[post["medium"]]) if p)
-        jobs[i] = (pic, prompt, loras, "ok " + " + ".join(l[0].split("-high")[0] for _, l in with_lora))
+        label = "ok " + " + ".join(l[0].split("-high")[0] for _, l in with_lora)
+        if engine == "ltx2":   # its general sex LoRA for any act (same trigger words), and furry
+            loras = ([(LTX2_LORAS["act"], 0.8)] if with_lora else []) + [(LTX2_LORAS["furry"], 0.6)]
+            label = "ok ltx2" + (" + act" if with_lora else "")
+        jobs[i] = (pic, prompt, loras, label)
     # Every shot, then all the checks (loading their models once), then again for the ones
     # that failed. ComfyUI restarts after each clip: kept running, Wan's models pile up in RAM
     # and the second clip runs the server out of memory.
@@ -829,7 +837,7 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                 if cancelled():
                     break
                 pic, prompt, loras, _ = jobs[i]
-                paths[i] = comfy.img2vid("wan", pic, post["medium"], prompt,
+                paths[i] = comfy.img2vid(engine, pic, post["medium"], prompt,
                                          seed if seed is not None else rng.randrange(2 ** 32), out.parent.name,
                                          f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
                                          end=None if shots[i].climax else pic, wan=SCENE_WAN | (wan or {}))
@@ -856,10 +864,12 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                      "cancelled" if cancelled() else f"dropped after {SHOT_TRIES} tries")
     if not clips:
         return None, notes
+    from .comfy import LTX2
     h, w = next(iter(clips.values())).shape[1:3]
+    fps = LTX2["fps"] if engine == "ltx2" else WAN["fps"]
     writer = subprocess.Popen(
         ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
-         "-r", str(WAN["fps"]), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+         "-r", str(fps), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
     try:
         for i in sorted(clips):
@@ -919,6 +929,7 @@ def render_preview(args: list[str]) -> None:
     ap.add_argument("--size", help="WxH, e.g. 576x848")
     ap.add_argument("--seed", type=int, help="the same seed for every try, to compare settings")
     ap.add_argument("--out", default="scene.mp4")
+    ap.add_argument("--engine", default="wan", choices=("wan", "ltx2"))
     a = ap.parse_args(args)
     cfg = Config()
     gen = cfg.generation()
@@ -942,7 +953,8 @@ def render_preview(args: list[str]) -> None:
     if a.size:
         wan["width"], wan["height"] = (int(x) for x in a.size.lower().split("x"))
     path, notes = render(cfg, comfy, post, shots, pics, subdir / a.out, random.Random(),
-                         act_strength=a.act_strength, style_strength=a.style_strength, wan=wan or None, seed=a.seed)
+                         act_strength=a.act_strength, style_strength=a.style_strength, wan=wan or None, seed=a.seed,
+                         engine=a.engine)
     print(f"scene-render: {path} {notes}", flush=True)
 
 
