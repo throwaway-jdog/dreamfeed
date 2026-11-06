@@ -16,7 +16,7 @@ The dashboard's Comics page queues the same thing as a job (kind "comic"). Steps
    Build-up panels are dressed (an outfit of the persona's; nude kept out), act panels nude.
 5. Bubbles are drawn here, not by the image model (it can't write): where the cut-out shows no
    one, near the top, the tail toward the speaker (told apart by hair colour).
-6. Pages of 2 by 2 panels, saved as generated/comic-.../page-N.jpg with comic.json, and a
+6. Pages in one of LAYOUTS (a grid, a tall panel, a wide one), saved as generated/comic-.../page-N.jpg with comic.json, and a
    generations row (kind and status "comic", the first page as its file) for the dashboard.
 """
 import argparse
@@ -37,8 +37,17 @@ from . import acts, safety, scene
 PANELS = 4             # per page
 MAX_PAGES = 4
 FONT = Path(__file__).parent / "fonts" / "ComicNeue-Bold.ttf"   # SIL Open Font License (fonts/OFL.txt)
-PAGE_W, GUTTER, BORDER = 1600, 24, 5
+PAGE_W, PAGE_H, GUTTER, BORDER = 1600, 2240, 24, 5
+# Page layouts for 4 panels, in reading order: cells as (x, y, width, height), shares of the
+# page inside its margins. A page picks one at random.
+LAYOUTS = {
+    "grid": [(0, 0, .5, .5), (.5, 0, .5, .5), (0, .5, .5, .5), (.5, .5, .5, .5)],
+    "tall left": [(0, 0, .55, 1), (.55, 0, .45, 1 / 3), (.55, 1 / 3, .45, 1 / 3), (.55, 2 / 3, .45, 1 / 3)],
+    "wide finish": [(0, 0, 1 / 3, .45), (1 / 3, 0, 1 / 3, .45), (2 / 3, 0, 1 / 3, .45), (0, .45, 1, .55)],
+    "wide open": [(0, 0, 1, .45), (0, .45, 1 / 3, .55), (1 / 3, .45, 1 / 3, .55), (2 / 3, .45, 1 / 3, .55)],
+}
 MAX_LINE = 70          # characters in one panel's line
+FONT_SIZE = PAGE_W // 42   # the same in every panel, whatever its size
 COPIED = 0.7           # a line this alike (difflib) to an example line is a copy
 REFERENCE_TRIES = 4
 EXPRESSIONS = ("smile", "blush", "smug", "surprised", "embarrassed", "happy", "teasing", "open mouth")
@@ -114,7 +123,7 @@ def script(cfg, cast: list, kind: str, story: str, actions: list[str], rng: rand
     who = "\n".join(f"- {'AB'[i]}: {p.bio or p.name}. How they talk: " + " / ".join(v)
                     for i, (p, v) in enumerate(zip(cast, voices)))
     panels, title = [], ""
-    writer = Writer(cfg.caption_model) if cfg.caption_model else None
+    writer = Writer(cfg.story_model, cfg.story_revision) if cfg.story_model else None
     try:
         for start in range(0, len(actions), PANELS):
             page_actions = actions[start:start + PANELS]
@@ -202,7 +211,7 @@ def bubble(img: Image.Image, mask: Image.Image, line: str, head: tuple[int, int]
     its tail toward head."""
     img = img.convert("RGB").copy()
     w, h = img.size
-    font = ImageFont.truetype(str(FONT), max(18, w // 22))
+    font = ImageFont.truetype(str(FONT), FONT_SIZE)
     lines = textwrap.wrap(line, width=18) or [line]
     draw = ImageDraw.Draw(img)
     box = [draw.textbbox((0, 0), l, font=font) for l in lines]
@@ -236,19 +245,36 @@ def bubble(img: Image.Image, mask: Image.Image, line: str, head: tuple[int, int]
     return img
 
 
-def page(panels: list[Image.Image]) -> Image.Image:
-    """2 by 2 panels on a white page, each in a black border."""
-    cell_w = (PAGE_W - 3 * GUTTER) // 2
-    cell_h = int(cell_w * 1.35)
-    out = Image.new("RGB", (PAGE_W, 3 * GUTTER + 2 * cell_h), "white")
+def cells(layout: str) -> list[tuple[int, int, int, int]]:
+    """A layout's cells in pixels: (x, y, width, height), gutters between them."""
+    w, h = PAGE_W - 2 * GUTTER, PAGE_H - 2 * GUTTER
+    out = []
+    for x, y, cw, ch in LAYOUTS[layout]:
+        x0, y0 = GUTTER + round(x * w), GUTTER + round(y * h)
+        x1, y1 = GUTTER + round((x + cw) * w), GUTTER + round((y + ch) * h)
+        out.append((x0 + (GUTTER // 2 if x > 0 else 0), y0 + (GUTTER // 2 if y > 0 else 0),
+                    x1 - x0 - (GUTTER // 2 if x > 0 else 0) - (GUTTER // 2 if x + cw < 1 else 0),
+                    y1 - y0 - (GUTTER // 2 if y > 0 else 0) - (GUTTER // 2 if y + ch < 1 else 0)))
+    return out
+
+
+def fit(img: Image.Image, w: int, h: int, focus: float = 0.3) -> tuple[int, int, int, int]:
+    """The part of img that covers a w x h cell: all of its width or height, the rest cropped
+    around focus (a share of the height: faces are near the top)."""
+    r = max(w / img.width, h / img.height)
+    cw, ch = w / r, h / r
+    left = (img.width - cw) / 2
+    top = min(max(0.0, focus * img.height - ch / 2), img.height - ch)
+    return round(left), round(top), round(left + cw), round(top + ch)
+
+
+def page(panels: list[Image.Image], layout: str) -> Image.Image:
+    """The panels (already cut to their cells) on a white page, each in a black border."""
+    out = Image.new("RGB", (PAGE_W, PAGE_H), "white")
     d = ImageDraw.Draw(out)
-    for i, p in enumerate(panels):
-        x, y = GUTTER + (i % 2) * (cell_w + GUTTER), GUTTER + (i // 2) * (cell_h + GUTTER)
-        r = max(cell_w / p.width, cell_h / p.height)   # cover the cell, cropped from the middle
-        q = p.resize((int(p.width * r) + 1, int(p.height * r) + 1), Image.LANCZOS)
-        left, top = (q.width - cell_w) // 2, min((q.height - cell_h) // 4, q.height - cell_h)
-        out.paste(q.crop((left, top, left + cell_w, top + cell_h)), (x, y))
-        d.rectangle([x, y, x + cell_w - 1, y + cell_h - 1], outline=(0, 0, 0), width=BORDER)
+    for p, (x, y, w, h) in zip(panels, cells(layout)):
+        out.paste(p.resize((w, h), Image.LANCZOS), (x, y))
+        d.rectangle([x, y, x + w - 1, y + h - 1], outline=(0, 0, 0), width=BORDER)
     return out
 
 
@@ -357,16 +383,21 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
     drawn = scene.draw(cfg, comfy, persona, post, shots, night, "comic", rng)
     ref.unlink(missing_ok=True)
     progress("lettering", 0, 1)
+    layouts = [rng.choice(list(LAYOUTS)) for _ in range(0, len(drawn), PANELS)]
+    cell_list = [c for lay in layouts for c in cells(lay)]
     cut = cutout.Cutout()
     try:
         panels = []
-        for (path, note), pn in zip(drawn, sc["panels"]):
+        for (path, note), pn, (_, _, cw, ch) in zip(drawn, sc["panels"], cell_list):
             if path is None:   # every candidate failed a check: a blank panel rather than none
-                panels.append(Image.new("RGB", (832, 1216), "white"))
+                panels.append(Image.new("RGB", (cw, ch), "white"))
                 print(f"comic: blank panel ({note})", flush=True)
                 continue
             with Image.open(path) as im:
                 img = im.convert("RGB")
+            # Cut to the cell first, so the bubble lands inside what's shown.
+            box = fit(img, cw, ch, focus=0.3 if pn["action"] in TALK else 0.45)
+            img = img.crop(box).resize((cw, ch), Image.LANCZOS)
             if pn["speaker"] is not None and pn["line"]:
                 mask = cut.mask(img)
                 m = np.asarray(mask)
@@ -379,9 +410,9 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
     folder = out_dir / night
     folder.mkdir(parents=True, exist_ok=True)
     files = []
-    for n in range(0, len(panels), PANELS):
+    for n, layout in zip(range(0, len(panels), PANELS), layouts):
         path = folder / f"page-{n // PANELS + 1}.jpg"
-        page(panels[n:n + PANELS]).save(path, quality=90)
+        page(panels[n:n + PANELS], layout).save(path, quality=90)
         files.append(str(path.relative_to(out_dir)))
     meta = {"title": sc["title"], "pages": files, "cast": handles, "story": story, "script": sc["panels"]}
     (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))

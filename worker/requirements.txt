@@ -5,6 +5,8 @@ pillow==12.3.0
 gallery-dl==1.32.19
 # Writes a fresh caption for every post (CAPTION_MODEL).
 transformers==4.57.1
+bitsandbytes==0.50.2   # 4-bit text models (STORY_MODEL)
+accelerate==1.15.0
 # English word frequencies: tells names apart from ordinary words in captions.
 wordfreq==3.1.1
 # Cuts characters out of a shot to paste them into the scene's room (cutout.py, BiRefNet).

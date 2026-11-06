@@ -235,13 +235,18 @@ def picture(general: dict[str, float]) -> list[str]:
 # ---- the model ------------------------------------------------------------------------------
 
 class Writer:
-    def __init__(self, model_id: str):
+    def __init__(self, model_id: str, revision: str | None = None):
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
         print(f"captions: loading {model_id}", flush=True)
         self.torch = torch
-        self.tok = AutoTokenizer.from_pretrained(model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16).to("cuda").eval()
+        self.tok = AutoTokenizer.from_pretrained(model_id, revision=revision)
+        if getattr(AutoConfig.from_pretrained(model_id, revision=revision), "quantization_config", None):
+            # Already 4-bit (bitsandbytes): it's placed on the GPU as it loads.
+            self.model = AutoModelForCausalLM.from_pretrained(model_id, revision=revision, device_map="cuda").eval()
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(model_id, revision=revision,
+                                                              dtype=torch.bfloat16).to("cuda").eval()
 
     def close(self) -> None:
         del self.model
@@ -252,7 +257,14 @@ class Writer:
                                   max_new_tokens))
 
     def _sample(self, messages: list[dict], max_new_tokens: int = 90) -> str:
-        ids = self.tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to("cuda")
+        try:
+            ids = self.tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt")
+        except Exception:   # a template without a system role (Mistral): it goes first in the user's turn
+            system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+            rest = [m for m in messages if m["role"] != "system"]
+            rest[0] = dict(rest[0], content=f"{system}\n\n{rest[0]['content']}")
+            ids = self.tok.apply_chat_template(rest, add_generation_prompt=True, return_tensors="pt")
+        ids = ids.to("cuda")
         with self.torch.no_grad():
             out = self.model.generate(ids, attention_mask=self.torch.ones_like(ids), max_new_tokens=max_new_tokens,
                                       do_sample=True, temperature=0.9, top_p=0.95,

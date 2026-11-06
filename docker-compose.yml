@@ -39,6 +39,8 @@ services:
       VIDEO_ACT_LORA_STRENGTH: ${VIDEO_ACT_LORA_STRENGTH:-0.8}
       VIDEO_STYLE_LORA_STRENGTH: ${VIDEO_STYLE_LORA_STRENGTH:-0.7}   # a style's own video LoRA (README: Video LoRAs)
       CAPTION_MODEL: ${CAPTION_MODEL-}       # text model that writes each post's caption; empty: example captions
+      STORY_MODEL: ${STORY_MODEL-}           # bigger text model for comics' stories; empty: CAPTION_MODEL
+      STORY_MODEL_REVISION: ${STORY_MODEL_REVISION-}
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data

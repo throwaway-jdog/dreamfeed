@@ -39,6 +39,10 @@ class Config:
         # Hugging Face id of the text model that writes a fresh caption for every post (see
         # captions.py). Empty: captions come from the personas' example captions.
         self.caption_model = os.environ.get("CAPTION_MODEL", "").strip()
+        # A bigger text model for comics' stories (dialogue that answers the line before); empty:
+        # the caption model writes them too. Pre-quantized (bitsandbytes 4-bit) models load as such.
+        self.story_model = os.environ.get("STORY_MODEL", "").strip() or self.caption_model
+        self.story_revision = os.environ.get("STORY_MODEL_REVISION", "").strip() or None
         # How often the worker checks the nightly window and dashboard requests.
         self.scan_seconds = opt_float("SCAN_SECONDS", 10)
 
