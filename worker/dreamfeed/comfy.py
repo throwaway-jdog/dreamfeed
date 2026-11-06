@@ -75,14 +75,18 @@ class Comfy:
 
     def txt2img(self, checkpoint: str, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, extra_negative: str = "", strict: bool = False,
-                lora=None, init: Path | None = None, denoise: float = 1.0, regions=None) -> Path:
+                lora=None, init: Path | None = None, denoise: float = 1.0, regions=None,
+                reference: tuple[Path, float, str] | None = None) -> Path:
         """lora: (file in models/loras, strength), or a list of them, applied in turn to the model
         and text encoder. regions: [(tags, x from, x to)] or [(tags, x from, x to, lora)], each
         added for its own vertical strip (shares of the width) on top of prompt for the whole
         picture: two characters each described again in their own part don't trade looks. A
         region's lora (file, strength) is used only for that part (a ComfyUI hook), so one
         character's LoRA doesn't turn the other into them.
-        init: start from this picture instead of noise (img2img), keeping 1 - denoise of it."""
+        init: start from this picture instead of noise (img2img), keeping 1 - denoise of it.
+        reference: (picture, weight, IP-Adapter weight type): the image model is also shown this
+        picture (IP_ADAPTER), e.g. the post a scene is made from, so every shot keeps its
+        characters' colours and look."""
         p = presets.for_checkpoint(checkpoint)
         loras = [lora] if isinstance(lora, tuple) else list(lora or [])
         last = f"lora{len(loras) - 1}" if loras else "ckpt"
@@ -113,6 +117,19 @@ class Comfy:
         # can't hold: such a picture runs in the lean "regions" mode, on a fresh ComfyUI each time.
         hooked = any(len(r) > 3 and r[3] for r in regions or [])
         self.start("regions" if hooked else "image")
+        if reference:
+            pic, weight, kind = reference
+            model = workflow["sample"]["inputs"]["model"]
+            workflow |= {
+                "ref_image": {"class_type": "LoadImage", "inputs": {"image": self.upload(pic)}},
+                "ref_model": {"class_type": "IPAdapterModelLoader", "inputs": {"ipadapter_file": IP_ADAPTER["model"]}},
+                "ref_vision": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": IP_ADAPTER["vision"]}},
+                "ref": {"class_type": "IPAdapterAdvanced", "inputs": {
+                    "model": model, "ipadapter": ["ref_model", 0], "image": ["ref_image", 0],
+                    "clip_vision": ["ref_vision", 0], "weight": weight, "weight_type": kind,
+                    "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0, "embeds_scaling": "V only"}},
+            }
+            workflow["sample"]["inputs"]["model"] = ["ref", 0]
         for n, (tags, x0, x1, *own) in enumerate(regions or []):
             if safety.blocked(tags):
                 raise ValueError(f"blocked tags in a region: {', '.join(safety.blocked(tags))}")
@@ -152,6 +169,9 @@ class Comfy:
             time.sleep(1)
         raise TimeoutError(f"ComfyUI prompt {prompt_id} did not finish in 600s")
 
+
+IP_ADAPTER = {"model": "ip-adapter-plus_sdxl_vit-h.safetensors",
+              "vision": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"}
 
 VIDEO_NEGATIVE = ("blurry, low quality, worst quality, static, still image, frozen, slow motion, distorted, "
                   "deformed, bad anatomy, "

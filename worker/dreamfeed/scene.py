@@ -220,6 +220,8 @@ BG_WEIGHT = 0.6      # of a candidate's score: background colours against likene
 DRIFT_MIN = 0.9
 DRIFT_FRAMES = 16
 STACK_SCALE = 0.8    # each LoRA's strength when a climax stacks two: at full strength they fight
+# Every shot is also shown the post (IP-Adapter): (weight, weight type), or None for off.
+SCENE_REFERENCE: tuple[float, str] | None = None
 
 
 def _edges(img: Image.Image) -> np.ndarray:
@@ -536,7 +538,8 @@ def _girl_girl(persona, post: dict, seen_post, rng: random.Random) -> Kind:
 
 
 def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: str,
-         rng: random.Random, keep_room: Path | None = None) -> list[tuple[Path | None, str]]:
+         rng: random.Random, keep_room: Path | None = None,
+         reference: tuple[float, str] | None = SCENE_REFERENCE) -> list[tuple[Path | None, str]]:
     """One checked picture per shot: (path or None, note), for any kind of scene (Kind). The
     room is drawn once; of each shot's candidates, the one that best shows what the kind needs,
     then looks most like the post, wins, and is pasted into the room. Losers are deleted;
@@ -577,7 +580,8 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0],
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",
                                         extra_negative=neg, strict=post["strict"], lora=lora,
-                                        regions=kind.regions if kind.halves(shot) else None)
+                                        regions=kind.regions if kind.halves(shot) else None,
+                                        reference=(post["file"], *reference) if reference else None)
                           for c in range(kind.candidates(shot))])
     finally:
         comfy.stop()
@@ -725,6 +729,8 @@ def preview(args: list[str]) -> None:
     ap.add_argument("post", type=int)
     ap.add_argument("--seed", type=int)
     ap.add_argument("--acts", help="acts.SLOTS picks, e.g. first=doggy,second=standing (the rest random)")
+    ap.add_argument("--reference", help="IP-Adapter on the post: WEIGHT,TYPE (e.g. 0.5,linear), or off")
+    ap.add_argument("--out", default="contact-sheet.jpg", help="the contact sheet's file name")
     a = ap.parse_args(args)
     from .acts import checked
     picked_raw = dict(x.split("=", 1) for x in a.acts.split(",")) if a.acts else {}
@@ -739,9 +745,12 @@ def preview(args: list[str]) -> None:
     out_dir = cfg.data_dir / "generated"
     subdir = f"scene-preview-{a.post}"
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
+    ref = SCENE_REFERENCE
+    if a.reference:
+        ref = None if a.reference == "off" else (float(a.reference.split(",")[0]), a.reference.split(",", 1)[1])
     pictures = draw(cfg, comfy, persona, post, shots, subdir, f"post{a.post}", rng,
-                    keep_room=out_dir / subdir / "room.png")
-    sheet = contact_sheet(post["file"], shots, pictures, out_dir / subdir / "contact-sheet.jpg")
+                    keep_room=out_dir / subdir / "room.png", reference=ref)
+    sheet = contact_sheet(post["file"], shots, pictures, out_dir / subdir / a.out)
     from dataclasses import asdict
     (out_dir / subdir / "plan.json").write_text(json.dumps(
         [asdict(s) | {"picture": str(p) if p else None, "note": n} for s, (p, n) in zip(shots, pictures)], indent=1))

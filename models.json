@@ -1,5 +1,5 @@
 {
- "_note": "LoRAs that can be downloaded again: python3 fetch-models.py. Trained ones (style-*, video-*) are in the backup instead.",
+ "_note": "Models that can be downloaded again: python3 fetch-models.py. Trained ones (style-*, video-*) are in the backup instead.",
  "loras": {
   "wan2.2-i2v-creampie-high.safetensors": {
    "civitai_version": 2197409,
@@ -180,6 +180,16 @@
    "civitai_model": 2171333,
    "what": "Wan2.2 - French Kiss (I2V/T2V) (Low Noise 1.0v)",
    "sha256": "a80aa2d0f064d9b3882959318484d18c9dd390d7e4a88c725d1e972e5cd832a1"
+  }
+ },
+ "files": {
+  "ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors": {
+   "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+   "sha256": "3f5062b8400c94b7159665b21ba5c62acdcd7682262743d7f2aefedef00e6581"
+  },
+  "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors": {
+   "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+   "sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030"
   }
  }
 }

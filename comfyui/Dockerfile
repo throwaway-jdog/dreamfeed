@@ -12,6 +12,10 @@ ARG COMFYUI_GGUF_COMMIT=6ea2651e7df66d7585f6ffee804b20e92fb38b8a
 RUN git clone https://github.com/city96/ComfyUI-GGUF.git /app/ComfyUI/custom_nodes/ComfyUI-GGUF \
     && git -C /app/ComfyUI/custom_nodes/ComfyUI-GGUF checkout ${COMFYUI_GGUF_COMMIT} \
     && pip install --no-cache-dir -r /app/ComfyUI/custom_nodes/ComfyUI-GGUF/requirements.txt
+# IP-Adapter: a reference picture steers the image model (scenes: every shot looks like the post).
+ARG IPADAPTER_COMMIT=a0f451a5113cf9becb0847b92884cb10cbdec0ef
+RUN git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git /app/ComfyUI/custom_nodes/ComfyUI_IPAdapter_plus \
+    && git -C /app/ComfyUI/custom_nodes/ComfyUI_IPAdapter_plus checkout ${IPADAPTER_COMMIT}
 # SageAttention: a faster attention kernel (triton, no compiling), used for video jobs.
 RUN pip install --no-cache-dir sageattention==1.0.6
 COPY extra_model_paths.yaml supervisor.py /app/

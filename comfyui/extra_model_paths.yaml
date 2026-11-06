@@ -7,3 +7,5 @@ dreamfeed:
     unet
   text_encoders: text_encoders
   vae: vae
+  ipadapter: ipadapter
+  clip_vision: clip_vision
