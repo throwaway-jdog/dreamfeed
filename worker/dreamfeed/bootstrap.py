@@ -1,6 +1,6 @@
 """Pictures to train a character LoRA on, for a persona's own character that has no art yet.
 
-    python -m dreamfeed bootstrap PERSONA [--count 160] [--keep 40]
+    python -m dreamfeed bootstrap PERSONA [--count 160] [--keep 40] [--add] [--nude]
 
 Draws COUNT pictures of the persona's look (no LoRA) in varied framings, poses, outfits and
 backgrounds, checks each like a post (adults-only at the strict threshold, feral, blocked
@@ -12,6 +12,8 @@ out like a checked style, so character-prep can build the LoRA from it:
     python -m dreamfeed character-prep PERSONA --from PERSONAboot --tagged PERSONAboot --solo ...
 
 data/lora/PERSONAboot/sheet.jpg shows the kept pictures, to look over before training.
+--add keeps the pictures already there and adds KEEP more (judged alike against all of them);
+--nude draws only nude pictures (with --add: more of her body for the LoRA to learn).
 """
 import argparse
 import json
@@ -48,7 +50,7 @@ def _sheet(paths, out) -> None:
     sheet.save(out, quality=85)
 
 
-def run(cfg: Config, handle: str, count: int, keep: int) -> dict:
+def run(cfg: Config, handle: str, count: int, keep: int, add: bool = False, nude: bool = False) -> dict:
     from PIL import Image
     from . import personas
     from .checks import problem
@@ -69,12 +71,16 @@ def run(cfg: Config, handle: str, count: int, keep: int) -> dict:
     gen = cfg.generation()
     name = f"{handle}boot"
     base = cfg.data_dir / "lora" / name
-    if base.exists():
+    out = base / "dataset" / f"1_{name}"
+    have = sorted(out.glob("*.png")) if add else []
+    if add and not have:
+        raise SystemExit(f"bootstrap: --add, but {out} has no pictures yet")
+    if not add and base.exists():
         shutil.rmtree(base)
-    base.mkdir(parents=True)
+    base.mkdir(parents=True, exist_ok=True)
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, cfg.data_dir / "generated")
     rng = random.Random()
-    outfits = (p.outfits or ["casual clothes"]) + ["nude"] * 2
+    outfits = ["nude"] if nude else (p.outfits or ["casual clothes"]) + ["nude"] * 2
     drawn = []
     try:
         for n in range(count):
@@ -114,22 +120,31 @@ def run(cfg: Config, handle: str, count: int, keep: int) -> dict:
         vision.close()
     if not good:
         raise SystemExit(f"bootstrap: none of the {count} pictures look like her ({why})")
-    # The most alike: closest to the centre of those with the most of her preferred traits.
-    best = max(g[3] for g in good)
-    core = [g[4] for g in good if g[3] >= best - 1]
+    # The most alike: closest to the centre of those with the most of her preferred traits (or,
+    # adding, of the pictures already kept).
+    if have:
+        from .vision import Vision as _V
+        v = _V(cfg.models_dir)
+        try:
+            core = [v.embed([Image.open(f).convert("RGB")])[0] for f in have]
+        finally:
+            v.close()
+    else:
+        best = max(g[3] for g in good)
+        core = [g[4] for g in good if g[3] >= best - 1]
     centre = np.mean(core, 0)
     centre /= max(np.linalg.norm(centre), 1e-6)
     good.sort(key=lambda g: -(float(g[4] @ centre) + 0.02 * g[3]))
     kept = good[:keep]
-    out = base / "dataset" / f"1_{name}"
-    out.mkdir(parents=True)
+    out.mkdir(parents=True, exist_ok=True)
     trigger = f"{name}_style"
-    for n, (path, img, tags, _, _) in enumerate(kept):
+    first = max((int(f.stem) for f in have), default=-1) + 1
+    for n, (path, img, tags, _, _) in enumerate(kept, first):
         img.save(out / f"{n:04d}.png")
         (out / f"{n:04d}.txt").write_text(", ".join([trigger] + tags))
     for path, *_ in good:
         path.unlink(missing_ok=True)
-    stats = {"kept": len(kept), "drawn": count, "matched": len(good), "dropped": why,
+    stats = {"kept": len(have) + len(kept), "added": len(kept), "drawn": count, "matched": len(good), "dropped": why,
              "trigger": trigger, "medium": p.medium}
     (base / "prep.json").write_text(json.dumps(stats))
     _sheet(sorted(out.glob("*.png")), base / "sheet.jpg")
@@ -142,7 +157,9 @@ def main(args: list[str]) -> None:
     ap.add_argument("persona")
     ap.add_argument("--count", type=int, default=160, help="pictures to draw")
     ap.add_argument("--keep", type=int, default=40, help="the most alike to keep")
+    ap.add_argument("--add", action="store_true", help="add to the pictures already there")
+    ap.add_argument("--nude", action="store_true", help="only nude pictures")
     a = ap.parse_args(args)
     if not a.persona.replace("_", "").isalnum():
         sys.exit("bootstrap: bad persona handle")
-    run(Config(), a.persona, a.count, a.keep)
+    run(Config(), a.persona, a.count, a.keep, add=a.add, nude=a.nude)
