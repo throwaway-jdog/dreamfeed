@@ -76,7 +76,8 @@ from .acts import (GIRL_GIRL_MIDDLE as YURI_MIDDLE, GIRL_GIRL_PEAK as YURI_PEAK,
 # each but kissing). Each act: its tags for the picture, and the tags the tagger must see for
 # the picture to show it.
 YURI_POSITIONS = {
-    "kissing": ("(french kiss:1.2), kissing, hug, embracing, nude, breasts press, cowboy shot", {"kiss", "french kiss"}),
+    "kissing": ("(french kiss:1.4), (kissing:1.3), face to face, lips together, eyes closed, (hug:1.1), nude, "
+                "breasts press, upper body", {"kiss", "french kiss"}),
     "fingering": ("(fingering:1.3), (lying on back:1.2), spread legs, hand between legs, nude, full body", {"fingering"}),
     "cunnilingus": ("(cunnilingus:1.3), oral, (lying on back:1.2), spread legs, head between thighs, nude, full body",
                     {"cunnilingus"}),
@@ -483,16 +484,18 @@ def _straight(persona, post: dict, seen_post, rng: random.Random) -> Kind:
         bad = (set() if furry_him else FURRY_PARTNER) | NO_PARTNER | WRONG_POSE.get(shot.act, set()) | \
             (CUT_OFF if shot.act not in (None, "blowjob") else set())
         missing = bool(NO_PARTNER & seen) or (shot.act is not None and a.general.get("solo focus", 0) >= SOLO_FOCUS)
+        on_model = -len(persona.off_model(seen, post["prompt"])) if persona else 0
         # He must be there before anything else counts: a fallback pick must never be a
         # penis through the wall.
-        return (not missing and not (bad & seen), act_ok, side, same)
+        return (not missing and not (bad & seen), act_ok, side, on_model, same)
 
     total = len(body) + len(hair) + len(fur) + 1
     return Kind(cast, avoid, regions, negative,
                 lambda shot: SHOT_CANDIDATES_SIDE if shot.act not in (None, "blowjob") else SHOT_CANDIDATES,
                 fits,
                 lambda f: f"{'' if f[0] else 'partner missing or cut off, '}{'' if f[1] else 'act not seen, '}"
-                          f"{'' if f[2] else 'not side-on, '}her and him {f[3]}/{total}",
+                          f"{'' if f[2] else 'not side-on, '}{'' if not f[3] else f'{-f[3]} must-show traits missing, '}"
+                          f"her and him {f[4]}/{total}",
                 # Halves sit them side by side: only after (an act needs them together).
                 halves=lambda shot: shot.act is None)
 
@@ -513,13 +516,15 @@ def _girl_girl(persona, post: dict, seen_post, rng: random.Random) -> Kind:
     def fits(shot: Shot, seen: set, a) -> tuple:
         both = bool(YURI_BOTH & seen) and not (YURI_NOT & seen) and not (CUT_OFF & seen)
         shows = shot.act is None or bool(YURI_POSITIONS[shot.act][1] & seen)
-        return (both, shows, len(traits & seen))
+        # Each persona's must_show traits (both, when the other is a persona too) before likeness.
+        on_model = -len(persona.off_model(seen, post["prompt"])) if persona else 0
+        return (both, shows, on_model, len(traits & seen))
 
     return Kind(yuri_cast(post["prompt"]), "", regions, negative,
-                lambda shot: SHOT_CANDIDATES_SIDE if shot.act not in (None, "kissing") else SHOT_CANDIDATES,
+                lambda shot: SHOT_CANDIDATES_SIDE if shot.act is not None else SHOT_CANDIDATES,
                 fits,
                 lambda f: f"{'' if f[0] else 'not just the two of them, '}{'' if f[1] else 'act not seen, '}"
-                          f"their looks {f[2]}/{len(traits)}",
+                          f"{'' if not f[2] else f'{-f[2]} must-show traits missing, '}their looks {f[3]}/{len(traits)}",
                 # Halves stand them side by side, upright: only where that's the pose.
                 halves=lambda shot: shot.act in (None, "kissing"))
 

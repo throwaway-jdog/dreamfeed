@@ -30,6 +30,10 @@ ACTS = (
         "two partners take turns sucking his penis, heads bobbing in a steady rhythm"),
     # Girl-girl acts, each with its own LoRA (Civitai: cunnilingus 1954774 and fingering 2007360
     # for Wan 2.2 I2V; scissoring 654646 was made for T2V, and is tried on I2V at less strength).
+    # French Kiss 2171333 (Wan 2.2 I2V; no trigger word, the description carries it).
+    Act("kissing", "", ("french kiss", "kiss"),
+        "they kiss deeply, lips pressed together and mouths moving, tongues touching, heads tilting",
+        lora="wan2.2-i2v-kissing", strength=0.8),
     Act("cunnilingus", "cunn1l1ngu5", ("cunnilingus",),
         "one girl licks between the other's thighs, her head moving, the other's hips rocking",
         lora="wan2.2-i2v-cunnilingus", strength=0.8),

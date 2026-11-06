@@ -168,6 +168,18 @@
    "civitai_model": 2198636,
    "what": "Upright sex (Wan2.2 14B I2V LOW v1.0)",
    "sha256": "0608b4aa1b4529de6de3e74a0cae3094c8f5699d958dbd664578a40bf329265f"
+  },
+  "wan2.2-i2v-kissing-high.safetensors": {
+   "civitai_version": 2445168,
+   "civitai_model": 2171333,
+   "what": "Wan2.2 - French Kiss (I2V/T2V) (High Noise 1.0v)",
+   "sha256": "bba38b08ea78b661d20cef533f9cf9e371556ec70d1846031ac7f6c6c1490dc3"
+  },
+  "wan2.2-i2v-kissing-low.safetensors": {
+   "civitai_version": 2445176,
+   "civitai_model": 2171333,
+   "what": "Wan2.2 - French Kiss (I2V/T2V) (Low Noise 1.0v)",
+   "sha256": "a80aa2d0f064d9b3882959318484d18c9dd390d7e4a88c725d1e972e5cd832a1"
   }
  }
 }
