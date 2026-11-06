@@ -267,6 +267,19 @@ textarea.in { resize: vertical; min-height: 72px; }
 .field small, .hint { color: var(--muted); font-size: 13px; font-weight: 400; }
 .field code { font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 6px; }
 .seg.two { grid-template-columns: 1fr 1fr; }
+.comic-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.comic-card { display: grid; gap: 6px; text-align: left; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; }
+.comic-card img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; border-radius: 10px; background: var(--bg); }
+.comic-card b { font-size: 14px; } .comic-card small { color: var(--muted); font-size: 12px; }
+.reader { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow-y: auto; }
+.reader-bar { position: sticky; top: 0; display: flex; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 10px max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px));
+  background: var(--surface); border-bottom: 1px solid var(--rule); }
+.reader-bar span { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-bar .secondary { width: auto; padding: 0 16px; }
+.reader-pages { display: grid; gap: 12px; padding: 12px; max-width: 900px; margin: 0 auto; }
+.reader-pages img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.reader-pages .del { color: var(--muted); }
 .range { display: grid; grid-template-columns: 1fr 5ch; gap: 10px; align-items: center; }
 .range input { width: 100%; accent-color: var(--accent); min-height: var(--tap); }
 .range output { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -308,6 +321,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <div class="views" role="group" aria-label="View">
       <button type="button" data-view="feed" aria-pressed="true">Feed</button>
       <button type="button" data-view="liked" aria-pressed="false">Liked</button>
+      <button type="button" data-view="comics" aria-pressed="false">Comics</button>
       <button type="button" data-view="dash" aria-pressed="false">Dashboard</button>
     </div>
     <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false">
@@ -430,6 +444,29 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </div>
   </section>
   <section class="profile" id="profile" hidden></section>
+  <section class="dash" id="comics" hidden aria-label="Comics">
+    <form class="panel" id="c-form" novalidate>
+      <h2>New comic</h2>
+      <p class="note">Two characters and a story. The comic is planned, written in their voices, drawn panel by panel and lettered. Each page has 4 panels and takes about 6 minutes.</p>
+      <label class="field"><span>First character <small>a persona with a trained style</small></span><select class="in" id="c-a"></select></label>
+      <label class="field"><span>Second character</span><select class="in" id="c-b"></select></label>
+      <label class="field"><span>Story <small>a few sentences: where they are, what happens, the mood</small></span>
+        <textarea class="in" id="c-story" rows="4" maxlength="600" placeholder="They come home soaked from the rain and decide to warm up together."></textarea></label>
+      <div class="field"><span>Pages</span>
+        <div class="seg" id="c-pages" role="group" aria-label="Pages">
+          <button type="button" data-n="1" aria-pressed="true">1</button><button type="button" data-n="2" aria-pressed="false">2</button>
+          <button type="button" data-n="3" aria-pressed="false">3</button><button type="button" data-n="4" aria-pressed="false">4</button>
+        </div></div>
+      <div class="ed-err" id="c-err" role="alert"></div>
+      <button class="primary" type="submit" id="c-go">Make the comic</button>
+    </form>
+    <div class="panel" id="c-making-panel" hidden><h2>Being made</h2><ul class="plist" id="c-making"></ul></div>
+    <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
+  </section>
+  <div class="reader" id="reader" hidden role="dialog" aria-label="Comic">
+    <div class="reader-bar"><span id="reader-title"></span><button type="button" class="secondary" id="reader-close">Close</button></div>
+    <div class="reader-pages" id="reader-pages"></div>
+  </div>
   <div class="timeline" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
   <div class="loading" id="loading" hidden>Loading…</div>
@@ -710,7 +747,7 @@ async function reset() {
 }
 
 async function loadMore() {
-  if (state.view === "dash" || state.loading || !state.more) return;
+  if (state.view === "dash" || state.view === "comics" || state.loading || !state.more) return;
   state.loading = true; $("loading").hidden = false;
   const gen = state.gen;
   try {
@@ -804,7 +841,7 @@ function renderPeople() {
     const n = document.createElement("span"); n.textContent = p.name;
     b.append(avatarEl("", p), n); b.onclick = () => openProfile(p.handle); row.append(b);
   }
-  row.hidden = state.view === "dash" || !state.people.length;
+  row.hidden = state.view === "dash" || state.view === "comics" || !state.people.length;
 }
 function openProfile(handle) {
   if (state.view !== "feed") { state.persona = handle; setView("feed"); return; }
@@ -1039,12 +1076,13 @@ function setView(v) {
   if (state.view === v) return;
   state.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
-  const dash = v === "dash";
-  $("dash").hidden = !dash; $("grid").hidden = dash; $("sentinel").hidden = dash;
+  const dash = v === "dash", com = v === "comics";
+  $("dash").hidden = !dash; $("comics").hidden = !com; $("grid").hidden = dash || com; $("sentinel").hidden = dash || com;
   if (v !== "feed") state.persona = "";
   renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
   if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); }
+  else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
   else reset();
 }
 $("menu-btn").onclick = e => {
@@ -1067,6 +1105,79 @@ async function refreshSummary() {
     }
   } catch {}
 }
+
+/* ---------- comics ---------- */
+const comicState = { personas: [], pages: 1, timer: null };
+async function loadComics() {
+  try {
+    const d = await api("api/personas/edit");
+    comicState.personas = (d.personas || []).filter(p => p.lora && p.lora.enabled !== false);
+  } catch { comicState.personas = []; }
+  const a = $("c-a"), keep = a.value;
+  a.replaceChildren(...comicState.personas.map(p => { const o = el("option", null, `${p.name} (@${p.handle})`); o.value = p.handle; return o; }));
+  if (comicState.personas.some(p => p.handle === keep)) a.value = keep;
+  renderSecond(); refreshComics();
+}
+function renderSecond() {
+  const a = comicState.personas.find(p => p.handle === $("c-a").value), b = $("c-b"), keep = b.value;
+  const others = comicState.personas.filter(p => a && p.handle !== a.handle && p.medium === a.medium && !p.strict && !a.strict);
+  const partner = el("option", null, "Her partner (a man)"); partner.value = "partner";
+  b.replaceChildren(...others.map(p => { const o = el("option", null, `${p.name} (@${p.handle})`); o.value = p.handle; return o; }), partner);
+  if ([...b.options].some(o => o.value === keep)) b.value = keep;
+}
+$("c-a").onchange = renderSecond;
+document.querySelectorAll("#c-pages button").forEach(btn => btn.onclick = () => {
+  comicState.pages = +btn.dataset.n;
+  document.querySelectorAll("#c-pages button").forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+});
+$("c-form").onsubmit = async e => {
+  e.preventDefault(); $("c-err").textContent = ""; $("c-go").disabled = true;
+  try {
+    await api("api/comics/create", { cast: [$("c-a").value, $("c-b").value], story: $("c-story").value.trim(), pages: comicState.pages });
+    $("c-story").value = ""; toast("The comic is being made. It shows up here when it's done."); refreshComics();
+  } catch (err) { $("c-err").textContent = err.message; }
+  $("c-go").disabled = false;
+};
+async function refreshComics() {
+  clearTimeout(comicState.timer);
+  let d; try { d = await api("api/comics"); } catch { return; }
+  const making = $("c-making"); making.replaceChildren();
+  for (const m of d.making) {
+    const li = el("li"); li.style.padding = "10px 0";
+    const pr = m.progress ? ` · ${m.progress.phase}${m.progress.total > 1 ? ` ${m.progress.done}/${m.progress.total}` : ""}` : "";
+    li.append(el("b", null, `${m.cast[0]} + ${m.cast[1] === "partner" ? "her partner" : m.cast[1]}`),
+              el("div", "hint", `${m.pages} page${m.pages > 1 ? "s" : ""} · ${m.status === "running" ? "making" : "waiting"}${pr}`),
+              el("div", "hint", m.story));
+    making.append(li);
+  }
+  $("c-making-panel").hidden = !d.making.length;
+  const list = $("c-list"); list.replaceChildren();
+  for (const c of d.comics) {
+    const card = el("button", "comic-card"); card.type = "button";
+    const img = el("img"); img.loading = "lazy"; img.alt = ""; img.src = `comic/${c.id}/1`;
+    card.append(img, el("b", null, c.title || "Untitled"),
+                el("small", null, `${c.cast.map(h => h === "partner" ? "her partner" : "@" + h).join(" + ")} · ${c.pages} page${c.pages > 1 ? "s" : ""}`));
+    card.onclick = () => openComic(c);
+    list.append(card);
+  }
+  $("c-none").hidden = d.comics.length > 0;
+  if (state.view === "comics" && d.making.length) comicState.timer = setTimeout(refreshComics, 10000);
+}
+function openComic(c) {
+  $("reader-title").textContent = c.title || "Untitled";
+  const pages = $("reader-pages"); pages.replaceChildren();
+  for (let n = 1; n <= c.pages; n++) { const img = el("img"); img.alt = `Page ${n}`; img.src = `comic/${c.id}/${n}`; pages.append(img); }
+  const del = el("button", "secondary del", "Delete this comic"); del.type = "button";
+  del.onclick = async () => {
+    if (!confirm("Delete this comic?")) return;
+    try { await api("api/comics/delete", { id: c.id }); closeComic(); refreshComics(); } catch (err) { toast(err.message); }
+  };
+  pages.append(del);
+  $("reader").hidden = false; $("reader").scrollTop = 0;
+}
+function closeComic() { $("reader").hidden = true; }
+$("reader-close").onclick = closeComic;
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("reader").hidden) closeComic(); });
 
 /* ---------- dashboard ---------- */
 const SEC_PER_IMAGE = 10.5;
@@ -1142,6 +1253,7 @@ function renderLive(d) {
       : j.params.kind === "animate"
       ? (j.params.ids ? "animate 1 image" : `animate the best ${j.params.count}`)
       : j.params.kind === "scene" ? "make a scene"
+      : j.params.kind === "comic" ? `make a ${j.params.pages}-page comic`
       : `${j.params.images} images, keep ${j.params.keep}${j.params.personas ? " · " + j.params.personas.map(h => personaOf(h)?.name || h).join(", ") : ""}`;
     head.append(el("span", null, `Waiting: ${what}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";
@@ -1560,7 +1672,8 @@ loadPeople().then(() => { for (const it of state.items) if (it.persona) fillAvat
 let startView = "feed";
 try { startView = localStorage.getItem("dreamfeed-view") || "feed"; } catch {}
 if (location.hash === "#dashboard") startView = "dash";
-if (startView === "dash" || startView === "liked") setView(startView); else reset();
+if (location.hash === "#comics") startView = "comics";
+if (["dash", "liked", "comics"].includes(startView)) setView(startView); else reset();
 </script>
 </body>
 </html>

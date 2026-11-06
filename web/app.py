@@ -274,6 +274,99 @@ def queue_generation(req: dict) -> dict:
 MAX_PROMPT = 500
 
 
+COMIC_STORY = 600
+COMIC_PAGES = 4
+
+
+def _comic_meta(file: str) -> dict:
+    return read_json((GENERATED / file).parent / "comic.json")
+
+
+def comics() -> dict:
+    """Finished comics (newest first), and the ones being made."""
+    out = {"comics": [], "making": []}
+    with db() as conn:
+        for r in conn.execute("SELECT g.id, g.caption, g.persona, g.file, g.created_at, p.name FROM generations g"
+                              " LEFT JOIN personas p ON p.handle = g.persona"
+                              " WHERE g.kind = 'comic' AND g.status = 'comic' ORDER BY g.id DESC LIMIT 100"):
+            meta = _comic_meta(r["file"])
+            out["comics"].append({"id": r["id"], "title": r["caption"] or "", "persona": r["persona"],
+                                  "name": r["name"] or r["persona"], "pages": len(meta.get("pages") or [1]),
+                                  "cast": meta.get("cast") or [], "story": meta.get("story", ""),
+                                  "created": r["created_at"]})
+        for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
+                              " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic\"%'"):
+            params = json.loads(r["params"])
+            out["making"].append({"job": r["id"], "status": r["status"], "cast": params["cast"],
+                                  "story": params["story"], "pages": params["pages"],
+                                  "progress": json.loads(r["progress"]) if r["progress"] else None})
+    return out
+
+
+def comic_page(gid: int, n: int) -> Path | None:
+    with db() as conn:
+        row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
+    if not row:
+        return None
+    pages = _comic_meta(row["file"]).get("pages") or [row["file"]]
+    if not 1 <= n <= len(pages):
+        return None
+    path = (GENERATED / pages[n - 1]).resolve()
+    return path if path.is_relative_to(GENERATED.resolve()) and path.is_file() else None
+
+
+def queue_comic(req: dict) -> dict:
+    """{"cast": [persona, persona | "partner"], "story", "pages"}: checked here as the worker checks it."""
+    cast = req.get("cast")
+    if not isinstance(cast, list) or len(cast) != 2:
+        raise ValueError("pick two characters")
+    every = {p.handle: p for p in people.parse(read_personas())}
+    a = every.get(str(cast[0]))
+    if not a or not a.lora:
+        raise ValueError("the first character must be a persona with a trained style")
+    if cast[1] != "partner":
+        b = every.get(str(cast[1]))
+        if not b or b.handle == a.handle:
+            raise ValueError("pick a second persona, or her partner")
+        if b.medium != a.medium:
+            raise ValueError(f"@{a.handle} is {a.medium} and @{b.handle} is {b.medium}")
+        if a.strict or b.strict:
+            raise ValueError("personas using the strict checks can't be in a comic together")
+    story = " ".join(str(req.get("story") or "").split())
+    if not story:
+        raise ValueError("write a few words of story")
+    if len(story) > COMIC_STORY:
+        raise ValueError(f"keep the story under {COMIC_STORY} characters")
+    bad = safety.story_blocked(story)
+    if bad:
+        raise ValueError(f"the story can't include: {', '.join(bad)}")
+    try:
+        pages = int(req.get("pages", 1))
+    except (TypeError, ValueError):
+        raise ValueError("bad page count")
+    if not 1 <= pages <= COMIC_PAGES:
+        raise ValueError(f"1 to {COMIC_PAGES} pages")
+    with db() as conn:
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
+            raise ValueError("three requests are already waiting; let one finish first")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
+            {"kind": "comic", "cast": [a.handle, str(cast[1])], "story": story, "pages": pages}),)).lastrowid
+    return {"job": jid}
+
+
+def delete_comic(req: dict) -> dict:
+    gid = int(req.get("id", 0))
+    with db() as conn:
+        row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
+        if not row:
+            raise LookupError("no such comic")
+        folder = (GENERATED / row["file"]).parent.resolve()
+        if folder.is_relative_to(GENERATED.resolve()) and folder != GENERATED.resolve():
+            shutil.rmtree(folder, ignore_errors=True)
+        conn.execute("UPDATE generations SET status = 'deleted' WHERE id = ?", (gid,))
+    return {"ok": True}
+
+
 def scene_acts(req: dict) -> dict:
     """The acts a scene from this post can be made of, for the picker."""
     with db() as conn:
@@ -860,6 +953,15 @@ class Handler(BaseHTTPRequestHandler):
             if not file:
                 return self.send(404, {"error": "no profile picture yet"})
             return self.send_file(file)
+        if path == "/api/comics":
+            return self.send(200, comics())
+        if path.startswith("/comic/"):
+            parts = path.split("/")
+            if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
+                file = comic_page(int(parts[2]), int(parts[3]))
+                if file:
+                    return self.send_file(file)
+            return self.send(404, {"error": "page not found"})
         if path == "/api/summary":
             return self.send(200, summary())
         if path == "/api/dashboard":
@@ -878,6 +980,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
+                   "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
                    "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,

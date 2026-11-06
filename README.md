@@ -271,6 +271,19 @@ dreamfeed/
   logs/
 ```
 
+## Comics
+
+The **Comics** tab makes comics about two characters: two personas (each with a trained
+character style), or a persona and her partner. Give it a story in a few sentences and a page
+count (1 to 4, 4 panels a page). The worker (`worker/dreamfeed/comic.py`, also
+`python -m dreamfeed comic A B --story "..."`) draws a clean picture of the two of them first,
+plans the panels (build-up, then acts, cuddling at the end), has the text model write each page's
+lines in their voices from the story, draws all panels like a scene's shots (one cast, one room,
+the same checks), and letters them: speech bubbles are drawn by the code where nobody is, with
+the tail toward the speaker (the image model can't write). About 6 minutes a page. Stories and
+lines are checked like captions, and must be consensual (`safety.story_blocked`). Comics stay
+until deleted; they aren't in the feed and don't expire.
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,

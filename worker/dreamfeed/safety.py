@@ -8,7 +8,8 @@ Where they apply:
      file can switch on but never off; a strict persona can't be another one's {friend}.
    - persona builder (builder.py): descriptions with youth words are refused (YOUTH_TAGS,
      CAPTION_NEVER); blocked hashtags are dropped.
-   - dashboard animation requests (web/app.py): request_blocked.
+   - dashboard animation requests (web/app.py): request_blocked; comic stories (and every
+     line a comic's script writes) also story_blocked: nothing young and nothing non-consensual.
 2. Every prompt sent to the image or video model (comfy.py): prompts() refuses blocked tags
    and adds the adult terms (ADULT_POSITIVE, YOUTH_NEGATIVE, and STRICT_* for strict
    personas); each region of a two-character picture is checked too.
@@ -179,6 +180,18 @@ REQUEST_NEVER = re.compile(r"\b(child|children|kid|kids|toddler|baby|babies|loli
 
 def request_blocked(text: str) -> list[str]:
     return sorted({m.group(0).lower() for m in REQUEST_NEVER.finditer(text)} | set(caption_blocked(text)))
+
+
+# Stories are consensual, always: a comic's premise or line with any of these is refused.
+STORY_NEVER = re.compile(
+    r"\b(rap(e|ed|es|ing|ist)|non-?con\w*|noncon\w*|forc(e|ed|es|ing)\w*|against (her|his|their) will|"
+    r"unconscious|passed out|asleep|sleeping|drugg?ed|drunk|roofie\w*|blackmail\w*|coerc\w*|"
+    r"struggl\w*|resist\w*|scream(s|ed|ing)? (no|stop)|says? no|said no|without (her|his|their) consent|"
+    r"captive|kidnap\w*|slave\w*|incest|sister|brother|daughter|son|mother|father|mom|dad|step-?\w+)\b", re.I)
+
+
+def story_blocked(text: str) -> list[str]:
+    return sorted(set(request_blocked(text)) | {m.group(0).lower() for m in STORY_NEVER.finditer(text)})
 
 
 def feral_hits(scores: dict[str, float]) -> list[str]:

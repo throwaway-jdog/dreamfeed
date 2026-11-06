@@ -311,6 +311,7 @@ class Shot:
     climax: str = ""   # motion.CLIMAXES name: the clip adds that LoRA to the position's, and plays
                        # once without looping (a climax builds; it doesn't reset)
     yuri: bool = False   # a girl-girl shot: act is a YURI_POSITIONS name
+    avoid: str = ""      # kept out of this shot's picture as well (e.g. a comic's dressed panels)
 
 
 def _frames(path: Path) -> np.ndarray:
@@ -575,7 +576,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     asks: list[tuple[str, str]] = []   # each shot's prompt and negative, for the blending pass
     try:
         for i, shot in enumerate(shots):
-            neg = ", ".join(n for n in (negative, kind.avoid, kind.negative(shot)) if n)
+            neg = ", ".join(n for n in (negative, kind.avoid, kind.negative(shot), shot.avoid) if n)
             asks.append((f"{cast}, {shot.tags}", neg))
             cands.append([comfy.txt2img(post["checkpoint"], post["medium"], asks[-1][0],
                                         rng.randrange(2 ** 32), subdir, f"{name}-shot{i}-{c}",

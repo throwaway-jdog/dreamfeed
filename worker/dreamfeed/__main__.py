@@ -16,6 +16,9 @@ python -m dreamfeed video-prep NAME [--limit N] [--no-download]
 python -m dreamfeed scene-preview POST_ID [--seed N]   plan a scene's shots and draw them (no video)
 python -m dreamfeed character-prep NAME --from STYLE --look TAGS [--traits TAGS] [--train STEPS]
                               A character LoRA from a style's pictures of one character.
+python -m dreamfeed comic HANDLE (HANDLE|partner) --story TEXT [--pages N]
+                              A comic about two characters: script, panels, speech bubbles
+                              (the dashboard's Comics page queues the same).
 python -m dreamfeed bootstrap PERSONA [--count N] [--keep N]
                               Pictures of a persona's own character (no art yet) to train a
                               character LoRA on.
@@ -88,6 +91,9 @@ def main() -> None:
     elif cmd == "speech":
         from .speech import main as speech
         speech(rest)
+    elif cmd == "comic":
+        from .comic import main as comic
+        comic(rest)
     elif cmd == "bootstrap":
         from .bootstrap import main as bootstrap
         bootstrap(rest)
