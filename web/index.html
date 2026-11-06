@@ -280,6 +280,23 @@ textarea.in { resize: vertical; min-height: 72px; }
 .reader-pages { display: grid; gap: 12px; padding: 12px; max-width: 900px; margin: 0 auto; }
 .reader-pages img { width: 100%; height: auto; display: block; border-radius: 6px; }
 .reader-pages .del { color: var(--muted); }
+.mk-tools { display: grid; gap: 10px; padding: 12px 16px; max-width: 900px; margin: 0 auto; }
+.mk-who { display: flex; flex-wrap: wrap; gap: 8px; }
+.mk-who button { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
+.mk-who button[aria-checked="true"] { border-color: var(--fg); box-shadow: 0 0 0 1px var(--fg); }
+.mk-who i { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+.mk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mk-row .in { flex: 1 1 160px; width: auto; }
+.mk-row .secondary { width: auto; padding: 0 14px; }
+.mk-brush { flex: 1 1 160px; grid-template-columns: auto 1fr; }
+.mk-page { display: grid; gap: 10px; padding: 0 12px 24px; max-width: 900px; margin: 0 auto; }
+.mk-nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mk-nav .secondary { width: auto; padding: 0 14px; } .mk-nav span { font-size: 14px; text-align: center; }
+.mk-canvas { position: relative; }
+.mk-canvas img { width: 100%; height: auto; display: block; border-radius: 6px; user-select: none; -webkit-user-select: none; }
+.mk-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.comic-card .badge { color: var(--accent); font-weight: 700; font-size: 12px; }
 .range { display: grid; grid-template-columns: 1fr 5ch; gap: 10px; align-items: center; }
 .range input { width: 100%; accent-color: var(--accent); min-height: var(--tap); }
 .range output { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -472,12 +489,35 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
         </div></div>
       <label class="field"><span>Cover page <small>optional: its page number, if the most colourful page isn't the cover</small></span>
         <input class="in" id="ci-cover" type="number" min="1" max="200" inputmode="numeric"></label>
+      <label class="check"><input type="checkbox" id="ci-mark" checked><span>I'll mark the characters <small class="hint">Once the pages are in, you scribble over each character on every page and say who she is. Each one then gets her own colours, even where they touch.</small></span></label>
       <div class="ed-err" id="ci-err" role="alert"></div>
       <button class="primary" type="submit" id="ci-go">Import and colour</button>
     </form>
     <div class="panel" id="c-making-panel" hidden><h2>Being made</h2><ul class="plist" id="c-making"></ul></div>
     <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
   </section>
+  <div class="reader marker" id="marker" hidden role="dialog" aria-label="Mark the characters">
+    <div class="reader-bar"><span id="mk-title"></span><button type="button" class="secondary" id="mk-close">Save and close</button></div>
+    <div class="mk-tools">
+      <p class="hint" id="mk-help">Scribble over each character, the cover first: rough is fine, a mark spreads up to the lines around it. Pages you leave unmarked are coloured automatically.</p>
+      <div class="mk-who" id="mk-who" role="radiogroup" aria-label="Who you're marking"></div>
+      <div class="mk-row">
+        <input class="in" id="mk-name" maxlength="30" aria-label="Name of the selected character">
+        <button type="button" class="secondary" id="mk-add">Add a character</button>
+      </div>
+      <div class="mk-row">
+        <label class="range mk-brush"><span class="hint">Brush</span><input type="range" id="mk-brush" min="4" max="60" value="18"></label>
+        <button type="button" class="secondary" id="mk-undo">Undo</button>
+        <button type="button" class="secondary" id="mk-clear">Clear page</button>
+      </div>
+    </div>
+    <div class="mk-page">
+      <div class="mk-nav"><button type="button" class="secondary" id="mk-prev">Previous</button><span id="mk-where"></span><button type="button" class="secondary" id="mk-next">Next</button></div>
+      <div class="mk-canvas"><img id="mk-img" alt=""><canvas id="mk-canvas"></canvas></div>
+      <div class="ed-err" id="mk-err" role="alert"></div>
+      <button class="primary" type="button" id="mk-go">Colour it</button>
+    </div>
+  </div>
   <div class="reader" id="reader" hidden role="dialog" aria-label="Comic">
     <div class="reader-bar"><span id="reader-title"></span><button type="button" class="secondary" id="reader-original" hidden aria-pressed="false">Show the original</button><button type="button" class="secondary" id="reader-close">Close</button></div>
     <div class="reader-pages" id="reader-pages"></div>
@@ -1161,7 +1201,7 @@ $("ci-form").onsubmit = async e => {
   e.preventDefault(); $("ci-err").textContent = ""; $("ci-go").disabled = true;
   try {
     await api("api/comics/import", { url: $("ci-url").value.trim(), title: $("ci-title").value.trim(),
-                                     medium: comicState.medium, cover: $("ci-cover").value });
+                                     medium: comicState.medium, cover: $("ci-cover").value, mark: $("ci-mark").checked });
     $("ci-url").value = $("ci-title").value = $("ci-cover").value = "";
     toast("The comic is being imported. It shows up here when it's coloured."); refreshComics();
   } catch (err) { $("ci-err").textContent = err.message; }
@@ -1188,7 +1228,9 @@ async function refreshComics() {
     const img = el("img"); img.loading = "lazy"; img.alt = ""; img.src = `comic/${c.id}/1`;
     card.append(img, el("b", null, c.title || "Untitled"),
                 el("small", null, `${c.imported ? "imported" : c.cast.map(h => h === "partner" ? "her partner" : "@" + h).join(" + ")} · ${c.pages} page${c.pages > 1 ? "s" : ""}`));
-    card.onclick = () => openComic(c);
+    if (c.marking) card.append(el("span", "badge", "Mark the characters"));
+    if (c.colouring) card.append(el("span", "badge", "Being coloured from your marks"));
+    card.onclick = () => c.marking ? openMarker(c) : openComic(c);
     list.append(card);
   }
   $("c-none").hidden = d.comics.length > 0;
@@ -1214,6 +1256,105 @@ function openComic(c) {
   $("reader").hidden = false; $("reader").scrollTop = 0;
 }
 function closeComic() { $("reader").hidden = true; }
+/* ---------- marking the characters of an imported comic ---------- */
+const MARK_COLOURS = ["#ff7a00", "#3d7bff", "#2fbf55", "#e6c200", "#c03ad6", "#00b5b5"];
+const mk = { id: null, info: null, page: 1, who: 1, characters: [], marks: {}, drawing: null, dirty: false };
+async function openMarker(c) {
+  let info;
+  try { info = await api(`api/comics/marks/${c.id}`); } catch (e) { toast(e.message); return; }
+  Object.assign(mk, { id: c.id, info, page: info.cover, who: 1, dirty: false,
+    characters: info.characters.length ? info.characters : ["Character 1", "Character 2"], marks: info.marks || {} });
+  $("mk-title").textContent = info.title || "Mark the characters"; $("mk-err").textContent = "";
+  $("marker").hidden = false; renderWho(); showMarkPage();
+}
+function renderWho() {
+  const box = $("mk-who"); box.replaceChildren();
+  mk.characters.forEach((name, i) => {
+    const b = el("button"); b.type = "button"; b.setAttribute("role", "radio"); b.setAttribute("aria-checked", String(mk.who === i + 1));
+    const dot = el("i"); dot.style.background = MARK_COLOURS[i]; b.append(dot, el("span", null, name));
+    b.onclick = () => { mk.who = i + 1; renderWho(); };
+    box.append(b);
+  });
+  $("mk-name").value = mk.characters[mk.who - 1] || "";
+  $("mk-add").disabled = mk.characters.length >= MARK_COLOURS.length;
+}
+$("mk-name").oninput = () => { mk.characters[mk.who - 1] = $("mk-name").value; mk.dirty = true;
+  const span = $("mk-who").children[mk.who - 1]?.querySelector("span"); if (span) span.textContent = $("mk-name").value; };
+$("mk-add").onclick = () => { if (mk.characters.length >= MARK_COLOURS.length) return;
+  mk.characters.push(`Character ${mk.characters.length + 1}`); mk.who = mk.characters.length; mk.dirty = true; renderWho(); $("mk-name").select(); };
+function markOrder() {   // the cover first, then the pages in order
+  const n = mk.info.pages, out = [mk.info.cover];
+  for (let p = 1; p <= n; p++) if (p !== mk.info.cover) out.push(p);
+  return out;
+}
+function showMarkPage() {
+  const order = markOrder(), at = order.indexOf(mk.page), marked = order.filter(p => (mk.marks[p] || []).length).length;
+  const kind = mk.page === mk.info.cover ? "the cover" : mk.info.colour[mk.page - 1] ? "a colour page" : "black and white";
+  $("mk-where").textContent = `Page ${mk.page} of ${mk.info.pages} · ${kind} · ${marked} marked`;
+  $("mk-prev").disabled = at <= 0; $("mk-next").disabled = at >= order.length - 1;
+  const img = $("mk-img"); img.onload = drawMarks; img.src = `comic/${mk.id}/${mk.page}`;
+}
+function canvasFit() {
+  const c = $("mk-canvas"), r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(r.width * d) || c.height !== Math.round(r.height * d)) { c.width = Math.round(r.width * d); c.height = Math.round(r.height * d); }
+  return c;
+}
+function drawStroke(ctx, st, w, h) {
+  ctx.strokeStyle = ctx.fillStyle = MARK_COLOURS[st.who - 1]; ctx.lineWidth = st.width * w;
+  ctx.lineCap = ctx.lineJoin = "round"; ctx.beginPath();
+  st.points.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h));
+  if (st.points.length === 1) { ctx.arc(st.points[0][0] * w, st.points[0][1] * h, st.width * w / 2, 0, 7); ctx.fill(); } else ctx.stroke();
+}
+function drawMarks() {
+  const c = canvasFit(), ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height); ctx.globalAlpha = 0.55;
+  for (const st of (mk.marks[mk.page] || []).concat(mk.drawing ? [mk.drawing] : [])) drawStroke(ctx, st, c.width, c.height);
+}
+window.addEventListener("resize", () => { if (!$("marker").hidden) drawMarks(); });
+function where(e) { const r = $("mk-canvas").getBoundingClientRect();
+  return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; }
+$("mk-canvas").addEventListener("pointerdown", e => {
+  if (e.button > 0) return;
+  e.preventDefault(); $("mk-canvas").setPointerCapture(e.pointerId);
+  const r = $("mk-canvas").getBoundingClientRect();
+  mk.drawing = { who: mk.who, width: +$("mk-brush").value / r.width, points: [where(e)] }; drawMarks();
+});
+$("mk-canvas").addEventListener("pointermove", e => {
+  if (!mk.drawing) return;
+  const p = where(e), last = mk.drawing.points[mk.drawing.points.length - 1], r = $("mk-canvas").getBoundingClientRect();
+  if (Math.hypot((p[0] - last[0]) * r.width, (p[1] - last[1]) * r.height) < 3) return;   // fewer points, same line
+  mk.drawing.points.push(p); drawMarks();
+});
+function endStroke() {
+  if (!mk.drawing) return;
+  (mk.marks[mk.page] ||= []).push(mk.drawing); mk.drawing = null; mk.dirty = true; drawMarks(); showWhere();
+}
+function showWhere() { const order = markOrder(), marked = order.filter(p => (mk.marks[p] || []).length).length;
+  $("mk-where").textContent = $("mk-where").textContent.replace(/\d+ marked$/, `${marked} marked`); }
+$("mk-canvas").addEventListener("pointerup", endStroke);
+$("mk-canvas").addEventListener("pointercancel", endStroke);
+$("mk-undo").onclick = () => { (mk.marks[mk.page] || []).pop(); mk.dirty = true; drawMarks(); showWhere(); };
+$("mk-clear").onclick = () => { if (!(mk.marks[mk.page] || []).length || !confirm("Clear this page's marks?")) return;
+  mk.marks[mk.page] = []; mk.dirty = true; drawMarks(); showWhere(); };
+async function saveMarks(go) {
+  if (!mk.dirty && !go) return true;
+  try {
+    const r = await api("api/comics/marks", { id: mk.id, characters: mk.characters, pages: mk.marks, go });
+    mk.dirty = false; return r;
+  } catch (e) { $("mk-err").textContent = e.message; return false; }
+}
+function stepMark(d) { const order = markOrder(), at = order.indexOf(mk.page) + d;
+  if (at < 0 || at >= order.length) return; mk.page = order[at]; saveMarks(false); showMarkPage(); $("marker").scrollTop = 0; }
+$("mk-prev").onclick = () => stepMark(-1);
+$("mk-next").onclick = () => stepMark(1);
+$("mk-close").onclick = async () => { if (await saveMarks(false)) { $("marker").hidden = true; refreshComics(); } };
+$("mk-go").onclick = async () => {
+  const unmarked = markOrder().filter(p => !(mk.marks[p] || []).length).length;
+  if (unmarked && !confirm(`${unmarked} page${unmarked > 1 ? "s aren't" : " isn't"} marked; ${unmarked > 1 ? "they're" : "it's"} coloured automatically. Colour it now?`)) return;
+  $("mk-go").disabled = true; $("mk-err").textContent = "";
+  if (await saveMarks(true)) { $("marker").hidden = true; toast("Colouring from your marks. It shows up here when it's done."); refreshComics(); }
+  $("mk-go").disabled = false;
+};
 $("reader-close").onclick = closeComic;
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("reader").hidden) closeComic(); });
 
@@ -1293,6 +1434,7 @@ function renderLive(d) {
       : j.params.kind === "scene" ? "make a scene"
       : j.params.kind === "comic" ? `make a ${j.params.pages}-page comic`
       : j.params.kind === "comic_import" ? "import and colour a comic"
+      : j.params.kind === "comic_colour" ? "colour a comic from your marks"
       : `${j.params.images} images, keep ${j.params.keep}${j.params.personas ? " · " + j.params.personas.map(h => personaOf(h)?.name || h).join(", ") : ""}`;
     head.append(el("span", null, `Waiting: ${what}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";

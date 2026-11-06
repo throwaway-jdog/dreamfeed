@@ -441,6 +441,9 @@ def run_job(cfg: Config, job_id: int) -> None:
     if params.get("kind") == "comic_import":
         from . import colorize
         return colorize.run_job(cfg, conn, job_id, params)
+    if params.get("kind") == "comic_colour":
+        from . import colorize
+        return colorize.run_colour_job(cfg, conn, job_id, params)
     night = f"manual-{dt.datetime.now():%Y%m%d-%H%M%S}"
     with conn:
         conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))

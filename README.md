@@ -299,6 +299,16 @@ the original. About 30 seconds a page. Tuned on a page of ours turned grey: abou
 coloured parts get the right colour (75-80% when hard-inked, with no greys).
 `python -m dreamfeed colorize --cover C.png PAGE.png... --out DIR` tries it on files.
 
+**Marking the characters** (the import form's "I'll mark the characters", on by default): the
+import stops once the pages are in and checked, and the comic waits on the Comics page. Its
+marking screen goes page by page, the cover first: name the characters, pick one, scribble over
+her (rough is fine: a mark spreads over the page up to the ink lines around it), and so on for
+each page; marks are saved as you go (`marks.json` beside `comic.json`). **Colour it** queues the
+colouring (a `comic_colour` job): a patch marked as one character only takes colours from that
+character on the cover, so colours don't jump from one to the other where they touch (on a
+tangled test page, 77% right became 84-88%). Unmarked pages are coloured automatically; the
+cover must be marked if any page is.
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,
