@@ -42,7 +42,7 @@ MIN_PICTURES = 20
 REPEATS = 8          # fewer pictures than a style, each seen more often
 TAG_MIN = 0.35
 CLOSEUP_REPEATS = 4   # half a whole picture's: close-ups of her shouldn't outweigh her
-CLOSEUP_MIN_PX = 384
+CLOSEUP_MIN_PX = 320   # generated pictures are 832 wide: a 0.45 square is 374
 CLOSEUP_SURE = 0.5    # the tagger's score for the part in the best square
 # Each part: the tag that finds it, the square's side as shares of the picture's shorter side,
 # tags that mean the square shows someone else too, and whether only solo pictures count
@@ -199,7 +199,10 @@ def prepare(cfg: Config, name: str, styles: list[str], look: list[str], traits: 
     return stats
 
 
-DUPLICATE = 0.95   # CLIP likeness of two copies of one picture (resized, recompressed)
+# CLIP likeness of two copies of one picture (resized, recompressed: 0.99 and up between X and
+# e621). Not lower: different pictures of one character on plain backgrounds (a bootstrapped
+# set) reach 0.98.
+DUPLICATE = 0.985
 
 
 def _unique(picks: list[Path], embs: list) -> tuple[list[Path], list]:
