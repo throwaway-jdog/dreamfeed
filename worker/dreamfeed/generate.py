@@ -257,9 +257,9 @@ def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> lis
                 continue
             mark = _watermark(a)
             p = cast.get(handle)
-            if not mark and p and p.must_show:
+            if not mark and p:
                 missing = p.off_model({t for t, s in a.general.items() if s >= TAG_SEEN}, prompt or "")
-                mark = ("off-model", "no " + ", ".join(missing)) if missing else None
+                mark = ("off-model", ", ".join(missing)) if missing else None
             if mark:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{mark[0]}: {mark[1]}")

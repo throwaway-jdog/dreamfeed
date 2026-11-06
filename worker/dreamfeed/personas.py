@@ -80,6 +80,7 @@ class Persona:
     girlfriends: list[str] = field(default_factory=list)
     friends: list[str] = field(default_factory=list)   # other personas' handles, for {friend}
     must_show: list[set] = field(default_factory=list)  # traits a post must show: any tag of each set
+    must_not_show: list[str] = field(default_factory=list)  # tags that make a post off-model
     cast: dict = field(default_factory=dict, repr=False)   # every persona by handle (parse sets it)
     settings: list[str] = field(default_factory=list)
     characters: list[str] = field(default_factory=list)
@@ -124,12 +125,17 @@ class Persona:
         return ", ".join(t for t in (f.trigger, look) if t)
 
     def off_model(self, seen: set[str], prompt: str) -> list[str]:
-        """Their must_show traits (and a friend's, when one is in the post) the tagger didn't see."""
-        groups = list(self.must_show)
+        """What makes a picture of them off-model: must_show traits (theirs, and a friend's when
+        one is in the post) the tagger didn't see, and must_not_show tags it did (Yumi's "blue
+        fur": her hair can stay red while her fur goes blue). Not their whole negative prompt:
+        the tagger sees "medium breasts" on most of Yumi's good posts."""
+        groups, never = list(self.must_show), set(self.must_not_show)
         friend = self.friend_in(prompt)
         if friend:
             groups += friend.must_show
-        return [" or ".join(sorted(g)) for g in groups if not g & seen]
+            never |= set(friend.must_not_show)
+        return ["no " + " or ".join(sorted(g)) for g in groups if not g & seen] + \
+            sorted(f"has {t}" for t in never & seen)
 
     def friend_in(self, prompt: str):
         """The friend (a Persona) this prompt shows, or None."""
@@ -247,7 +253,8 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
         look=str(p.get("look", "")), avatar=str(p.get("avatar", "portrait, upper body, looking at viewer, smile")),
         posts=posts, outfits=list(p.get("outfits", [])), partners=list(p.get("partners", [])),
         girlfriends=list(p.get("girlfriends", [])), friends=[str(f) for f in p.get("friends", [])],
-        must_show=[{str(t).strip() for t in g if str(t).strip()} for g in p.get("must_show", []) if g], settings=list(p.get("settings", [])),
+        must_show=[{str(t).strip() for t in g if str(t).strip()} for g in p.get("must_show", []) if g],
+        must_not_show=[str(t).strip() for t in p.get("must_not_show", []) if str(t).strip()], settings=list(p.get("settings", [])),
         characters=list(p.get("characters", [])), emoji=list(p.get("emoji", [])),
         hashtags=list(p.get("hashtags", [])), video_share=float(p.get("video_share", 0.2)),
         weight=float(p.get("weight", 1.0)), negative=str(p.get("negative", "")),

@@ -62,7 +62,9 @@ keeps the previous version as `data/personas.json.bak`. The format, from
   the persona writes (below).
 - `must_show`: traits every post must show, each a list of tags any of which counts (e.g.
   `[["red hair"], ["hairclip", "hair ornament"]]`); a post the tagger doesn't see one in is
-  drawn again, like one with a watermark (up to twice). With a `{friend}`, theirs count too.
+  drawn again, like one with a watermark (up to twice). `must_not_show`: tags that make a post
+  off-model the same way (e.g. `["blue fur"]`). With a `{friend}`, theirs count too. Scenes
+  pick their shots by these as well.
 - `voice`: the name of a trained style; the persona's captions then sound like that
   artist's own posts instead of its example captions.
 

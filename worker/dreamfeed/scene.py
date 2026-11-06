@@ -503,7 +503,11 @@ def _straight(persona, post: dict, seen_post, rng: random.Random) -> Kind:
 def _girl_girl(persona, post: dict, seen_post, rng: random.Random) -> Kind:
     """Two women: both in every shot and nobody else."""
     regions = persona.regions(post["prompt"], rng) if persona else None
-    traits = {_bare(t) for r in regions or [] for t in r[0].split(",")} - {"adult", "mature female", "anthro"}
+    # Their looks, from the personas (and the other's text in the post, when she isn't one).
+    looks = [persona.look] if persona else []
+    friend = persona.friend_in(post["prompt"]) if persona else None
+    looks += [friend.look] if friend else [r[0] for r in regions or []]
+    traits = {_bare(t) for look in looks for t in look.split(",")} - {"adult", "mature female", "anthro", "1girl"}
 
     def negative(shot: Shot) -> str:
         # (cum means squirting here: NO_CUM would keep "ejaculation" out of the climax.)
