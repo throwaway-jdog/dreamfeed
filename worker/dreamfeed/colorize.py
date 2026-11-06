@@ -8,13 +8,19 @@ The dashboard's Comics page queues an import as a job (kind "comic_import"):
    if more than MAX_DROPPED of them fail, the import stops: it isn't a comic to keep.
 2. Colour pages and black-and-white ones are told apart by their saturation. The cover is the
    most colourful page (or --cover N, counting from 1).
-3. Each black-and-white page is drawn again in colour by the image model, held to the page's
-   own lines (ControlNet, line-art mode), shown the cover (IP-Adapter: the characters' colours),
-   and told what the page shows (its tags), starting from the page itself. It's drawn at about a
-   megapixel in the page's shape and scaled back up; only its hues are kept, over the page's own
-   brightness, so the artist's lines, shading and lettering stay exactly as they were (and the
-   margins white). The coloured page is checked again.
-4. The comic is saved like the comics made here (generated/comic-import-.../comic.json), with
+3. Each black-and-white page gets a colour hint from the colour pages: every patch of the page
+   is matched to the most alike patches of the colour pages (DINOv2 features of both in grey,
+   with their surroundings, about as bright once the colour pages' greys are spread like the
+   page's) and takes their colour; bare paper inside the panels takes their brightness too
+   (skin and fur are often left white in black and white). Matching by what's drawn is what
+   gets each character her own colours; a cover shown whole to the image model (IP-Adapter)
+   or a list of colour tags put them on whoever.
+4. The image model redraws the hint (img2img, about half of it), held to the page's own lines
+   (ControlNet, line-art mode) and told what the page shows (its tags): clean colours that
+   follow the drawing. Then the artist's page goes back on top: its brightness everywhere but
+   bare paper inside the panels, the model's hues except on ink and the margins, so lines,
+   shading and lettering are exactly as drawn. The coloured page is checked again.
+5. The comic is saved like the comics made here (generated/comic-import-.../comic.json), with
    the original pages kept beside the coloured ones for the reader's switch.
 """
 import argparse
@@ -34,10 +40,20 @@ COLOUR = 0.12          # mean HSV saturation above which a page is in colour
 MAX_DROPPED = 0.2      # share of pages that may fail the checks before the import stops
 PIXELS = 1024 * 1024   # the size pages are coloured at
 LINES = 0.85           # ControlNet strength: the drawing stays the artist's
-REFERENCE = (0.7, "linear")   # IP-Adapter weight and type: the cover's colours come from here
 PAPER = 240                   # page brightness of paper
 INK, INK_DARK = 25, 70         # ink (no colour) below INK, full colour above INK_DARK
-DENOISE = 0.85                # the page is redrawn from itself in grey, not from noise
+HINT_SLACK = 15               # how much darker than the hint bare paper may come out
+HINT_COLOURED = 12            # hint chroma at which bare paper takes the colours' full shade
+DENOISE = 0.5                 # how much of the colour hint the image model redraws
+# Colour hints. Tuned on a page of ours turned grey (and hard-inked), scored against its own
+# colours: about 90% (grey) and 75% (inked) of its coloured parts got the right colour, where
+# the cover through IP-Adapter got 5%.
+DINO = "timm/vit_base_patch14_dinov2.lvd142m@4685c99dabffe5affac90bd99dbffd25801ae58d"   # pinned
+MATCH_SIDE = 896       # long side the pages are matched at (64 patches)
+NEAREST, SHARPNESS = 8, 0.03   # colour from the 8 most alike patches, softmax temperature
+AROUND = 4             # patches of surroundings each patch is matched with
+SAME_BRIGHTNESS = 0.5  # how much a difference in grey counts against a match
+BOOST = 1.5            # matched colours are averages, a little duller than the real ones
 TAG_MIN = 0.35
 NOT_COLOUR = {"monochrome", "greyscale", "lineart", "sketch", "black and white", "spot color",
               "partially colored", "halftone", "screentones"}
@@ -67,8 +83,7 @@ def _size(page: Image.Image) -> tuple[int, int]:
 
 def page_prompt(general: dict) -> str:
     """What a black-and-white page shows: its own tags, less the ones saying it's black and white
-    and its colours (a grey page's "grey hair" is wrong). The cover's colours aren't named either:
-    a list of them lands on whoever, so they come from the cover picture itself (IP-Adapter)."""
+    and its colours (a grey page's "grey hair" is wrong; the colours come from the hint)."""
     from . import safety
     tags = [t for t, s in sorted(general.items(), key=lambda kv: -kv[1])
             if s >= TAG_MIN and t not in NOT_COLOUR and not safety.blocked(t) and not _colour(t)][:30]
@@ -79,42 +94,122 @@ def _colour(tag: str) -> bool:
     return tag.split(" ")[0] in COLOURS and tag.split(" ")[-1] in COLOUR_WORDS
 
 
-def colour_page(comfy, checkpoint: str, page: Image.Image, prompt: str, cover: Path, medium: str,
+class Hints:
+    """Colour hints for black-and-white pages from the comic's colour pages (see the top)."""
+
+    def __init__(self, colour_pages: list[Image.Image]):
+        import timm
+        import torch
+        self.torch = torch
+        self.model = timm.create_model(f"hf-hub:{DINO}", pretrained=True, dynamic_img_size=True).eval().cuda()
+        self.refs = colour_pages
+
+    def close(self) -> None:
+        del self.model
+        self.torch.cuda.empty_cache()
+
+    def _features(self, grey: np.ndarray):
+        """(patches x features, normalised; grid (h, w)) of a grey picture."""
+        torch, F = self.torch, self.torch.nn.functional
+        r = MATCH_SIDE / max(grey.shape)
+        h, w = max(1, round(grey.shape[0] * r / 14)), max(1, round(grey.shape[1] * r / 14))
+        img = Image.fromarray(grey.clip(0, 255).astype(np.uint8)).convert("RGB").resize((w * 14, h * 14), Image.BICUBIC)
+        x = torch.from_numpy(np.asarray(img, dtype=np.float32) / 255)
+        x = ((x - torch.tensor([0.485, 0.456, 0.406])) / torch.tensor([0.229, 0.224, 0.225])).permute(2, 0, 1)[None].cuda()
+        with torch.no_grad():
+            f = F.normalize(self.model.forward_features(x)[0, self.model.num_prefix_tokens:].float(), dim=-1)
+        around = F.avg_pool2d(f.T.reshape(1, -1, h, w), 2 * AROUND + 1, 1, AROUND, count_include_pad=False)
+        around = F.normalize(around.reshape(f.shape[1], -1).T, dim=-1)
+        return F.normalize(torch.cat([f, around], 1), dim=-1), (h, w)
+
+    def hint(self, page: Image.Image) -> Image.Image:
+        torch, F = self.torch, self.torch.nn.functional
+        y = np.asarray(ImageOps.grayscale(page), dtype=np.float32)
+        pf, (h, w) = self._features(y)
+        feats, values = [], []      # per reference patch: features; (cb, cr, grey, brightness)
+        for ref in self.refs:
+            ry = np.asarray(ImageOps.grayscale(ref), dtype=np.float32)
+            spread = _match_histogram(ry, y)
+            f, (rh, rw) = self._features(spread)
+            _, cb, cr = (np.asarray(c, dtype=np.float32) for c in ref.convert("YCbCr").split())
+            v = torch.from_numpy(np.stack([cb - 128, cr - 128, spread, ry]))[None]
+            values.append(F.adaptive_avg_pool2d(v, (rh, rw))[0].reshape(4, -1).T)
+            feats.append(f)
+        rf, rv = torch.cat(feats), torch.cat(values).cuda()
+        py = F.adaptive_avg_pool2d(torch.from_numpy(y)[None, None], (h, w)).flatten().cuda()
+        sim = pf @ rf.T - SAME_BRIGHTNESS * (py[:, None] - rv[None, :, 2]).abs() / 255
+        best, which = sim.topk(min(NEAREST, sim.shape[1]), dim=1)
+        weight = torch.softmax(best / SHARPNESS, dim=1)
+        got = (rv[which] * weight[..., None]).sum(1).T.reshape(4, h, w)
+        got = F.interpolate(got[None], size=y.shape, mode="bilinear", align_corners=False)[0].cpu().numpy()
+        cb, cr = got[0] * BOOST, got[1] * BOOST
+        bright = _guided(y / 255, got[3], 4)
+        paper = (y >= PAPER) & ~_margins(y)
+        hy = np.where(paper, np.minimum(y, bright), y)
+        out = np.stack([hy, cb + 128, cr + 128], axis=-1).clip(0, 255).astype(np.uint8)
+        return Image.fromarray(out, "YCbCr").convert("RGB")
+
+
+def _match_histogram(src: np.ndarray, like: np.ndarray) -> np.ndarray:
+    """src's greys spread like like's."""
+    order = np.sort(src.ravel())
+    q = np.searchsorted(order, src.ravel()) / max(1, order.size - 1)
+    return np.interp(q, np.linspace(0, 1, like.size), np.sort(like.ravel())).reshape(src.shape)
+
+
+def _guided(guide: np.ndarray, src: np.ndarray, r: int, eps: float = 1e-3) -> np.ndarray:
+    """src smoothed without crossing guide's edges (a guided filter)."""
+    import torch
+    import torch.nn.functional as F
+    i, p = torch.from_numpy(guide)[None, None], torch.from_numpy(src.astype(np.float32))[None, None]
+    box = lambda x: F.avg_pool2d(x, 2 * r + 1, 1, r, count_include_pad=False)
+    mi, mp = box(i), box(p)
+    a = (box(i * p) - mi * mp) / (box(i * i) - mi * mi + eps)
+    return (box(a) * i + box(mp - a * mi))[0, 0].numpy()
+
+
+def colour_page(comfy, checkpoint: str, page: Image.Image, hint: Image.Image, prompt: str, medium: str,
                 subdir: str, name: str, rng: random.Random) -> Image.Image:
-    """page in colour: the model's colours with the original page laid over them."""
+    """page in colour: the image model's redrawing of the hint, the page laid over it."""
     size = _size(page)
     tmp = Path(tempfile.mkdtemp(prefix="lines-"))
     try:
-        lines_path, init = tmp / "lines.png", tmp / "page.png"
+        lines_path, init = tmp / "lines.png", tmp / "hint.png"
         line_art(page, size).save(lines_path)
-        page.resize(size, Image.LANCZOS).save(init)
+        hint.resize(size, Image.LANCZOS).save(init)
         path = comfy.txt2img(checkpoint, medium, prompt, rng.randrange(2 ** 32), subdir, name,
                              strict=True, extra_negative=NEGATIVE, init=init, denoise=DENOISE,
-                             reference=(cover, *REFERENCE), control=(lines_path, LINES), size=size)
+                             control=(lines_path, LINES), size=size)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     with Image.open(path) as im:
         colours = im.convert("RGB").resize(page.size, Image.LANCZOS)
     path.unlink(missing_ok=True)
-    return blend(page, colours)
+    return blend(page, colours, hint)
 
 
-def blend(page: Image.Image, colours: Image.Image) -> Image.Image:
-    """The page's own brightness (its lines, shading and lettering, exactly) with the model's
-    hues. Ink stays black, and the paper around the panels (margins, gutters) stays white. White
-    inside the panels takes colour: in black and white, skin and fur are often bare paper."""
+def blend(page: Image.Image, colours: Image.Image, hint: Image.Image | None = None) -> Image.Image:
+    """The page laid over the colours: its brightness (lines, shading, lettering exactly) except
+    on bare paper inside the panels, which keeps the colours' own shade where the hint has a colour
+    and no darker than the hint (so the model's own scribbles in a speech bubble don't show); the colours' hues except
+    on ink and on the paper around the panels (margins, gutters), which stay black and white."""
     y = np.asarray(ImageOps.grayscale(page), dtype=np.float32)
-    _, cb, cr = (np.asarray(c, dtype=np.float32) for c in colours.convert("YCbCr").split())
-    keep = np.clip((y - INK) / (INK_DARK - INK), 0, 1) * ~_margins(y)
-    cb, cr = 128 + (cb - 128) * keep, 128 + (cr - 128) * keep
-    out = np.stack([y, cb, cr], axis=-1).clip(0, 255).astype(np.uint8)
-    return Image.fromarray(out, "YCbCr").convert("RGB")
+    cy, cb, cr = (np.asarray(c, dtype=np.float32) for c in colours.convert("YCbCr").split())
+    if hint is not None:     # paper is shaded only where the hint has a colour (white stays white)
+        hy, hb, hr = (np.asarray(c, dtype=np.float32) for c in hint.resize(page.size, Image.LANCZOS).convert("YCbCr").split())
+        tinted = np.clip(np.hypot(hb - 128, hr - 128) / HINT_COLOURED, 0, 1)
+        cy = y - (y - np.maximum(cy, hy - HINT_SLACK)) * tinted
+    margins = _margins(y)
+    paper = (y >= PAPER) & ~margins
+    keep = np.clip((y - INK) / (INK_DARK - INK), 0, 1) * ~margins
+    out = np.stack([np.where(paper, np.minimum(y, cy), y), 128 + (cb - 128) * keep, 128 + (cr - 128) * keep], axis=-1)
+    return Image.fromarray(out.clip(0, 255).astype(np.uint8), "YCbCr").convert("RGB")
 
 
 def _margins(y: np.ndarray) -> np.ndarray:
     """The paper joined to the page's edge: near-white pixels reachable from outside the page."""
     from PIL import ImageDraw
-    light = Image.fromarray(np.pad((y >= PAPER) * 255, 1, constant_values=255).astype(np.uint8))
+    light = Image.fromarray(np.pad((y >= PAPER) * 255, 1, constant_values=255).astype(np.uint8)).copy()   # its own memory: floodfill writes to it
     ImageDraw.floodfill(light, (0, 0), 128)
     return (np.asarray(light) == 128)[1:-1, 1:-1]
 
@@ -174,23 +269,41 @@ def colorize(cfg, pages: list[Path], medium: str, folder: Path, cover_index: int
     else:
         raise RuntimeError("no page is in colour to colour the others from")
     print(f"colorize: cover {cover[0].name}", flush=True)
-    # 2. Colour.
     bw = [k for k in kept if k[1] < COLOUR and k is not cover]
+    if not bw:
+        raise RuntimeError("no page is in black and white: nothing to colour")
+    # 2. Colour hints, from the cover and any other colour pages (the cover first).
+    tmp = Path(tempfile.mkdtemp(prefix="hints-"))
     coloured = {}
-    comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
     try:
-        for n, (p, _, general) in enumerate(bw):
-            progress("colouring", n, len(bw))
+        refs = []
+        for p in [cover[0]] + [k[0] for k in kept if k[1] >= COLOUR and k is not cover]:
             with Image.open(p) as im:
-                img = im.convert("RGB")
-            out = colour_page(comfy, gen.checkpoints[medium], img, page_prompt(general), cover[0],
-                              medium, str(folder.relative_to(out_dir)), f"col-{p.stem}", rng)
-            dest = p.with_name(f"{p.stem}-colour.jpg")
-            out.save(dest, quality=92)
-            coloured[p] = dest
+                refs.append(im.convert("RGB"))
+        hints = Hints(refs)
+        try:
+            for n, (p, _, _) in enumerate(bw):
+                progress("matching colours", n, len(bw))
+                with Image.open(p) as im:
+                    hints.hint(im.convert("RGB")).save(tmp / f"{n}.png")
+        finally:
+            hints.close()
+        # 3. The image model.
+        comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
+        try:
+            for n, (p, _, general) in enumerate(bw):
+                progress("colouring", n, len(bw))
+                with Image.open(p) as im, Image.open(tmp / f"{n}.png") as hint:
+                    out = colour_page(comfy, gen.checkpoints[medium], im.convert("RGB"), hint.convert("RGB"),
+                                      page_prompt(general), medium, str(folder.relative_to(out_dir)), f"col-{p.stem}", rng)
+                dest = p.with_name(f"{p.stem}-colour.jpg")
+                out.save(dest, quality=92)
+                coloured[p] = dest
+        finally:
+            comfy.stop()
     finally:
-        comfy.stop()
-    # 3. The coloured pages are checked again; one that fails stays as it was drawn.
+        shutil.rmtree(tmp, ignore_errors=True)
+    # 4. The coloured pages are checked again; one that fails stays as it was drawn.
     vision = Vision(cfg.models_dir)
     try:
         for n, (p, dest) in enumerate(list(coloured.items())):

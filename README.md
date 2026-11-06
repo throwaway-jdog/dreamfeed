@@ -288,12 +288,14 @@ until deleted; they aren't in the feed and don't expire.
 the gallery's link (anything gallery-dl reads), say whether it's furry or anime, and optionally
 which page is the cover (else the most colourful page is). Every page gets the strict
 adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
-imported. Each black-and-white page is redrawn in colour from itself, held to its own lines
-(ControlNet Union, line-art mode) and shown the cover (IP-Adapter). Only the hues are kept: the
-page's own brightness goes back on top, so lines, shading and lettering are exactly the artist's
-and the margins stay white. Coloured pages are checked again (a failing one stays as drawn). The
-reader can switch between colour and the original. About a minute a page. Which character gets
-which of the cover's colours isn't always right yet: the model only sees the cover as a whole.
+imported. Each black-and-white page is matched, patch by patch, to the colour pages (DINOv2
+features in grey, with surroundings and brightness) and takes their colours as a hint; the image
+model redraws the hint held to the page's own lines (ControlNet Union, line-art mode); then the
+page goes back on top, so lines, shading and lettering are exactly the artist's, bubbles and
+margins stay white, and bare paper (skin and fur in black and white) takes the colour. Coloured
+pages are checked again (a failing one stays as drawn). The reader can switch between colour and
+the original. About 30 seconds a page. Tuned on a page of ours turned grey: about 90% of its
+coloured parts get the right colour (75-80% when hard-inked, with no greys).
 `python -m dreamfeed colorize --cover C.png PAGE.png... --out DIR` tries it on files.
 
 ## Backup
