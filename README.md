@@ -284,6 +284,18 @@ the tail toward the speaker (the image model can't write). About 6 minutes a pag
 lines are checked like captions, and must be consensual (`safety.story_blocked`). Comics stay
 until deleted; they aren't in the feed and don't expire.
 
+**Importing** a black-and-white comic with a colour cover (the same tab; `colorize.py`): paste
+the gallery's link (anything gallery-dl reads), say whether it's furry or anime, and optionally
+which page is the cover (else the most colourful page is). Every page gets the strict
+adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
+imported. Each black-and-white page is redrawn in colour from itself, held to its own lines
+(ControlNet Union, line-art mode) and shown the cover (IP-Adapter). Only the hues are kept: the
+page's own brightness goes back on top, so lines, shading and lettering are exactly the artist's
+and the margins stay white. Coloured pages are checked again (a failing one stays as drawn). The
+reader can switch between colour and the original. About a minute a page. Which character gets
+which of the cover's colours isn't always right yet: the model only sees the cover as a whole.
+`python -m dreamfeed colorize --cover C.png PAGE.png... --out DIR` tries it on files.
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,

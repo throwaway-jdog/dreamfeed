@@ -276,6 +276,7 @@ MAX_PROMPT = 500
 
 COMIC_STORY = 600
 COMIC_PAGES = 4
+COMIC_TITLE = 100
 
 
 def _comic_meta(file: str) -> dict:
@@ -293,22 +294,31 @@ def comics() -> dict:
             out["comics"].append({"id": r["id"], "title": r["caption"] or "", "persona": r["persona"],
                                   "name": r["name"] or r["persona"], "pages": len(meta.get("pages") or [1]),
                                   "cast": meta.get("cast") or [], "story": meta.get("story", ""),
+                                  "imported": bool(meta.get("imported")),
+                                  "originals": bool(meta.get("originals")) and meta["originals"] != meta.get("pages"),
                                   "created": r["created_at"]})
         for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
-                              " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic\"%'"):
+                              " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic%'"):
             params = json.loads(r["params"])
-            out["making"].append({"job": r["id"], "status": r["status"], "cast": params["cast"],
-                                  "story": params["story"], "pages": params["pages"],
-                                  "progress": json.loads(r["progress"]) if r["progress"] else None})
+            if params.get("kind") not in ("comic", "comic_import"):
+                continue
+            item = {"job": r["id"], "status": r["status"], "progress": json.loads(r["progress"]) if r["progress"] else None}
+            if params["kind"] == "comic_import":
+                item |= {"imported": True, "title": params.get("title") or "", "url": params["url"]}
+            else:
+                item |= {"cast": params["cast"], "story": params["story"], "pages": params["pages"]}
+            out["making"].append(item)
     return out
 
 
-def comic_page(gid: int, n: int) -> Path | None:
+def comic_page(gid: int, n: int, original: bool = False) -> Path | None:
+    """Page n of a comic; original: an imported comic's page as it was drawn, before colouring."""
     with db() as conn:
         row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
     if not row:
         return None
-    pages = _comic_meta(row["file"]).get("pages") or [row["file"]]
+    meta = _comic_meta(row["file"])
+    pages = (meta.get("originals") if original else None) or meta.get("pages") or [row["file"]]
     if not 1 <= n <= len(pages):
         return None
     path = (GENERATED / pages[n - 1]).resolve()
@@ -351,6 +361,36 @@ def queue_comic(req: dict) -> dict:
             raise ValueError("three requests are already waiting; let one finish first")
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
             {"kind": "comic", "cast": [a.handle, str(cast[1])], "story": story, "pages": pages}),)).lastrowid
+    return {"job": jid}
+
+
+def queue_comic_import(req: dict) -> dict:
+    """{"url", "title", "medium", "cover"}: a black-and-white comic with a colour cover, coloured from it."""
+    url = str(req.get("url") or "").strip()
+    if not re.match(r"https?://[^\s/]+\.[^\s/]+/\S*$", url):
+        raise ValueError("paste a link to the comic's gallery")
+    title = " ".join(str(req.get("title") or "").split())[:COMIC_TITLE]
+    medium = req.get("medium")
+    if medium not in MEDIUMS:
+        raise ValueError("pick furry or anime")
+    cover = req.get("cover")
+    if cover in (None, ""):
+        cover = None
+    else:
+        try:
+            cover = int(cover)
+        except (TypeError, ValueError):
+            raise ValueError("the cover is a page number")
+        if not 1 <= cover <= 200:
+            raise ValueError("the cover is a page number")
+    bad = safety.story_blocked(f"{title} {url}")
+    if bad:
+        raise ValueError(f"the comic can't include: {', '.join(bad)}")
+    with db() as conn:
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
+            raise ValueError("three requests are already waiting; let one finish first")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
+            {"kind": "comic_import", "url": url, "title": title, "medium": medium, "cover": cover}),)).lastrowid
     return {"job": jid}
 
 
@@ -957,8 +997,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, comics())
         if path.startswith("/comic/"):
             parts = path.split("/")
-            if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
-                file = comic_page(int(parts[2]), int(parts[3]))
+            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"]):
+                file = comic_page(int(parts[2]), int(parts[3]), original=len(parts) == 5)
                 if file:
                     return self.send_file(file)
             return self.send(404, {"error": "page not found"})
@@ -981,6 +1021,7 @@ class Handler(BaseHTTPRequestHandler):
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
                    "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
+                   "/api/comics/import": queue_comic_import,
                    "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,

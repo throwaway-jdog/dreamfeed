@@ -76,7 +76,8 @@ class Comfy:
     def txt2img(self, checkpoint: str, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, extra_negative: str = "", strict: bool = False,
                 lora=None, init: Path | None = None, denoise: float = 1.0, regions=None,
-                reference: tuple[Path, float, str] | None = None) -> Path:
+                reference: tuple[Path, float, str] | None = None,
+                control: tuple[Path, float] | None = None, size: tuple[int, int] | None = None) -> Path:
         """lora: (file in models/loras, strength), or a list of them, applied in turn to the model
         and text encoder. regions: [(tags, x from, x to)] or [(tags, x from, x to, lora)], each
         added for its own vertical strip (shares of the width) on top of prompt for the whole
@@ -86,7 +87,9 @@ class Comfy:
         init: start from this picture instead of noise (img2img), keeping 1 - denoise of it.
         reference: (picture, weight, IP-Adapter weight type): the image model is also shown this
         picture (IP_ADAPTER), e.g. the post a scene is made from, so every shot keeps its
-        characters' colours and look."""
+        characters' colours and look. control: (line-art picture, strength): ControlNet
+        (CONTROLNET, line-art mode) keeps the drawing to those lines, white on black. size:
+        (width, height) instead of the checkpoint's own, multiples of 64."""
         p = presets.for_checkpoint(checkpoint)
         loras = [lora] if isinstance(lora, tuple) else list(lora or [])
         last = f"lora{len(loras) - 1}" if loras else "ckpt"
@@ -130,6 +133,8 @@ class Comfy:
                     "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0, "embeds_scaling": "V only"}},
             }
             workflow["sample"]["inputs"]["model"] = ["ref", 0]
+        if size:
+            workflow["latent"]["inputs"]["width"], workflow["latent"]["inputs"]["height"] = size
         for n, (tags, x0, x1, *own) in enumerate(regions or []):
             if safety.blocked(tags):
                 raise ValueError(f"blocked tags in a region: {', '.join(safety.blocked(tags))}")
@@ -147,6 +152,20 @@ class Comfy:
             workflow[f"rmix{n}"] = {"class_type": "ConditioningCombine", "inputs": {
                 "conditioning_1": [f"rmix{n - 1}" if n else "pos", 0], "conditioning_2": [f"rarea{n}", 0]}}
             workflow["sample"]["inputs"]["positive"] = [f"rmix{n}", 0]
+        if control:
+            lines, strength = control
+            sample = workflow["sample"]["inputs"]
+            workflow |= {
+                "cn_model": {"class_type": "ControlNetLoader", "inputs": {"control_net_name": CONTROLNET["file"]}},
+                "cn_type": {"class_type": "SetUnionControlNetType", "inputs": {
+                    "control_net": ["cn_model", 0], "type": CONTROLNET["type"]}},
+                "cn_image": {"class_type": "LoadImage", "inputs": {"image": self.upload(lines)}},
+                "cn": {"class_type": "ControlNetApplyAdvanced", "inputs": {
+                    "positive": sample["positive"], "negative": sample["negative"], "control_net": ["cn_type", 0],
+                    "image": ["cn_image", 0], "strength": strength, "start_percent": 0.0, "end_percent": 1.0,
+                    "vae": ["ckpt", 2]}},
+            }
+            sample["positive"], sample["negative"] = ["cn", 0], ["cn", 1]
         if init:
             workflow["init"] = {"class_type": "LoadImage", "inputs": {"image": self.upload(init)}}
             workflow["latent"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["init", 0], "vae": ["ckpt", 2]}}
@@ -169,6 +188,9 @@ class Comfy:
             time.sleep(1)
         raise TimeoutError(f"ComfyUI prompt {prompt_id} did not finish in 600s")
 
+
+# xinsir's ControlNet Union for SDXL (ProMax, Apache 2.0), in its line-art mode.
+CONTROLNET = {"file": "controlnet-union-sdxl-promax.safetensors", "type": "canny/lineart/anime_lineart/mlsd"}
 
 IP_ADAPTER = {"model": "ip-adapter-plus_sdxl_vit-h.safetensors",
               "vision": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"}

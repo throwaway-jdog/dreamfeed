@@ -94,6 +94,9 @@ def main() -> None:
     elif cmd == "comic":
         from .comic import main as comic
         comic(rest)
+    elif cmd == "colorize":
+        from .colorize import main as colorize
+        colorize(rest)
     elif cmd == "bootstrap":
         from .bootstrap import main as bootstrap
         bootstrap(rest)
