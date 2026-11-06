@@ -492,7 +492,9 @@ def _straight(persona, post: dict, seen_post, rng: random.Random) -> Kind:
                 lambda shot: SHOT_CANDIDATES_SIDE if shot.act not in (None, "blowjob") else SHOT_CANDIDATES,
                 fits,
                 lambda f: f"{'' if f[0] else 'partner missing or cut off, '}{'' if f[1] else 'act not seen, '}"
-                          f"{'' if f[2] else 'not side-on, '}her and him {f[3]}/{total}")
+                          f"{'' if f[2] else 'not side-on, '}her and him {f[3]}/{total}",
+                # Halves sit them side by side: only after (an act needs them together).
+                halves=lambda shot: shot.act is None)
 
 
 def _girl_girl(persona, post: dict, seen_post, rng: random.Random) -> Kind:
