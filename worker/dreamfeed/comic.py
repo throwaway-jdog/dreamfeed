@@ -52,6 +52,9 @@ COPIED = 0.7           # a line this alike (difflib) to an example line is a cop
 REFERENCE_TRIES = 4
 EXPRESSIONS = ("smile", "blush", "smug", "surprised", "embarrassed", "happy", "teasing", "open mouth")
 NAKED = ("nude, completely nude, nipples, pussy, penis, topless, breasts out, sex")   # kept out of dressed panels
+# Kept out of every panel: the bubbles are lettered by the code, and the model's own writing
+# (on shirts, signs) comes out garbled.
+NO_TEXT = "text, letters, words, writing, logo, print shirt, speech bubble, signature"
 # What a panel can show, by kind of story: name -> (picture tags, the scene act it's checked as).
 TALK = {
     "talking": ("talking, looking at another, cowboy shot", None),
@@ -378,12 +381,14 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
             f"page {i // PANELS + 1} panel {i % PANELS + 1}: {pn['action']}",
             f"{tags}, {pn['expression']}" + (f", ({outfit}:1.2), clothed" if dressed and outfit else "")
             + (", talking, open mouth" if pn["speaker"] is not None else ""),
-            act, False, "", yuri=yuri, avoid=NAKED if dressed else ""))
+            act, False, "", yuri=yuri, avoid=", ".join(a for a in (NAKED if dressed else "", NO_TEXT) if a)))
     progress("drawing the panels", 0, len(shots))
     drawn = scene.draw(cfg, comfy, persona, post, shots, night, "comic", rng)
     ref.unlink(missing_ok=True)
     progress("lettering", 0, 1)
-    layouts = [rng.choice(list(LAYOUTS)) for _ in range(0, len(drawn), PANELS)]
+    layouts = []
+    for _ in range(0, len(drawn), PANELS):   # a different layout from the page before
+        layouts.append(rng.choice([l for l in LAYOUTS if not layouts or l != layouts[-1]]))
     cell_list = [c for lay in layouts for c in cells(lay)]
     cut = cutout.Cutout()
     try:
