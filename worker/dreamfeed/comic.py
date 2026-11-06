@@ -14,8 +14,9 @@ The dashboard's Comics page queues the same thing as a job (kind "comic"). Steps
    example line, and mustn't bring in anyone else.
 4. Panels: scene.draw, all pages in one go (one cast, one room, the same checks as a scene).
    Build-up panels are dressed (an outfit of the persona's; nude kept out), act panels nude.
-5. Bubbles are drawn here, not by the image model (it can't write): where the cut-out shows no
-   one, near the top, the tail toward the speaker (told apart by hair colour).
+5. Bubbles are drawn here, not by the image model (it can't write): never over a face (heads.py
+   finds them; the text shrinks to fit beside them), else where the cut-out shows no one, near
+   the top, the tail toward the speaker (told apart by hair colour).
 6. Pages in one of LAYOUTS (a grid, a tall panel, a wide one), saved as generated/comic-.../page-N.jpg with comic.json, and a
    generations row (kind and status "comic", the first page as its file) for the dashboard.
 """
@@ -172,69 +173,66 @@ def script(cfg, cast: list, kind: str, story: str, actions: list[str], rng: rand
     return {"title": title or story[:60], "panels": panels}
 
 
-def _heads(mask: np.ndarray) -> list[tuple[int, int]]:
-    """The top of each of the (up to) two people in a cut-out mask, left one first."""
-    m = mask > 128
-    cols = np.where(m.any(0))[0]
-    if not len(cols):
-        return []
-    mid = (cols.min() + cols.max()) // 2
-    out = []
-    for lo, hi in ((cols.min(), mid), (mid, cols.max() + 1)):
-        rows = np.where(m[:, lo:hi].any(1))[0]
-        if len(rows):
-            top = rows.min()
-            xs = np.where(m[top:top + max(8, mask.shape[0] // 40), lo:hi].any(0))[0] + lo
-            out.append((int(xs.mean()), int(top)))
-    return out
-
-
-def _speaker_head(img: Image.Image, mask: np.ndarray, heads: list, hair: tuple | None) -> tuple[int, int] | None:
-    """Which head is the speaker's: the one whose hair (the character's own pixels in the cut-out,
-    just below the top of the head) is closest in colour."""
-    if not heads:
+def _speaker(img: Image.Image, mask: np.ndarray, faces: list, hair: tuple | None) -> tuple | None:
+    """The speaker's head box: of the heads found, the one whose own pixels (the cut-out) are
+    closest in colour to their hair."""
+    if not faces:
         return None
-    if len(heads) == 1 or hair is None:
-        return heads[0]
+    if len(faces) == 1 or hair is None:
+        return faces[0]
     a = np.asarray(img.convert("RGB"), dtype=np.float32)
-    h, w = mask.shape
 
-    def dist(head):
-        x, y = head
-        y0, y1, x0, x1 = y, min(h, y + h // 8), max(0, x - w // 8), min(w, x + w // 8)
+    def dist(box):
+        x0, y0, x1, y1 = box
         own = mask[y0:y1, x0:x1] > 128
         if not own.any():
             return 1e9
         return float(np.linalg.norm(a[y0:y1, x0:x1][own].mean(0) - np.array(hair)))
-    return min(heads, key=dist)
+    return min(faces[:2], key=dist)
 
 
-def bubble(img: Image.Image, mask: Image.Image, line: str, head: tuple[int, int] | None) -> Image.Image:
-    """The panel with a speech bubble for line: where nobody is (the cut-out mask), near the top,
-    its tail toward head."""
+def _overlap(a, b) -> float:
+    return max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def bubble(img: Image.Image, mask: Image.Image, line: str, faces: list, speaker: tuple | None) -> Image.Image:
+    """The panel with a speech bubble for line, never over a face (faces: head boxes) when it
+    can be helped: the text shrinks and narrows until it fits beside them; then where nobody is
+    (the cut-out), near the top, close to the speaker, its tail toward their head."""
     img = img.convert("RGB").copy()
     w, h = img.size
-    font = ImageFont.truetype(str(FONT), FONT_SIZE)
-    lines = textwrap.wrap(line, width=18) or [line]
-    draw = ImageDraw.Draw(img)
-    box = [draw.textbbox((0, 0), l, font=font) for l in lines]
-    tw = max(b[2] - b[0] for b in box)
-    lh = max(b[3] - b[1] for b in box) + font.size // 4
-    bw, bh = int(tw * 1.25 + font.size * 1.6), int(lh * len(lines) * 1.2 + font.size * 1.2)
     m = np.asarray(mask.convert("L").resize((w, h)), dtype=np.float32) / 255
+    pad = max(6, w // 80)
+    keep_off = [(x0 - pad, y0 - pad, x1 + pad, y1 + pad) for x0, y0, x1, y1 in faces]
+    draw = ImageDraw.Draw(img)
     best = None
-    for y in range(int(h * 0.02), int(h * 0.45) - bh, max(8, h // 40)):
-        for x in range(int(w * 0.02), w - bw - int(w * 0.02), max(8, w // 40)):
-            cover = float(m[y:y + bh, x:x + bw].mean())
-            near = 0.0 if head is None else np.hypot(x + bw / 2 - head[0], y + bh - head[1]) / max(w, h)
-            score = cover * 3 + near * 0.5 + y / h * 0.2
-            if best is None or score < best[0]:
-                best = (score, x, y)
-    _, x, y = best or (0, int(w * 0.05), int(h * 0.03))
+    for scale, width in ((1.0, 18), (0.85, 15), (0.72, 13)):
+        font = ImageFont.truetype(str(FONT), max(14, int(FONT_SIZE * scale)))
+        lines = textwrap.wrap(line, width=width) or [line]
+        box = [draw.textbbox((0, 0), l, font=font) for l in lines]
+        lh = max(b[3] - b[1] for b in box) + font.size // 4
+        bw = min(w - 2 * pad, int(max(b[2] - b[0] for b in box) * 1.25 + font.size * 1.6))
+        bh = int(lh * len(lines) * 1.2 + font.size * 1.2)
+        if bh > h - 2 * pad:
+            continue
+        for y in range(pad, h - bh - pad + 1, max(8, h // 50)):
+            for x in range(pad, w - bw - pad + 1, max(8, w // 50)):
+                rect = (x, y, x + bw, y + bh)
+                on_face = sum(_overlap(rect, f) for f in keep_off) / (bw * bh)
+                cover = float(m[y:y + bh, x:x + bw].mean())
+                near = 0.0 if speaker is None else \
+                    np.hypot(x + bw / 2 - (speaker[0] + speaker[2]) / 2, y + bh / 2 - speaker[1]) / max(w, h)
+                score = (on_face > 0, on_face, cover * 3 + near * 0.6 + y / h * 0.4)
+                if best is None or score < best[0]:
+                    best = (score, x, y, bw, bh, font, lines, box, lh)
+        if best and not best[0][0]:
+            break   # this size fits beside every face
+    _, x, y, bw, bh, font, lines, box, lh = best
     ink, fill = (20, 20, 20), (255, 255, 255)
-    if head is not None:   # the tail, under the bubble, from its edge toward the speaker
+    if speaker is not None:   # the tail, under the bubble, from its middle toward the speaker's head
         cx, cy = x + bw / 2, y + bh / 2
-        tx, ty = cx + (head[0] - cx) * 0.75, cy + (head[1] - cy) * 0.75
+        hx, hy = (speaker[0] + speaker[2]) / 2, (speaker[1] + speaker[3]) / 2
+        tx, ty = hx + (cx - hx) * 0.35, hy + (cy - hy) * 0.35   # stop short of the face
         base = font.size * 0.7
         ang = np.arctan2(ty - cy, tx - cx) + np.pi / 2
         p1 = (cx + np.cos(ang) * base, cy + np.sin(ang) * base)
@@ -390,6 +388,8 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
     for _ in range(0, len(drawn), PANELS):   # a different layout from the page before
         layouts.append(rng.choice([l for l in LAYOUTS if not layouts or l != layouts[-1]]))
     cell_list = [c for lay in layouts for c in cells(lay)]
+    from .heads import Heads
+    finder = Heads()
     cut = cutout.Cutout()
     try:
         panels = []
@@ -405,9 +405,9 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
             img = img.crop(box).resize((cw, ch), Image.LANCZOS)
             if pn["speaker"] is not None and pn["line"]:
                 mask = cut.mask(img)
-                m = np.asarray(mask)
-                head = _speaker_head(img, m, _heads(m), _hair(cast[pn["speaker"]].look))
-                img = bubble(img, mask, pn["line"], head)
+                faces = finder.find(img)
+                who = _speaker(img, np.asarray(mask), faces, _hair(cast[pn["speaker"]].look))
+                img = bubble(img, mask, pn["line"], faces, who)
             panels.append(img)
             path.unlink(missing_ok=True)
     finally:
