@@ -41,7 +41,7 @@ class Comfy:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.load(resp)["name"]
 
-    def img2vid(self, engine: str, image: Path, medium: str, prompt: str, seed: int,
+    def img2vid(self, image: Path, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, strict: bool = False,
                 loras: list[tuple[str, str, float]] = (), end: Path | None = None,
                 wan: dict | None = None) -> Path:
@@ -52,14 +52,8 @@ class Comfy:
         replace WAN's for this clip (e.g. width, height, motion_steps)."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start("video")
-        if engine == "wan":
-            workflow = _wan_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
-                                     end=self.upload(end) if end else None, settings=wan)
-        elif engine == "ltx2":   # loras here: (file, strength)
-            workflow = _ltx2_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
-                                      end=self.upload(end) if end else None)
-        else:
-            workflow = _ltx_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}")
+        workflow = _wan_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
+                                 end=self.upload(end) if end else None, settings=wan)
         return self._run(workflow, timeout=1800)
 
     def _run(self, workflow: dict, timeout: float = 600) -> Path:
@@ -174,77 +168,6 @@ WAN = {"high": "wan2.2-i2v-high-q4km.gguf", "low": "wan2.2-i2v-low-q4km.gguf",
        "text": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae": "wan_2.1_vae.safetensors",
        "width": 480, "height": 704, "frames": 81, "fps": 16, "shift": 5.0,
        "steps": 8, "motion_steps": 2, "high_steps": 4, "motion_cfg": 3.5}
-LTX = {"ckpt": "ltxv-2b-0.9.8-distilled.safetensors", "text": "t5xxl_fp8_e4m3fn_scaled.safetensors",
-       "width": 512, "height": 768, "frames": 121, "fps": 24, "steps": 8}
-
-
-# LTX-2.3 (22B, distilled, unsloth's 4-bit GGUF) with its Gemma 3 12B text encoder: one model
-# in 8 steps without CFG, where Wan runs two. It makes a sound track too, which is dropped.
-LTX2 = {"unet": "ltx-2.3-22b-distilled-Q4_K_S.gguf", "gemma": "gemma-3-12b-it-qat-UD-Q4_K_XL.gguf",
-        "connectors": "ltx-2.3-22b-distilled_embeddings_connectors.safetensors",
-        "vae": "ltx-2.3-22b-distilled_video_vae.safetensors", "audio_vae": "ltx-2.3-22b-distilled_audio_vae.safetensors",
-        "width": 480, "height": 704, "frames": 121, "fps": 24,
-        "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"}
-
-
-def _ltx2_workflow(source: str, positive: str, negative: str, seed: int, prefix: str,
-                   loras: list[tuple[str, float]] = (), end: str | None = None) -> dict:
-    """source: the uploaded first frame; end: an uploaded last frame (the same picture makes a loop)."""
-    l = LTX2
-    w = {
-        "unet": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": l["unet"]}},
-        "text": {"class_type": "DualCLIPLoaderGGUF", "inputs": {
-            "clip_name1": l["gemma"], "clip_name2": l["connectors"], "type": "ltxv"}},
-        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": l["vae"]}},
-        "audio_vae": {"class_type": "LTXVAudioVAELoader", "inputs": {"ckpt_name": l["audio_vae"]}},
-        "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": positive}},
-        "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": negative}},
-        "image": {"class_type": "LoadImage", "inputs": {"image": source}},
-        "prep": {"class_type": "LTXVPreprocess", "inputs": {"image": ["image", 0], "img_compression": 35}},
-        "i2v": {"class_type": "LTXVImgToVideo", "inputs": {
-            "positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0], "image": ["prep", 0],
-            "width": l["width"], "height": l["height"], "length": l["frames"], "batch_size": 1, "strength": 1.0}},
-    }
-    model = ["unet", 0]
-    for n, (file, strength) in enumerate(loras):
-        w[f"lora{n}"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
-            "model": model, "lora_name": file, "strength_model": strength}}
-        model = [f"lora{n}", 0]
-    cond_in = ["i2v", 0], ["i2v", 1], ["i2v", 2]
-    if end:
-        w["end"] = {"class_type": "LoadImage", "inputs": {"image": end}}
-        w["endprep"] = {"class_type": "LTXVPreprocess", "inputs": {"image": ["end", 0], "img_compression": 35}}
-        w["guide"] = {"class_type": "LTXVAddGuide", "inputs": {
-            "positive": ["i2v", 0], "negative": ["i2v", 1], "vae": ["vae", 0], "latent": ["i2v", 2],
-            "image": ["endprep", 0], "frame_idx": -1, "strength": 1.0}}
-        cond_in = ["guide", 0], ["guide", 1], ["guide", 2]
-    w |= {
-        "cond": {"class_type": "LTXVConditioning", "inputs": {
-            "positive": cond_in[0], "negative": cond_in[1], "frame_rate": float(l["fps"])}},
-        "audio": {"class_type": "LTXVEmptyLatentAudio", "inputs": {
-            "frames_number": l["frames"], "frame_rate": l["fps"], "batch_size": 1, "audio_vae": ["audio_vae", 0]}},
-        "av": {"class_type": "LTXVConcatAVLatent", "inputs": {"video_latent": cond_in[2], "audio_latent": ["audio", 0]}},
-        "noise": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
-        "guider": {"class_type": "CFGGuider", "inputs": {
-            "model": model, "positive": ["cond", 0], "negative": ["cond", 1], "cfg": 1.0}},
-        "sampler": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
-        "sigmas": {"class_type": "ManualSigmas", "inputs": {"sigmas": l["sigmas"]}},
-        "sample": {"class_type": "SamplerCustomAdvanced", "inputs": {
-            "noise": ["noise", 0], "guider": ["guider", 0], "sampler": ["sampler", 0], "sigmas": ["sigmas", 0],
-            "latent_image": ["av", 0]}},
-        "split": {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": ["sample", 0]}},
-    }
-    video = ["split", 0]
-    if end:   # the guide frame is appended to the latent: take it off again
-        w["crop"] = {"class_type": "LTXVCropGuides", "inputs": {
-            "positive": ["cond", 0], "negative": ["cond", 1], "latent": ["split", 0]}}
-        video = ["crop", 2]
-    w["decode"] = {"class_type": "VAEDecodeTiled", "inputs": {
-        "samples": video, "vae": ["vae", 0], "tile_size": 512, "overlap": 64, "temporal_size": 4096,
-        "temporal_overlap": 8}}
-    return w | _save_video(["decode", 0], l["fps"], prefix)
-
-
 def _save_video(images: list, fps: float, prefix: str) -> dict:
     return {
         "video": {"class_type": "CreateVideo", "inputs": {"images": images, "fps": fps}},
@@ -299,28 +222,3 @@ def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: 
     return nodes | _save_video(["decode", 0], w["fps"], prefix)
 
 
-def _ltx_workflow(source: str, positive: str, negative: str, seed: int, prefix: str) -> dict:
-    l = LTX
-    return {
-        "ckpt": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": l["ckpt"]}},
-        "text": {"class_type": "CLIPLoader", "inputs": {"clip_name": l["text"], "type": "ltxv"}},
-        "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": positive}},
-        "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["text", 0], "text": negative}},
-        "image": {"class_type": "LoadImage", "inputs": {"image": source}},
-        "prep": {"class_type": "LTXVPreprocess", "inputs": {"image": ["image", 0], "img_compression": 35}},
-        "i2v": {"class_type": "LTXVImgToVideo", "inputs": {
-            "positive": ["pos", 0], "negative": ["neg", 0], "vae": ["ckpt", 2], "image": ["prep", 0],
-            "width": l["width"], "height": l["height"], "length": l["frames"], "batch_size": 1, "strength": 1.0}},
-        "cond": {"class_type": "LTXVConditioning", "inputs": {
-            "positive": ["i2v", 0], "negative": ["i2v", 1], "frame_rate": float(l["fps"])}},
-        "sampler": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
-        "sigmas": {"class_type": "LTXVScheduler", "inputs": {
-            "steps": l["steps"], "max_shift": 2.05, "base_shift": 0.95, "stretch": True, "terminal": 0.1,
-            "latent": ["i2v", 2]}},
-        "sample": {"class_type": "SamplerCustom", "inputs": {
-            "model": ["ckpt", 0], "add_noise": True, "noise_seed": seed, "cfg": 1.0,
-            "positive": ["cond", 0], "negative": ["cond", 1], "sampler": ["sampler", 0],
-            "sigmas": ["sigmas", 0], "latent_image": ["i2v", 2]}},
-        "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["ckpt", 2]}},
-        **_save_video(["decode", 0], l["fps"], prefix),
-    }

@@ -535,7 +535,7 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                      motion_prompt, seed,
                      src, handle, caption)).lastrowid
             try:
-                path = comfy.img2vid("wan", out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
+                path = comfy.img2vid(out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
                                      strict=bool(strict), loras=loras)
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
