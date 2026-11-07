@@ -381,6 +381,9 @@ def queue_comic_import(req: dict) -> dict:
     url = str(req.get("url") or "").strip()
     if not re.match(r"https?://[^\s/]+\.[^\s/]+/\S*$", url):
         raise ValueError("paste a link to the comic's gallery")
+    if re.match(r"https?://(www\.)?multporn\.net/sites/", url):
+        raise ValueError("that's multporn's full-screen viewer, which doesn't say which comic it shows: "
+                         "paste the comic's own page instead (multporn.net/comics/...)")
     title = " ".join(str(req.get("title") or "").split())[:COMIC_TITLE]
     medium = req.get("medium")
     if medium not in MEDIUMS:

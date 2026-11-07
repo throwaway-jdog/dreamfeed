@@ -287,7 +287,7 @@ def _multporn(url: str, folder: Path) -> list[Path]:
     get = lambda u: urllib.request.urlopen(urllib.request.Request(u, headers=AGENT), timeout=60).read()
     found = MULTPORN_PAGES.search(get(url).decode("utf-8", "replace"))
     if not found:
-        raise RuntimeError("no comic pages on that multporn page")
+        raise RuntimeError("no comic pages on that multporn page: use the comic's own page (multporn.net/comics/...)")
     listing = urllib.parse.urljoin(url, found.group(1).replace("\\/", "/"))
     previews = [html.unescape(u) for u in MULTPORN_IMAGE.findall(get(listing).decode("utf-8", "replace"))][:MAX_PAGES]
     out = []
