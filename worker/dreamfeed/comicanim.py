@@ -8,9 +8,9 @@ same picture it started from (so it loops without a jump), the clip gets the vid
 (every sampled frame, and no drifting away from the panel), and it's kept beside the comic.
 The reader plays it over its panel, looping.
 
-Panels are found once, when a comic is saved: they're the parts of the page the paper around
-them (gutters, margins) separates. Panels that touch with no gutter come out as one; the
-reader lets the person draw the box instead.
+Panels are found once, when a comic is saved: the page is cut along its gutters (whatever their
+colour). Panels with no gutter between them come out as one; the reader lets the person draw
+the box instead.
 """
 import json
 import random
@@ -18,28 +18,81 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageOps
 
-PANEL_SIDE = 600        # pages are searched for panels at this long side
+PANEL_SIDE = 1000       # pages are searched for panels at this long side
 PANEL_MIN = 0.02        # a panel is at least this share of the page
-PAPER = 235             # brighter than this is paper
+PAPER = 200             # a page edge this bright is paper (see _paper_panels)
+GUTTER_LIKE = 28        # this close in grey to the page's edge is gutter
+GUTTER_SHARE = 0.8      # a row or column this much gutter is a gutter (a bubble or tail may cross it)
+GUTTER_MIN = 2          # pixels (at PANEL_SIDE) a gutter is at least
 LOOP = {"frames": 49}   # about three seconds at Wan's 16 fps
 AREA = 480 * 704        # the clip's pixels (Wan's usual size), in the panel's shape
 LOOP_MOTION = "subtle looping animation, small natural movements, gentle breathing, blinking, hair swaying, still camera"
 
 
 def find_panels(img: Image.Image) -> list[list[float]]:
-    """Each panel's box [x0, y0, x1, y1], as shares of the page, in reading order (rows top to
-    bottom, then left to right)."""
+    """Each panel's box [x0, y0, x1, y1], as shares of the page, in reading order. The gutter
+    colour is read off the page's edge. Dark or coloured gutters: the page is cut along rows
+    or columns that are nearly all gutter, and each piece again, until a piece has none (an XY
+    cut). White paper: _paper_panels."""
     r = PANEL_SIDE / max(img.size)
-    small = ImageOps.grayscale(img).resize((max(1, round(img.width * r)), max(1, round(img.height * r))))
-    y = np.asarray(small)
-    paper = np.pad(y >= PAPER, 1, constant_values=True)
-    fill = Image.fromarray(paper.astype(np.uint8) * 255).copy()   # its own memory: floodfill writes to it
+    y = np.asarray(ImageOps.grayscale(img).resize((max(1, round(img.width * r)), max(1, round(img.height * r)))),
+                   dtype=np.float32)
+    h, w = y.shape
+    edge = np.concatenate([y[:3].ravel(), y[-3:].ravel(), y[:, :3].ravel(), y[:, -3:].ravel()])
+    ground = float(np.median(edge)) if float(np.percentile(np.abs(edge - np.median(edge)), 80)) <= GUTTER_LIKE else 255.0
+    gutter = np.abs(y - ground) <= GUTTER_LIKE
+    if ground >= PAPER:
+        return _paper_panels(gutter)
+    found = []
+
+    def runs(line: np.ndarray) -> list[tuple[int, int]]:
+        """Spans of line that are gutter, at least GUTTER_MIN long."""
+        out, start = [], None
+        for i, g in enumerate(list(line) + [False]):
+            if g and start is None:
+                start = i
+            elif not g and start is not None:
+                if i - start >= GUTTER_MIN:
+                    out.append((start, i))
+                start = None
+        return out
+
+    def cut(x0, y0, x1, y1, depth):
+        part = gutter[y0:y1, x0:x1]
+        rows, cols = part.mean(1) >= GUTTER_SHARE, part.mean(0) >= GUTTER_SHARE
+        # The piece without the gutter around it.
+        keep_r, keep_c = np.nonzero(~rows)[0], np.nonzero(~cols)[0]
+        if not len(keep_r) or not len(keep_c):
+            return
+        x0, x1, y0, y1 = x0 + keep_c[0], x0 + keep_c[-1] + 1, y0 + keep_r[0], y0 + keep_r[-1] + 1
+        part = gutter[y0:y1, x0:x1]
+        if depth < 8:
+            for axis in (0, 1):    # rows first: a page reads top to bottom, then left to right
+                line = part.mean(1 - axis) >= GUTTER_SHARE
+                gaps = runs(line)
+                if gaps:
+                    edges = [0] + [v for g in gaps for v in g] + [len(line)]
+                    for a, b in zip(edges[::2], edges[1::2]):
+                        if b > a:
+                            cut(x0, y0 + a, x1, y0 + b, depth + 1) if axis == 0 else cut(x0 + a, y0, x0 + b, y1, depth + 1)
+                    return
+        if (x1 - x0) * (y1 - y0) >= PANEL_MIN * h * w:
+            found.append([x0 / w, y0 / h, x1 / w, y1 / h])
+
+    cut(0, 0, w, h, 0)
+    return [[round(v, 4) for v in b] for b in found]
+
+
+def _paper_panels(paper: np.ndarray) -> list[list[float]]:
+    """On white paper: the panels are what the paper reaching in from the page's edge goes
+    around. (Cutting along mostly-white rows would also cut through white things in a panel.)"""
+    from PIL import ImageDraw
+    h, w = paper.shape
+    fill = Image.fromarray(np.pad(paper, 1, constant_values=True).astype(np.uint8) * 255).copy()   # own memory
     ImageDraw.floodfill(fill, (0, 0), 128)
-    inside = (np.asarray(fill) != 128)[1:-1, 1:-1]   # everything the outer paper doesn't reach
-    h, w = inside.shape
-    label = Image.fromarray(inside.astype(np.uint8) * 255).copy()
+    label = Image.fromarray((np.asarray(fill) != 128)[1:-1, 1:-1].astype(np.uint8) * 255).copy()
     boxes, value = [], 1
     for yy in range(0, h, 4):
         for xx in range(0, w, 4):
