@@ -192,6 +192,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .panel h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .panel .note { margin: 0; color: var(--muted); font-size: 13px; }
 .field { display: grid; gap: 8px; }
+.field[hidden] { display: none; }
 .field > span { font-size: 14px; font-weight: 600; }
 .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .seg button, .toggle { min-height: var(--tap); border-radius: 12px; border: 1px solid var(--rule); background: var(--bg);
@@ -428,7 +429,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
           <small id="g-keep-note">the rest are deleted</small>
         </div>
       </div>
-      <div class="field">
+      <label class="field"><span>Who posts</span>
+        <select class="in" id="g-who"><option value="">Everyone</option></select></label>
+      <div class="field" id="g-styles-field">
         <span>Styles</span>
         <div class="toggles" id="g-styles" role="group" aria-label="Styles">
           <button class="toggle" type="button" data-m="anime" aria-pressed="true">Anime</button>
@@ -1604,27 +1607,40 @@ $("reader-close").onclick = closeComic;
 
 /* ---------- dashboard ---------- */
 const SEC_PER_IMAGE = 10.5;
-const gen = { n: 12, keep: 6, styles: new Set(["anime", "furry"]) };
+const gen = { n: 12, keep: 6, styles: new Set(["anime", "furry"]), who: "" };
 const defaultKeep = n => Math.max(1, Math.round(n <= 12 ? n / 2 : n * 0.2));
 function renderGenForm() {
   document.querySelectorAll("#g-count button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.n === gen.n)));
   document.querySelectorAll("#g-styles button").forEach(b => b.setAttribute("aria-pressed", String(gen.styles.has(b.dataset.m))));
+  const who = $("g-who"), names = (state.people || []).map(p => p.handle).join();
+  if (who.dataset.names !== names) {   // the personas, once they've loaded
+    who.dataset.names = names;
+    who.replaceChildren(el("option", null, "Everyone"), ...(state.people || []).map(p => {
+      const o = el("option", null, `${p.name} (@${p.handle})`); o.value = p.handle; return o; }));
+    who.firstChild.value = "";
+    if (!(state.people || []).some(p => p.handle === gen.who)) gen.who = "";
+    who.value = gen.who;
+  }
+  $("g-styles-field").hidden = !!gen.who;   // a persona draws in her own style
   $("g-keep").textContent = gen.keep;
   $("g-keep-note").textContent = gen.keep === gen.n ? "keeps all of them" : `of ${gen.n}; the rest are deleted`;
   const mins = Math.max(1, Math.round(gen.n * SEC_PER_IMAGE / 60));
   $("g-est").textContent = `Takes about ${mins} minute${mins > 1 ? "s" : ""}. You can leave this page; new images show up in the feed when it's done.`;
-  $("g-go").disabled = !gen.styles.size || dashState.busy;
+  $("g-go").disabled = (!gen.who && !gen.styles.size) || dashState.busy;
+  $("g-go").textContent = gen.who ? `Post as @${gen.who}` : "Generate";
 }
 document.querySelectorAll("#g-count button").forEach(b => b.onclick = () => { gen.n = +b.dataset.n; gen.keep = defaultKeep(gen.n); renderGenForm(); });
 document.querySelectorAll("#g-styles button").forEach(b => b.onclick = () => {
   gen.styles.has(b.dataset.m) ? gen.styles.delete(b.dataset.m) : gen.styles.add(b.dataset.m); renderGenForm();
 });
+$("g-who").onchange = () => { gen.who = $("g-who").value; renderGenForm(); };
 $("g-less").onclick = () => { gen.keep = Math.max(1, gen.keep - (gen.n > 50 ? 5 : 1)); renderGenForm(); };
 $("g-more").onclick = () => { gen.keep = Math.min(gen.n, gen.keep + (gen.n > 50 ? 5 : 1)); renderGenForm(); };
 $("g-go").onclick = async () => {
   $("g-go").disabled = true;
   try {
-    await api("api/generate", { images: gen.n, keep: gen.keep, mediums: [...gen.styles] });
+    await api("api/generate", gen.who ? { images: gen.n, keep: gen.keep, personas: [gen.who] }
+                                      : { images: gen.n, keep: gen.keep, mediums: [...gen.styles] });
     toast("Queued. It starts within a few seconds.");
   } catch (e) { toast(e.message); }
   refreshDash();
