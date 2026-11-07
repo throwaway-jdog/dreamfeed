@@ -315,8 +315,9 @@ A comic whose pages are all in colour is imported as it is (checked, not coloure
 comic is saved: cut along the gutters, white, black or coloured; drag a box for panels that
 overlap or touch).
 Pick one, optionally say what moves, and a job (`comic_animate`, `comicanim.py`) cuts the panel
-out and has Wan 2.2 animate it for about three seconds, ending on the picture it started from so
-it loops without a jump. The clip gets the video checks (stricter ones for imported comics) and
+out and has Wan 2.2 animate it for about four seconds (as asked, or by the act's motion LoRA;
+a sex panel with no position thrusts), then cuts it to a cycle within the clip, blended at the
+seam, played at 12 fps. The clip gets the video checks (stricter ones for imported comics) and
 plays over its panel in the reader, looping; **Remove animation** takes it off again. Works on
 comics made here and imported ones. `python -m dreamfeed comic-panels` finds the panels of
 comics saved before panels were kept.

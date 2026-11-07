@@ -3,9 +3,11 @@
     python -m dreamfeed comic-panels            find the panels of comics saved before panels were kept
 
 The reader's "Animate a panel" queues a job (kind "comic_animate") for one panel of one page:
-the panel is cut out of the page, Wan 2.2 animates it for about three seconds ending on the
-same picture it started from (so it loops without a jump), the clip gets the video checks
-(every sampled frame, and no drifting away from the panel), and it's kept beside the comic.
+the panel is cut out of the page, Wan 2.2 animates it for about four seconds (moving as asked,
+or by the act's motion LoRA: a forced last frame equal to the first left it all but still),
+the clip gets the video checks (every sampled frame, and no drifting away from the panel), and
+it's cut where the motion comes back closest to the start and blended there (or played forward
+then back) so it loops without a jump. It's kept beside the comic.
 The reader plays it over its panel, looping.
 
 Panels are found once, when a comic is saved: the page is cut along its gutters (whatever their
@@ -26,9 +28,15 @@ PAPER = 200             # a page edge this bright is paper (see _paper_panels)
 GUTTER_LIKE = 28        # this close in grey to the page's edge is gutter
 GUTTER_SHARE = 0.8      # a row or column this much gutter is a gutter (a bubble or tail may cross it)
 GUTTER_MIN = 2          # pixels (at PANEL_SIDE) a gutter is at least
-LOOP = {"frames": 49}   # about three seconds at Wan's 16 fps
+LOOP = {"frames": 65}   # about four seconds at Wan's 16 fps, cut down to a loop (_loop)
+LOOP_MIN = 16           # frames a loop is at least
+SETTLE = 3              # first frames left out (the clip moving off the drawing)
+LOOP_FPS = 12           # loops play a little slower than Wan's 16 fps: its motion LoRAs run fast
+LOOP_CLOSE = 8.0        # mean difference (0-255) from the first frame close enough to loop back to it
+BLEND = 5               # frames blended into the start at the loop's end
 AREA = 480 * 704        # the clip's pixels (Wan's usual size), in the panel's shape
-LOOP_MOTION = "subtle looping animation, small natural movements, gentle breathing, blinking, hair swaying, still camera"
+IDLE_MOTION = "small natural movements, breathing, blinking, hair swaying"
+LOOP_WORDS = "continuous repeating motion, still camera"
 
 
 def find_panels(img: Image.Image) -> list[list[float]]:
@@ -124,6 +132,62 @@ def _clip_size(w: int, h: int) -> tuple[int, int]:
     return max(256, round(w * r / 16) * 16), max(256, round(h * r / 16) * 16)
 
 
+# What the person says moves, to an act's motion LoRA (motion.ACTS by name).
+SAID_ACTS = ((r"blow ?job|suck|fellat|deepthroat", "blowjob"), (r"reverse cowgirl", "reverse cowgirl"),
+             (r"\bri(d|de|des|ding)\b|cowgirl|bounc", "cowgirl"), (r"lick(ing)? (her|pussy)|cunnilingus|eat(ing)? (her )?out", "cunnilingus"),
+             (r"\bkiss", "kissing"), (r"finger", "fingering"), (r"scissor|tribad", "scissoring"),
+             (r"dildo|toy", "toy"), (r"doggy|from behind", "doggy"), (r"missionary", "missionary"))
+
+def _act(tags: list[str], said: str):
+    """The act whose motion LoRA moves this panel: what the person said first, then the tags,
+    then plain thrusting if there's sex in it."""
+    import re
+    from . import motion
+    by_name = {a.name: a for a in motion.ACTS}
+    for pattern, name in SAID_ACTS:
+        if re.search(pattern, said, re.I) and name in by_name:
+            return by_name[name]
+    act = motion.act_for(tags)
+    if act:
+        return act
+    if set(tags) & motion.SEX or re.search(r"thrust|penetrat|fuck|pound|in and out", said, re.I):
+        return motion.Act("thrusting", "", (), "he thrusts in and out of her in a steady rhythm, their bodies rocking with each thrust")
+    return None
+
+
+def _loop(frames: np.ndarray) -> np.ndarray:
+    """A clip's frames made into a loop without a jump: the longest-lasting cycle in it (two
+    frames at least LOOP_MIN apart that look alike, as in thrusting), its last frames blended
+    into its first; if nothing comes back close, forward then backward. The first frames are
+    skipped: the clip settles there from the drawing."""
+    small = np.stack([np.asarray(Image.fromarray(f).resize((96, 96)), dtype=np.float32) for f in frames])
+    best = None
+    for i in range(SETTLE, min(SETTLE + 12, len(frames) - LOOP_MIN)):
+        far = np.abs(small[i + LOOP_MIN:] - small[i]).mean(axis=(1, 2, 3))
+        for k in np.argsort(far)[:3]:
+            j = i + LOOP_MIN + int(k)
+            score = far[k] - 0.02 * (j - i)        # alike first, then longer
+            if far[k] <= LOOP_CLOSE and (best is None or score < best[0]):
+                best = (score, i, j)
+    if best:
+        _, i, j = best
+        out = frames[i:j].astype(np.float32)
+        blend = min(BLEND, (j - i) // 3)
+        for t in range(blend):   # the last frames fade into the first ones
+            k = (t + 1) / (blend + 1)
+            out[-blend + t] = out[-blend + t] * (1 - k) + frames[i + t] * k
+        return out.clip(0, 255).astype(np.uint8)
+    return np.concatenate([frames[SETTLE:], frames[-2:SETTLE:-1]])
+
+
+def _write(frames: np.ndarray, path: Path, fps: int) -> None:
+    import subprocess
+    h, w = frames.shape[1:3]
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps),
+                    "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-movflags", "+faststart", str(path)],
+                   input=frames.tobytes(), check=True, timeout=300)
+
+
 def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], motion_text: str,
                   strict: bool, progress=lambda phase, done, total: None) -> dict:
     """The clip for one panel; returns its entry for meta["animations"]."""
@@ -151,28 +215,37 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     finally:
         vision.close()
     tags = [t for t, s in sorted(seen.items(), key=lambda kv: -kv[1]) if s >= 0.35][:25]
-    act = motion.act_for(tags)
+    said = motion_text.strip()
+    act = _act(tags, said)
     use_lora = motion.lora_for(act, gen.act_lora, cfg.models_dir) if act else None
-    prompt = ", ".join(p for p in (act.trigger if use_lora else "", motion_text.strip(), LOOP_MOTION,
-                                   act.motion if act else "", ", ".join(tags), MOTION.get(medium, "")) if p)
+    # Asked-for or act motion leads; "subtle" only when nothing moves on its own.
+    lead = [said, act.motion if act else ""] if (said or act) else [IDLE_MOTION]
+    prompt = ", ".join(p for p in [act.trigger if use_lora and act else "", *lead, LOOP_WORDS, ", ".join(tags),
+                                   MOTION.get(medium, "")] if p)
+    print(f"comicanim: page {page}, act {act.name if act else None}, lora {bool(use_lora)}: {prompt[:200]}", flush=True)
     w, h = _clip_size(*panel.size)
     progress("animating", 0, 1)
     comfy = Comfy(gen.comfy_url, gen.supervisor_url, out_dir)
     try:
         path = comfy.img2vid(still, medium, prompt, random.Random().randrange(2 ** 32), str(folder.relative_to(out_dir)),
                              f"anim-{page}-{n}", strict=strict, loras=[use_lora] if use_lora else [],
-                             end=still, wan=LOOP | {"width": w, "height": h})
+                             wan=LOOP | {"width": w, "height": h})
     finally:
         comfy.stop()
         still.unlink(missing_ok=True)
     progress("checking the clip", 0, 1)
-    reason = _check_shots(cfg, {0: _frames(path)}, {"medium": medium, "strict": strict}).get(0)
+    frames = _frames(path)
+    path.unlink(missing_ok=True)
+    reason = _check_shots(cfg, {0: frames}, {"medium": medium, "strict": strict}).get(0)
     if reason:
-        path.unlink(missing_ok=True)
+        print(f"comicanim: page {page} dropped: {reason[0]}: {reason[1]}", flush=True)
         raise RuntimeError(f"the clip failed a check ({reason[0]}): try again, or another panel")
+    looped = _loop(frames)
     dest = folder / f"anim-{page}-{n}.mp4"
-    path.replace(dest)
-    return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": motion_text.strip()}
+    _write(looped, dest, LOOP_FPS)
+    moved = float(np.abs(np.diff(frames.astype(np.float32), axis=0)).mean())
+    print(f"comicanim: {dest.name}: {len(looped)} frames, motion {moved:.2f}", flush=True)
+    return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": said}
 
 
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
