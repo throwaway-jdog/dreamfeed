@@ -344,6 +344,9 @@ textarea.in { resize: vertical; min-height: 72px; }
 .mk-nav .secondary { width: auto; padding: 0 14px; } .mk-nav span { font-size: 14px; text-align: center; }
 .mk-canvas { position: relative; }
 .mk-canvas img { width: 100%; height: auto; display: block; border-radius: 6px; user-select: none; -webkit-user-select: none; }
+.mk-go .primary, .mk-go .secondary { flex: 1; width: auto; }
+#mk-show-test { justify-self: center; width: auto; padding: 0 16px; }
+.mk-canvas.testing canvas { display: none; }
 .mk-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .comic-card .badge { color: var(--accent); font-weight: 700; font-size: 12px; }
 .range { display: grid; grid-template-columns: 1fr 5ch; gap: 10px; align-items: center; }
@@ -563,9 +566,14 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </div>
     <div class="mk-page">
       <div class="mk-nav"><button type="button" class="secondary" id="mk-prev">Previous</button><span id="mk-where"></span><button type="button" class="secondary" id="mk-next">Next</button></div>
+      <button type="button" class="secondary" id="mk-show-test" hidden aria-pressed="false">Show the test colouring</button>
       <div class="mk-canvas"><img id="mk-img" alt=""><canvas id="mk-canvas"></canvas></div>
       <div class="ed-err" id="mk-err" role="alert"></div>
-      <button class="primary" type="button" id="mk-go">Colour it</button>
+      <div class="mk-row mk-go">
+        <button class="secondary" type="button" id="mk-test">Test marked pages</button>
+        <button class="primary" type="button" id="mk-go">Colour it</button>
+      </div>
+      <p class="hint">Test colours only the black-and-white pages you've marked (from the cover's marks), then waits here again so you can compare and adjust.</p>
     </div>
   </div>
   <div class="reader" id="reader" hidden role="dialog" aria-label="Comic">
@@ -1484,7 +1492,7 @@ const mk = { id: null, info: null, page: 1, who: 1, characters: [], marks: {}, d
 async function openMarker(c) {
   let info;
   try { info = await api(`api/comics/marks/${c.id}`); } catch (e) { toast(e.message); return; }
-  Object.assign(mk, { id: c.id, info, page: info.cover, who: 1, dirty: false,
+  Object.assign(mk, { id: c.id, info, page: info.cover, who: 1, dirty: false, showTest: false,
     characters: info.characters.length ? info.characters : ["Character 1", "Character 2"], marks: info.marks || {} });
   $("mk-title").textContent = info.title || "Mark the characters"; $("mk-err").textContent = "";
   $("marker").hidden = false; renderWho(); showMarkPage();
@@ -1514,7 +1522,13 @@ function showMarkPage() {
   const kind = mk.page === mk.info.cover ? "the cover" : mk.info.colour[mk.page - 1] ? "a colour page" : "black and white";
   $("mk-where").textContent = `Page ${mk.page} of ${mk.info.pages} · ${kind} · ${marked} marked`;
   $("mk-prev").disabled = at <= 0; $("mk-next").disabled = at >= order.length - 1;
-  const img = $("mk-img"); img.onload = drawMarks; img.src = `comic/${mk.id}/${mk.page}`;
+  const tested = (mk.info.tests || []).includes(mk.page);
+  if (!tested) mk.showTest = false;
+  const t = $("mk-show-test"); t.hidden = !tested; t.setAttribute("aria-pressed", String(mk.showTest));
+  t.textContent = mk.showTest ? "Back to the marks" : "Show the test colouring";
+  $("mk-canvas").parentNode.classList.toggle("testing", mk.showTest);
+  const img = $("mk-img"); img.onload = drawMarks;
+  img.src = mk.showTest ? `comic/${mk.id}/${mk.page}/test?v=${mk.info.tested}` : `comic/${mk.id}/${mk.page}`;
 }
 function canvasFit() {
   const c = $("mk-canvas"), r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
@@ -1570,6 +1584,15 @@ function stepMark(d) { const order = markOrder(), at = order.indexOf(mk.page) + 
 $("mk-prev").onclick = () => stepMark(-1);
 $("mk-next").onclick = () => stepMark(1);
 $("mk-close").onclick = async () => { if (await saveMarks(false)) { $("marker").hidden = true; refreshComics(); } };
+$("mk-show-test").onclick = () => { mk.showTest = !mk.showTest; showMarkPage(); };
+$("mk-test").onclick = async () => {
+  $("mk-test").disabled = true; $("mk-err").textContent = "";
+  try {
+    if (await saveMarks(false) === false) return;
+    await api("api/comics/marks", { id: mk.id, characters: mk.characters, pages: mk.marks, go: true, test: true });
+    $("marker").hidden = true; toast("Testing your marks. The comic comes back here to mark when it's done."); refreshComics();
+  } catch (e) { $("mk-err").textContent = e.message; } finally { $("mk-test").disabled = false; }
+};
 $("mk-go").onclick = async () => {
   const unmarked = markOrder().filter(p => !(mk.marks[p] || []).length).length;
   if (unmarked && !confirm(`${unmarked} page${unmarked > 1 ? "s aren't" : " isn't"} marked; ${unmarked > 1 ? "they're" : "it's"} coloured automatically. Colour it now?`)) return;

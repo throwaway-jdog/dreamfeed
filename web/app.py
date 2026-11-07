@@ -334,14 +334,16 @@ def comics() -> dict:
                          "url": f"animating a panel of page {params['page']}"}
             elif params["kind"] == "comic_colour":
                 title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
-                item |= {"imported": True, "title": title["caption"] if title else "", "url": "colouring from your marks"}
+                item |= {"imported": True, "title": title["caption"] if title else "",
+                         "url": f"testing your marks on page{'s' if len(params['pages']) > 1 else ''} "
+                                f"{', '.join(map(str, params['pages']))}" if params.get("test") else "colouring from your marks"}
             else:
                 item |= {"cast": params["cast"], "story": params["story"], "pages": params["pages"]}
             out["making"].append(item)
     return out
 
 
-def comic_page(gid: int, n: int, original: bool = False, thumb: bool = False) -> Path | None:
+def comic_page(gid: int, n: int, original: bool = False, thumb: bool = False, test: bool = False) -> Path | None:
     """Page n of a comic; original: an imported comic's page as it was drawn, before colouring;
     thumb: its small copy (the page itself if there's none yet)."""
     with db() as conn:
@@ -349,6 +351,10 @@ def comic_page(gid: int, n: int, original: bool = False, thumb: bool = False) ->
     if not row:
         return None
     meta = _comic_meta(row["file"])
+    if test:   # a marked page's test colouring
+        file = (meta.get("tests") or {}).get(str(n))
+        path = (GENERATED / file).resolve() if file else None
+        return path if path and path.is_relative_to(GENERATED.resolve()) and path.is_file() else None
     pages = (meta.get("originals") if original else None) or (meta.get("thumbs") if thumb else None) \
         or meta.get("pages") or [row["file"]]
     if not 1 <= n <= len(pages):
@@ -456,12 +462,14 @@ def comic_marks(gid: int) -> dict:
     saved = read_json(folder / "marks.json") or {}
     return {"title": meta.get("title", ""), "pages": len(meta.get("originals") or []), "colour": meta.get("colour") or [],
             "cover": meta.get("cover_index", 0) + 1, "characters": saved.get("characters") or [],
-            "marks": saved.get("pages") or {}}
+            "marks": saved.get("pages") or {}, "tests": sorted(int(n) for n in meta.get("tests") or {}),
+            "tested": meta.get("tested_at", "")}
 
 
 def save_comic_marks(req: dict) -> dict:
-    """{"id", "characters": [names], "pages": {"N": [{"who", "width", "points"}]}, "go"}: saves
-    the marks; with go, queues the colouring."""
+    """{"id", "characters": [names], "pages": {"N": [{"who", "width", "points"}]}, "go", "test"}:
+    saves the marks; with go, queues the colouring (with test, of the marked black-and-white pages
+    only, and the comic waits for marks again after)."""
     gid = int(req.get("id", 0))
     folder, meta = _marking(gid)
     count = len(meta.get("originals") or [])
@@ -497,12 +505,18 @@ def save_comic_marks(req: dict) -> dict:
     cover = str(meta.get("cover_index", 0) + 1)
     if pages and cover not in pages:
         raise ValueError("mark the characters on the cover too: their colours come from there")
+    job = {"kind": "comic_colour", "id": gid}
+    if req.get("test"):
+        colour = meta.get("colour") or []
+        test = sorted(int(n) for n in pages if n != cover and not colour[int(n) - 1])
+        if not test:
+            raise ValueError("mark a black-and-white page to test")
+        job |= {"test": True, "pages": test}
     with db() as conn:
         if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
             raise ValueError("three requests are already waiting; let one finish first")
         conn.execute("UPDATE generations SET status = 'comic_colouring' WHERE id = ?", (gid,))
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
-                           (json.dumps({"kind": "comic_colour", "id": gid}),)).lastrowid
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(job),)).lastrowid
     return {"job": jid}
 
 
@@ -1198,8 +1212,9 @@ class Handler(BaseHTTPRequestHandler):
                 file = comic_animation(int(parts[2]), int(parts[4]))
                 if file:
                     return self.send_file(file)
-            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"], ["thumb"]):
-                file = comic_page(int(parts[2]), int(parts[3]), original=parts[4:] == ["original"], thumb=parts[4:] == ["thumb"])
+            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"], ["thumb"], ["test"]):
+                file = comic_page(int(parts[2]), int(parts[3]), original=parts[4:] == ["original"], thumb=parts[4:] == ["thumb"],
+                                  test=parts[4:] == ["test"])
                 if file:
                     return self.send_file(file)
             return self.send(404, {"error": "page not found"})

@@ -307,7 +307,10 @@ each page; marks are saved as you go (`marks.json` beside `comic.json`). **Colou
 colouring (a `comic_colour` job): a patch marked as one character only takes colours from that
 character on the cover, so colours don't jump from one to the other where they touch (on a
 tangled test page, 77% right became 84-88%). Unmarked pages are coloured automatically; the
-cover must be marked if any page is.
+cover must be marked if any page is. **Test marked pages** colours only the black-and-white
+pages marked so far (with the cover's marks) and puts the comic back to waiting for marks, with a
+"Show the test colouring" switch on each tested page, so the marks can be tried and adjusted before
+colouring the whole comic.
 
 A comic whose pages are all in colour is imported as it is (checked, not coloured, no marking).
 

@@ -396,7 +396,7 @@ def _saturation_of(p: Path) -> float:
 
 
 def colour(cfg, prep: dict, medium: str, folder: Path, marks: dict | None = None,
-           progress=lambda phase, done, total: None, seed: int | None = None) -> dict:
+           progress=lambda phase, done, total: None, seed: int | None = None, only: set[int] | None = None) -> dict:
     """Steps 3-5. marks: {page index: [scribbles]} (see spread). Returns the comic's meta (paths
     under generated/): {"pages": coloured where they were black and white, "originals",
     "cover", "dropped", "seed"}. The models take turns on the GPU."""
@@ -410,7 +410,7 @@ def colour(cfg, prep: dict, medium: str, folder: Path, marks: dict | None = None
         seed = random.Random().randrange(2 ** 32)   # one for the whole comic: its pages are drawn alike
     files, cover = prep["files"], prep["cover"]
     refs = [cover] + [i for i, c in enumerate(prep["colour"]) if c and i != cover]
-    bw = [i for i, c in enumerate(prep["colour"]) if not c]
+    bw = [i for i, c in enumerate(prep["colour"]) if not c and (only is None or i in only)]
     open_page = lambda i: Image.open(files[i]).convert("RGB")
     rel = lambda p: str(p.relative_to(out_dir))
     if not bw:   # all in colour already: kept as they are
@@ -534,7 +534,9 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
 
 
 def run_colour_job(cfg, conn, job_id: int, params: dict) -> None:
-    """A marked comic coloured: {"kind": "comic_colour", "id": its generations row}. The marks
+    """A marked comic coloured: {"kind": "comic_colour", "id": its generations row, "test": only
+    the pages in "pages" (from 1), to try the marks; the comic goes back to waiting for them, with
+    the results in comic.json's "tests"}. The marks
     are in marks.json beside comic.json: {"characters": [names], "pages": {"1": [scribbles]}}
     (pages counted from 1)."""
     from .comicanim import add_panels
@@ -553,8 +555,19 @@ def run_colour_job(cfg, conn, job_id: int, params: dict) -> None:
             marks = {int(k) - 1: v for k, v in saved.get("pages", {}).items() if v}
             prep = {"files": [out_dir / p for p in meta["originals"]], "colour": meta["colour"], "tags": meta["tags"],
                     "cover": meta["cover_index"], "dropped": meta["dropped"]}
+            if params.get("test"):
+                only = {int(n) - 1 for n in params.get("pages") or []}
+                done = colour(cfg, prep, meta.get("medium", "furry"), folder, marks, progress, only=only)
+                tests = meta.get("tests") or {}
+                for i in only:
+                    if done["pages"][i] != done["originals"][i]:   # coloured (not dropped by a check)
+                        tests[str(i + 1)] = done["pages"][i]
+                meta["tests"] = tests
+                meta["tested_at"] = dt.datetime.now().strftime("%Y%m%d%H%M%S")
+                (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
+                return f"test: {sum(1 for i in only if str(i + 1) in tests)} of {len(only)} pages coloured"
             done = colour(cfg, prep, meta.get("medium", "furry"), folder, marks, progress)
-            meta = {k: v for k, v in meta.items() if k not in ("marking", "colour", "tags", "cover_index")} | done \
+            meta = {k: v for k, v in meta.items() if k not in ("marking", "colour", "tags", "cover_index", "tests", "tested_at")} | done \
                 | {"characters": saved.get("characters", [])}
             meta = add_panels(meta, out_dir)
             (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
