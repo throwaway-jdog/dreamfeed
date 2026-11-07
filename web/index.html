@@ -239,6 +239,19 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .pill.bad { background: color-mix(in srgb, #d64545 22%, transparent); color: #d64545; }
 .views .n { font-size: 11px; margin-left: 4px; color: var(--accent); font-variant-numeric: tabular-nums; }
 @media (max-width: 420px) { .stat { display: none; } .views button { padding: 0 11px; } }
+/* Phones: the views float at the bottom, in reach of a thumb, and the header keeps its room for
+   the persona strip. (No blur on the header there: a blurred parent would hold the fixed bar.) */
+@media (max-width: 640px) {
+  .top { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--bg); }
+  .views { position: fixed; z-index: 9; left: 50%; transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 24px);
+    padding: 5px; gap: 2px; background: var(--scrim); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1px solid var(--rule); box-shadow: 0 6px 24px rgb(0 0 0 / .35); }
+  .views button { min-height: 44px; padding: 0 14px; font-size: 15px; white-space: nowrap; }
+  main { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  .toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (max-width: 380px) { .views button { padding: 0 10px; font-size: 14px; } }
 /* Personas panel + editor */
 .plist { list-style: none; margin: 0; padding: 0; display: grid; }
 .plist li + li { border-top: 1px solid var(--rule); }
