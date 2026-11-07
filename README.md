@@ -309,6 +309,17 @@ character on the cover, so colours don't jump from one to the other where they t
 tangled test page, 77% right became 84-88%). Unmarked pages are coloured automatically; the
 cover must be marked if any page is.
 
+A comic whose pages are all in colour is imported as it is (checked, not coloured, no marking).
+
+**Animated panels.** In the reader, **Animate a panel** shows each page's panels (found when the
+comic is saved: the parts of the page the gutters separate; drag a box for panels that touch).
+Pick one, optionally say what moves, and a job (`comic_animate`, `comicanim.py`) cuts the panel
+out and has Wan 2.2 animate it for about three seconds, ending on the picture it started from so
+it loops without a jump. The clip gets the video checks (stricter ones for imported comics) and
+plays over its panel in the reader, looping; **Remove animation** takes it off again. Works on
+comics made here and imported ones. `python -m dreamfeed comic-panels` finds the panels of
+comics saved before panels were kept.
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,

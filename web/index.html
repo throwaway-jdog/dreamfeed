@@ -293,6 +293,17 @@ textarea.in { resize: vertical; min-height: 72px; }
 .reader-pages { display: grid; gap: 12px; padding: 12px; max-width: 900px; margin: 0 auto; }
 .reader-pages img { width: 100%; height: auto; display: block; border-radius: 6px; }
 .reader-pages .del { color: var(--muted); }
+.rpage { position: relative; }
+.rpage video { position: absolute; display: block; object-fit: fill; pointer-events: none; }
+.rpage .pbox { position: absolute; border: 3px solid var(--accent); border-radius: 4px; background: rgb(229 96 74 / .12);
+  display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 14px; text-shadow: 0 1px 3px #000; cursor: pointer; }
+.rpage .pbox.done { border-style: dashed; background: rgb(0 0 0 / .25); }
+.rpage .pbox.chosen { background: rgb(229 96 74 / .35); }
+.rpage .drag { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+.rd-help { max-width: 900px; margin: 10px auto 0; padding: 0 16px; }
+.rd-ask { position: sticky; bottom: 0; display: grid; gap: 10px; max-width: 900px; margin: 0 auto; padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface); border-top: 1px solid var(--rule); }
+.rd-ask .mk-row .primary { flex: 1; }
 .mk-tools { display: grid; gap: 10px; padding: 12px 16px; max-width: 900px; margin: 0 auto; }
 .mk-who { display: flex; flex-wrap: wrap; gap: 8px; }
 .mk-who button { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 14px; border-radius: 999px;
@@ -532,8 +543,16 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </div>
   </div>
   <div class="reader" id="reader" hidden role="dialog" aria-label="Comic">
-    <div class="reader-bar"><span id="reader-title"></span><button type="button" class="secondary" id="reader-original" hidden aria-pressed="false">Show the original</button><button type="button" class="secondary" id="reader-close">Close</button></div>
+    <div class="reader-bar"><span id="reader-title"></span><button type="button" class="secondary" id="reader-animate" hidden aria-pressed="false">Animate a panel</button><button type="button" class="secondary" id="reader-original" hidden aria-pressed="false">Show the original</button><button type="button" class="secondary" id="reader-close">Close</button></div>
+    <p class="hint rd-help" id="rd-help" hidden>Tap a panel to animate it into a short loop, or drag a box around one. Tap again to leave.</p>
     <div class="reader-pages" id="reader-pages"></div>
+    <form class="rd-ask" id="rd-ask" hidden>
+      <b>Animate this panel</b>
+      <label class="field"><span>What moves <small>optional: e.g. "tail swishing, steam rising". Without it, small natural movements.</small></span>
+        <input class="in" id="rd-motion" maxlength="200"></label>
+      <div class="ed-err" id="rd-err" role="alert"></div>
+      <div class="mk-row"><button type="button" class="secondary" id="rd-cancel">Cancel</button><button class="primary" type="submit" id="rd-go">Animate</button></div>
+    </form>
   </div>
   <div class="timeline" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
@@ -1249,25 +1268,92 @@ async function refreshComics() {
   $("c-none").hidden = d.comics.length > 0;
   if (state.view === "comics" && d.making.length) comicState.timer = setTimeout(refreshComics, 10000);
 }
+const rd = { c: null, picking: false, chosen: null, original: false };
 function openComic(c) {
+  Object.assign(rd, { c, picking: false, chosen: null, original: false });
   $("reader-title").textContent = c.title || "Untitled";
-  const pages = $("reader-pages"); pages.replaceChildren();
-  const imgs = [];
-  for (let n = 1; n <= c.pages; n++) { const img = el("img"); img.alt = `Page ${n}`; img.src = `comic/${c.id}/${n}`; pages.append(img); imgs.push(img); }
   const orig = $("reader-original"); orig.hidden = !c.originals; orig.setAttribute("aria-pressed", "false"); orig.textContent = "Show the original";
   orig.onclick = () => {
-    const on = orig.getAttribute("aria-pressed") !== "true";
-    orig.setAttribute("aria-pressed", String(on)); orig.textContent = on ? "Show in colour" : "Show the original";
-    imgs.forEach((img, i) => img.src = `comic/${c.id}/${i + 1}${on ? "/original" : ""}`);
+    rd.original = !rd.original;
+    orig.setAttribute("aria-pressed", String(rd.original)); orig.textContent = rd.original ? "Show in colour" : "Show the original";
+    renderPages();
   };
-  const del = el("button", "secondary del", "Delete this comic"); del.type = "button";
-  del.onclick = async () => {
-    if (!confirm("Delete this comic?")) return;
-    try { await api("api/comics/delete", { id: c.id }); closeComic(); refreshComics(); } catch (err) { toast(err.message); }
-  };
-  pages.append(del);
+  const anim = $("reader-animate"); anim.hidden = !!c.colouring; anim.setAttribute("aria-pressed", "false"); anim.textContent = "Animate a panel";
+  anim.onclick = () => { rd.picking = !rd.picking; rd.chosen = null; anim.setAttribute("aria-pressed", String(rd.picking));
+    anim.textContent = rd.picking ? "Done" : "Animate a panel"; renderPages(); };
+  renderPages();
   $("reader").hidden = false; $("reader").scrollTop = 0;
 }
+function pct(box) { const [x0, y0, x1, y1] = box;
+  return { left: `${x0 * 100}%`, top: `${y0 * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%` }; }
+function renderPages() {
+  const c = rd.c, pages = $("reader-pages"); pages.replaceChildren();
+  $("rd-help").hidden = !rd.picking; $("rd-ask").hidden = !rd.chosen; $("rd-err").textContent = "";
+  for (let n = 1; n <= c.pages; n++) {
+    const wrap = el("div", "rpage"), img = el("img"); img.alt = `Page ${n}`;
+    img.src = `comic/${c.id}/${n}${rd.original ? "/original" : ""}`; wrap.append(img);
+    const anims = (c.animations || []).map((a, i) => ({ ...a, i })).filter(a => a.page === n);
+    if (!rd.original && !rd.picking) for (const a of anims) {   // the loops play over their panels
+      const v = el("video"); Object.assign(v, { muted: true, loop: true, autoplay: true, playsInline: true, src: `comic/${c.id}/anim/${a.i}` });
+      v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); Object.assign(v.style, pct(a.box)); wrap.append(v);
+    }
+    if (rd.picking) {
+      const drag = el("div", "drag"); wrap.append(drag); dragBox(drag, n);
+      for (const box of (c.panels || {})[n] || []) {
+        if (anims.some(a => Math.abs(a.box[0] - box[0]) < 0.01 && Math.abs(a.box[1] - box[1]) < 0.01)) continue;
+        const b = el("button", "pbox" + (rd.chosen && rd.chosen.page === n && rd.chosen.box === box ? " chosen" : ""), "Animate");
+        b.type = "button"; Object.assign(b.style, pct(box)); b.onclick = () => choose(n, box); wrap.append(b);
+      }
+      for (const a of anims) {
+        const b = el("button", "pbox done", "Remove animation"); b.type = "button"; Object.assign(b.style, pct(a.box));
+        b.onclick = async () => { if (!confirm("Remove this animation?")) return;
+          try { await api("api/comics/animation-delete", { id: c.id, index: a.i }); await reloadComic(); } catch (e) { toast(e.message); } };
+        wrap.append(b);
+      }
+      if (rd.chosen && rd.chosen.page === n && !((c.panels || {})[n] || []).includes(rd.chosen.box)) {
+        const b = el("div", "pbox chosen"); Object.assign(b.style, pct(rd.chosen.box)); wrap.append(b);
+      }
+    }
+    pages.append(wrap);
+  }
+  if (!rd.picking) {
+    const del = el("button", "secondary del", "Delete this comic"); del.type = "button";
+    del.onclick = async () => {
+      if (!confirm("Delete this comic?")) return;
+      try { await api("api/comics/delete", { id: c.id }); closeComic(); refreshComics(); } catch (err) { toast(err.message); }
+    };
+    pages.append(del);
+  }
+}
+function choose(page, box) { rd.chosen = { page, box }; renderPages(); $("rd-motion").focus({ preventScroll: true }); }
+function dragBox(layer, page) {   // a box drawn by hand, for panels that weren't found
+  let start = null, shape = null;
+  const at = e => { const r = layer.getBoundingClientRect();
+    return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
+  layer.addEventListener("pointerdown", e => { if (e.button > 0) return; e.preventDefault(); layer.setPointerCapture(e.pointerId);
+    start = at(e); shape = el("div", "pbox chosen"); layer.parentNode.append(shape); });
+  layer.addEventListener("pointermove", e => { if (!start) return; const p = at(e);
+    Object.assign(shape.style, pct([Math.min(start[0], p[0]), Math.min(start[1], p[1]), Math.max(start[0], p[0]), Math.max(start[1], p[1])])); });
+  const end = e => { if (!start) return; const p = at(e), box = [Math.min(start[0], p[0]), Math.min(start[1], p[1]), Math.max(start[0], p[0]), Math.max(start[1], p[1])];
+    start = null; shape.remove();
+    if (box[2] - box[0] >= 0.05 && box[3] - box[1] >= 0.05) choose(page, box.map(v => Math.round(v * 10000) / 10000)); };
+  layer.addEventListener("pointerup", end); layer.addEventListener("pointercancel", end);
+}
+async function reloadComic() {
+  const d = await api("api/comics"); const c = d.comics.find(x => x.id === rd.c.id);
+  if (c) { rd.c = c; rd.chosen = null; renderPages(); }
+}
+$("rd-cancel").onclick = () => { rd.chosen = null; renderPages(); };
+$("rd-ask").onsubmit = async e => {
+  e.preventDefault(); if (!rd.chosen) return; $("rd-go").disabled = true; $("rd-err").textContent = "";
+  try {
+    await api("api/comics/animate", { id: rd.c.id, page: rd.chosen.page, box: rd.chosen.box, motion: $("rd-motion").value.trim() });
+    $("rd-motion").value = ""; rd.chosen = null; rd.picking = false;
+    $("reader-animate").setAttribute("aria-pressed", "false"); $("reader-animate").textContent = "Animate a panel";
+    renderPages(); toast("Animating the panel. It plays here when it's done.");
+  } catch (err) { $("rd-err").textContent = err.message; }
+  $("rd-go").disabled = false;
+};
 function closeComic() { $("reader").hidden = true; }
 /* ---------- marking the characters of an imported comic ---------- */
 const MARK_COLOURS = ["#ff7a00", "#3d7bff", "#2fbf55", "#e6c200", "#c03ad6", "#00b5b5"];
@@ -1448,6 +1534,7 @@ function renderLive(d) {
       : j.params.kind === "comic" ? `make a ${j.params.pages}-page comic`
       : j.params.kind === "comic_import" ? "import and colour a comic"
       : j.params.kind === "comic_colour" ? "colour a comic from your marks"
+      : j.params.kind === "comic_animate" ? "animate a comic panel"
       : `${j.params.images} images, keep ${j.params.keep}${j.params.personas ? " · " + j.params.personas.map(h => personaOf(h)?.name || h).join(", ") : ""}`;
     head.append(el("span", null, `Waiting: ${what}`));
     const stop = el("button", "linkish", "Remove"); stop.type = "button";

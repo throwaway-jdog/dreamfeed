@@ -386,8 +386,6 @@ def prepare(cfg, pages: list[Path], medium: str, cover_index: int | None = None,
     else:
         raise RuntimeError("no page is in colour to colour the others from")
     colour[cover] = True
-    if all(colour):
-        raise RuntimeError("no page is in black and white: nothing to colour")
     print(f"colorize: cover {files[cover].name}", flush=True)
     return {"files": files, "colour": colour, "tags": tags, "cover": cover, "dropped": dropped}
 
@@ -414,6 +412,10 @@ def colour(cfg, prep: dict, medium: str, folder: Path, marks: dict | None = None
     refs = [cover] + [i for i, c in enumerate(prep["colour"]) if c and i != cover]
     bw = [i for i, c in enumerate(prep["colour"]) if not c]
     open_page = lambda i: Image.open(files[i]).convert("RGB")
+    rel = lambda p: str(p.relative_to(out_dir))
+    if not bw:   # all in colour already: kept as they are
+        return {"pages": [rel(p) for p in files], "originals": [rel(p) for p in files], "cover": rel(files[cover]),
+                "dropped": prep["dropped"], "seed": seed}
     tmp = Path(tempfile.mkdtemp(prefix="hints-"))
     coloured = {}
     try:
@@ -458,7 +460,6 @@ def colour(cfg, prep: dict, medium: str, folder: Path, marks: dict | None = None
                 del coloured[i]
     finally:
         vision.close()
-    rel = lambda p: str(p.relative_to(out_dir))
     return {"pages": [rel(coloured.get(i, p)) for i, p in enumerate(files)], "originals": [rel(p) for p in files],
             "cover": rel(files[cover]), "dropped": prep["dropped"], "seed": seed}
 
@@ -494,6 +495,7 @@ def _job(conn, job_id: int, night: str, work) -> None:
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
     """An import queued from the Comics page: {"kind": "comic_import", "url", "title", "medium",
     "cover", "mark"}. Marked: stops for the marks (the comic's status is "comic_marking")."""
+    from .comicanim import add_panels
     from .generate import _set
     out_dir = cfg.data_dir / "generated"
     folder = out_dir / f"comic-import-{dt.datetime.now():%Y%m%d-%H%M%S}"
@@ -509,10 +511,11 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
             prep = prepare(cfg, pages, medium, params.get("cover"), progress)
             base = {"title": params.get("title") or "Imported comic", "source": params["url"], "imported": True,
                     "cast": [], "medium": medium}
-            if params.get("mark"):
+            marking = params.get("mark") and not all(prep["colour"])   # nothing to mark in a colour comic
+            if marking:
                 meta, status = base | _prep_meta(prep, out_dir) | {"marking": True}, "comic_marking"
             else:
-                meta, status = base | colour(cfg, prep, medium, folder, progress=progress), "comic"
+                meta, status = add_panels(base | colour(cfg, prep, medium, folder, progress=progress), out_dir), "comic"
             (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
@@ -523,7 +526,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
                 " VALUES (?, ?, 'comic import', ?, 0, ?, 'comic', ?, ?)",
                 (night, medium, params["url"], meta["title"], status, meta["pages"][0])).lastrowid
         _set(conn, gid, posted_at=dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
-        if params.get("mark"):
+        if marking:
             return f"{len(meta['pages'])} pages, {meta['dropped']} dropped by the checks: waiting for the marks"
         return f"{len(meta['pages'])} pages, {meta['dropped']} dropped by the checks"
 
@@ -534,6 +537,7 @@ def run_colour_job(cfg, conn, job_id: int, params: dict) -> None:
     """A marked comic coloured: {"kind": "comic_colour", "id": its generations row}. The marks
     are in marks.json beside comic.json: {"characters": [names], "pages": {"1": [scribbles]}}
     (pages counted from 1)."""
+    from .comicanim import add_panels
     out_dir = cfg.data_dir / "generated"
 
     def work(progress):
@@ -552,6 +556,7 @@ def run_colour_job(cfg, conn, job_id: int, params: dict) -> None:
             done = colour(cfg, prep, meta.get("medium", "furry"), folder, marks, progress)
             meta = {k: v for k, v in meta.items() if k not in ("marking", "colour", "tags", "cover_index")} | done \
                 | {"characters": saved.get("characters", [])}
+            meta = add_panels(meta, out_dir)
             (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
             status, first = "comic", meta["pages"][0]
         finally:

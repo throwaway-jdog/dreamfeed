@@ -298,16 +298,22 @@ def comics() -> dict:
                                   "cast": meta.get("cast") or [], "story": meta.get("story", ""),
                                   "imported": bool(meta.get("imported")),
                                   "marking": r["status"] == "comic_marking", "colouring": r["status"] == "comic_colouring",
+                                  "panels": meta.get("panels") or {},
+                                  "animations": [{"page": a["page"], "box": a["box"]} for a in meta.get("animations") or []],
                                   "originals": bool(meta.get("originals")) and meta["originals"] != meta.get("pages"),
                                   "created": r["created_at"]})
         for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
                               " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic%'"):
             params = json.loads(r["params"])
-            if params.get("kind") not in ("comic", "comic_import", "comic_colour"):
+            if params.get("kind") not in ("comic", "comic_import", "comic_colour", "comic_animate"):
                 continue
             item = {"job": r["id"], "status": r["status"], "progress": json.loads(r["progress"]) if r["progress"] else None}
             if params["kind"] == "comic_import":
                 item |= {"imported": True, "title": params.get("title") or "", "url": params["url"]}
+            elif params["kind"] == "comic_animate":
+                title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
+                item |= {"imported": True, "title": title["caption"] if title else "",
+                         "url": f"animating a panel of page {params['page']}"}
             elif params["kind"] == "comic_colour":
                 title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
                 item |= {"imported": True, "title": title["caption"] if title else "", "url": "colouring from your marks"}
@@ -475,6 +481,79 @@ def save_comic_marks(req: dict) -> dict:
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
                            (json.dumps({"kind": "comic_colour", "id": gid}),)).lastrowid
     return {"job": jid}
+
+
+ANIMATE_MOTION = 200      # characters of "what moves"
+
+
+def _finished_comic(gid: int) -> tuple[Path, dict]:
+    with db() as conn:
+        row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic' AND status = 'comic'",
+                           (gid,)).fetchone()
+    if not row:
+        raise LookupError("no such comic")
+    folder = (GENERATED / row["file"]).parent.resolve()
+    if not folder.is_relative_to(GENERATED.resolve()):
+        raise LookupError("no such comic")
+    return folder, read_json(folder / "comic.json")
+
+
+def queue_comic_animation(req: dict) -> dict:
+    """{"id", "page" (from 1), "box": [x0, y0, x1, y1] shares of the page, "motion"}: one panel
+    animated into a short loop."""
+    gid = int(req.get("id", 0))
+    folder, meta = _finished_comic(gid)
+    try:
+        page = int(req.get("page", 0))
+    except (TypeError, ValueError):
+        raise ValueError("bad page")
+    if not 1 <= page <= len(meta.get("pages") or []):
+        raise ValueError("bad page")
+    box = req.get("box")
+    if not isinstance(box, list) or len(box) != 4 or not all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in box):
+        raise ValueError("bad panel")
+    x0, y0, x1, y1 = (round(float(v), 4) for v in box)
+    if x1 - x0 < 0.05 or y1 - y0 < 0.05:
+        raise ValueError("that panel is too small")
+    motion = " ".join(str(req.get("motion") or "").split())
+    if len(motion) > ANIMATE_MOTION:
+        raise ValueError(f"keep it under {ANIMATE_MOTION} characters")
+    bad = safety.request_blocked(motion)
+    if bad:
+        raise ValueError(f"can't include: {', '.join(bad)}")
+    with db() as conn:
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
+            raise ValueError("three requests are already waiting; let one finish first")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
+            {"kind": "comic_animate", "id": gid, "page": page, "box": [x0, y0, x1, y1], "motion": motion}),)).lastrowid
+    return {"job": jid}
+
+
+def delete_comic_animation(req: dict) -> dict:
+    """{"id", "index"}: an animated panel back to the still page."""
+    gid, index = int(req.get("id", 0)), int(req.get("index", -1))
+    folder, meta = _finished_comic(gid)
+    anims = meta.get("animations") or []
+    if not 0 <= index < len(anims):
+        raise LookupError("no such animation")
+    gone = anims.pop(index)
+    path = (GENERATED / gone["file"]).resolve()
+    if path.is_relative_to(folder):
+        path.unlink(missing_ok=True)
+    (folder / "comic.json").write_text(json.dumps(meta | {"animations": anims}, ensure_ascii=False, indent=1))
+    return {"ok": True}
+
+
+def comic_animation(gid: int, index: int) -> Path | None:
+    try:
+        folder, meta = _finished_comic(gid)
+    except LookupError:
+        return None
+    anims = meta.get("animations") or []
+    if not 0 <= index < len(anims):
+        return None
+    path = (GENERATED / anims[index]["file"]).resolve()
+    return path if path.is_relative_to(folder) and path.is_file() else None
 
 
 def delete_comic(req: dict) -> dict:
@@ -1087,6 +1166,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
         if path.startswith("/comic/"):
             parts = path.split("/")
+            if len(parts) == 5 and parts[2].isdigit() and parts[3] == "anim" and parts[4].isdigit():
+                file = comic_animation(int(parts[2]), int(parts[4]))
+                if file:
+                    return self.send_file(file)
             if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"]):
                 file = comic_page(int(parts[2]), int(parts[3]), original=len(parts) == 5)
                 if file:
@@ -1112,6 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
                    "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
                    "/api/comics/import": queue_comic_import, "/api/comics/marks": save_comic_marks,
+                   "/api/comics/animate": queue_comic_animation, "/api/comics/animation-delete": delete_comic_animation,
                    "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,

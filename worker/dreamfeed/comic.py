@@ -419,7 +419,9 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
         path = folder / f"page-{n // PANELS + 1}.jpg"
         page(panels[n:n + PANELS], layout).save(path, quality=90)
         files.append(str(path.relative_to(out_dir)))
-    meta = {"title": sc["title"], "pages": files, "cast": handles, "story": story, "script": sc["panels"]}
+    from .comicanim import add_panels
+    meta = add_panels({"title": sc["title"], "pages": files, "cast": handles, "story": story, "script": sc["panels"],
+                       "medium": persona.medium}, out_dir)
     (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
     print(f"comic: {night} {sc['title']!r}, {len(files)} pages", flush=True)
     return meta | {"night": night}
