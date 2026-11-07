@@ -1,6 +1,6 @@
 """A comic panel animated: a short seamless loop, the way comic artists animate a panel.
 
-    python -m dreamfeed comic-panels            find the panels of comics saved before panels were kept
+    python -m dreamfeed comic-panels [--again]   panels and thumbnails for comics saved without them
 
 The reader's "Animate a panel" queues a job (kind "comic_animate") for one panel of one page:
 the panel is cut out of the page, Wan 2.2 animates it for about four seconds (moving as asked,
@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
+THUMB = 360             # a thumbnail's width
 PANEL_SIDE = 1000       # pages are searched for panels at this long side
 PANEL_MIN = 0.02        # a panel is at least this share of the page
 PAPER = 200             # a page edge this bright is paper (see _paper_panels)
@@ -116,15 +117,24 @@ def _paper_panels(paper: np.ndarray) -> list[list[float]]:
 
 
 def add_panels(meta: dict, out_dir: Path) -> dict:
-    """meta with "panels": {"N": boxes} for each of its pages (counted from 1)."""
-    panels = {}
+    """meta with "panels": {"N": boxes} for each of its pages (counted from 1), and "thumbs":
+    small copies of the pages (thumb-N.jpg beside them) for the reader's grid and the list."""
+    panels, thumbs = {}, []
     for n, page in enumerate(meta.get("pages") or [], 1):
+        path = out_dir / page
         try:
-            with Image.open(out_dir / page) as im:
-                panels[str(n)] = find_panels(im.convert("RGB"))
+            with Image.open(path) as im:
+                img = im.convert("RGB")
         except OSError:
             panels[str(n)] = []
-    return meta | {"panels": panels}
+            thumbs.append(page)
+            continue
+        panels[str(n)] = find_panels(img)
+        img.thumbnail((THUMB, THUMB * 2))
+        thumb = path.with_name(f"thumb-{n}.jpg")
+        img.save(thumb, quality=82)
+        thumbs.append(str(thumb.relative_to(out_dir)))
+    return meta | {"panels": panels, "thumbs": thumbs}
 
 
 def _clip_size(w: int, h: int) -> tuple[int, int]:
@@ -275,7 +285,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
 
 
 def main(args: list[str]) -> None:
-    """comic-panels: panels for the comics saved before they were kept."""
+    """comic-panels: panels and thumbnails for the comics saved before they were kept."""
     import sqlite3
     from .config import Config
     cfg = Config()
@@ -288,7 +298,7 @@ def main(args: list[str]) -> None:
             meta = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
-        if "panels" in meta and "--again" not in args:
+        if "thumbs" in meta and "--again" not in args:
             continue
         path.write_text(json.dumps(add_panels(meta, out_dir), ensure_ascii=False, indent=1))
         done += 1

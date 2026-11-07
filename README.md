@@ -311,6 +311,10 @@ cover must be marked if any page is.
 
 A comic whose pages are all in colour is imported as it is (checked, not coloured, no marking).
 
+**Reading.** A comic opens a page at a time, fitted to the screen: swipe (or the arrows, or the
+arrow keys) between pages. **Grid** shows every page small (thumbnails made when the comic is
+saved) to jump to one; the comic's delete button is there too.
+
 **Animated panels.** In the reader, **Animate a panel** shows each page's panels (found when the
 comic is saved: cut along the gutters, white, black or coloured; drag a box for panels that
 overlap or touch).
@@ -319,8 +323,8 @@ out and has Wan 2.2 animate it for about four seconds (as asked, or by the act's
 a sex panel with no position thrusts), then cuts it to a cycle within the clip, blended at the
 seam, played at 12 fps. The clip gets the video checks (stricter ones for imported comics) and
 plays over its panel in the reader, looping; **Remove animation** takes it off again. Works on
-comics made here and imported ones. `python -m dreamfeed comic-panels` finds the panels of
-comics saved before panels were kept.
+comics made here and imported ones. `python -m dreamfeed comic-panels` finds the panels (and makes
+the thumbnails) of comics saved before they were kept.
 
 ## Backup
 

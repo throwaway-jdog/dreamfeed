@@ -323,14 +323,16 @@ def comics() -> dict:
     return out
 
 
-def comic_page(gid: int, n: int, original: bool = False) -> Path | None:
-    """Page n of a comic; original: an imported comic's page as it was drawn, before colouring."""
+def comic_page(gid: int, n: int, original: bool = False, thumb: bool = False) -> Path | None:
+    """Page n of a comic; original: an imported comic's page as it was drawn, before colouring;
+    thumb: its small copy (the page itself if there's none yet)."""
     with db() as conn:
         row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
     if not row:
         return None
     meta = _comic_meta(row["file"])
-    pages = (meta.get("originals") if original else None) or meta.get("pages") or [row["file"]]
+    pages = (meta.get("originals") if original else None) or (meta.get("thumbs") if thumb else None) \
+        or meta.get("pages") or [row["file"]]
     if not 1 <= n <= len(pages):
         return None
     path = (GENERATED / pages[n - 1]).resolve()
@@ -1173,8 +1175,8 @@ class Handler(BaseHTTPRequestHandler):
                 file = comic_animation(int(parts[2]), int(parts[4]))
                 if file:
                     return self.send_file(file)
-            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"]):
-                file = comic_page(int(parts[2]), int(parts[3]), original=len(parts) == 5)
+            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"], ["thumb"]):
+                file = comic_page(int(parts[2]), int(parts[3]), original=parts[4:] == ["original"], thumb=parts[4:] == ["thumb"])
                 if file:
                     return self.send_file(file)
             return self.send(404, {"error": "page not found"})
