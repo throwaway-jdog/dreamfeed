@@ -236,6 +236,8 @@ def dashboard() -> dict:
                 run = dict(r)
                 run["stats"] = json.loads(run["stats"]) if run["stats"] else {}
                 run["progress"] = json.loads(run["progress"]) if run["progress"] else None
+                job = conn.execute("SELECT message FROM jobs WHERE night = ? ORDER BY id DESC LIMIT 1", (r["night"],)).fetchone()
+                run["message"] = job["message"] if job else None   # why a job's run failed, what it made
                 out["runs"].append(run)
             out["jobs"] = [dict(r) | {"params": json.loads(r["params"])} for r in conn.execute(
                 "SELECT id, params, status, night, message, created_at FROM jobs"
@@ -302,6 +304,22 @@ def comics() -> dict:
                                   "animations": [{"page": a["page"], "box": a["box"]} for a in meta.get("animations") or []],
                                   "originals": bool(meta.get("originals")) and meta["originals"] != meta.get("pages"),
                                   "created": r["created_at"]})
+        # Comic jobs that failed in the last day, with why: they'd otherwise just vanish from "being made".
+        out["failed"] = []
+        for r in conn.execute("SELECT id, params, message, finished_at FROM jobs WHERE status = 'failed'"
+                              " AND params LIKE '%\"kind\": \"comic%' AND finished_at >= datetime('now', '-1 day')"
+                              " ORDER BY id DESC LIMIT 10"):
+            params = json.loads(r["params"])
+            what = {"comic": "Making a comic", "comic_import": "Importing a comic", "comic_colour": "Colouring a comic",
+                    "comic_animate": f"Animating a panel on page {params.get('page')}"}.get(params.get("kind"))
+            if not what:
+                continue
+            title = ""
+            if params.get("id"):
+                row = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
+                title = row["caption"] if row else ""
+            out["failed"].append({"job": r["id"], "what": what, "title": title or params.get("url", ""),
+                                  "message": r["message"] or "", "finished": r["finished_at"]})
         for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
                               " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic%'"):
             params = json.loads(r["params"])

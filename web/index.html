@@ -543,6 +543,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button class="primary" type="submit" id="ci-go">Import and colour</button>
     </form>
     <div class="panel" id="c-making-panel" hidden><h2>Being made</h2><ul class="plist" id="c-making"></ul></div>
+    <div class="panel" id="c-failed-panel" hidden><h2>Didn't work</h2><p class="hint">In the last day.</p><ul class="plist" id="c-failed"></ul></div>
     <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
   </section>
   <div class="reader marker" id="marker" hidden role="dialog" aria-label="Mark the characters">
@@ -826,6 +827,8 @@ function toast(msg, action, onAction) {
 
 function nightLabel(n) {
   if (n.startsWith("test-")) return "Test batch";
+  const job = { comicanim: "Panel animation", comicimport: "Comic import", comiccolour: "Comic colouring", comicjob: "Comic" }[n.split("-")[0]];
+  if (job) return job;
   const v = n.match(/^video-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
   if (v) {
     const d = new Date(+v[1], v[2] - 1, +v[3], +v[4], +v[5]);
@@ -1289,6 +1292,14 @@ async function refreshComics() {
     making.append(li);
   }
   $("c-making-panel").hidden = !d.making.length;
+  const failed = $("c-failed"); failed.replaceChildren();
+  for (const f of d.failed || []) {
+    const li = el("li"); li.style.padding = "10px 0";
+    li.append(el("b", null, `${f.what}${f.title ? " · " + f.title : ""}`), el("div", "hint", f.message || "No reason given."),
+              el("div", "hint", f.finished ? relTime(f.finished) : ""));
+    failed.append(li);
+  }
+  $("c-failed-panel").hidden = !(d.failed || []).length;
   const list = $("c-list"); list.replaceChildren();
   for (const c of d.comics) {
     const card = el("button", "comic-card"); card.type = "button";
@@ -1665,6 +1676,7 @@ function renderRuns(d) {
     if (st.dropped) parts.push(`${st.dropped} dropped by the checks`);
     if (st.note) parts.push(st.note);
     if (r.finished_at) parts.push("finished " + clock(r.finished_at));
+    if (r.message && r.status !== "running") parts.push(r.message);   // a job's own message: why it failed, what it made
     li.append(el("span", "what", parts.join(" · ") || (r.status === "running" ? "in progress" : "")));
     list.append(li);
   }

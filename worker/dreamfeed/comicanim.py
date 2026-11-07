@@ -201,7 +201,7 @@ def _write(frames: np.ndarray, path: Path, fps: int) -> None:
 def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], motion_text: str,
                   strict: bool, progress=lambda phase, done, total: None) -> dict:
     """The clip for one panel; returns its entry for meta["animations"]."""
-    from . import motion
+    from . import motion, safety
     from .comfy import Comfy
     from .generate import MOTION
     from .scene import _check_shots, _frames
@@ -249,7 +249,8 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     reason = _check_shots(cfg, {0: frames}, {"medium": medium, "strict": strict}).get(0)
     if reason:
         print(f"comicanim: page {page} dropped: {reason[0]}: {reason[1]}", flush=True)
-        raise RuntimeError(f"the clip failed a check ({reason[0]}): try again, or another panel")
+        raise RuntimeError(f"Dropped by the safety checks: {safety.explain(*reason)}. Every try is drawn anew, so "
+                           "trying again (or describing the motion differently) can pass; otherwise pick another panel.")
     looped = _loop(frames)
     dest = folder / f"anim-{page}-{n}.mp4"
     _write(looped, dest, LOOP_FPS)

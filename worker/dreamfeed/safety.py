@@ -200,3 +200,22 @@ def feral_hits(scores: dict[str, float]) -> list[str]:
 
 def youth_tag_hits(scores: dict[str, float], threshold: float) -> list[str]:
     return sorted(t for t in YOUTH_TAGS if scores.get(t, 0.0) >= threshold)
+
+
+# What each check's reason code means, in plain words (for messages people read).
+REASONS = {
+    "youth-tag": "a frame was tagged as looking young",
+    "age-check": "a frame looked too young to the age check",
+    "age-estimate": "a face looked under age to the age estimate",
+    "feral": "a frame looked like an animal rather than an anthro character",
+    "photo": "it looked like a photo of a real person",
+    "blocked-tag": "it showed something that's never allowed",
+    "drift": "the clip drifted away from the picture it started from",
+}
+
+
+def explain(code: str, detail: str = "") -> str:
+    """A check's reason as a sentence: "a frame looked like an animal ... (feral check: animal focus)"."""
+    words = REASONS.get(code, code)
+    return f"{words} ({code} check{': ' + detail if detail else ''})"
+
