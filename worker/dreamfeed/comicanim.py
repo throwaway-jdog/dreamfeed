@@ -143,20 +143,31 @@ def _clip_size(w: int, h: int) -> tuple[int, int]:
 
 
 # What the person says moves, to an act's motion LoRA (motion.ACTS by name).
-SAID_ACTS = ((r"blow ?job|suck|fellat|deepthroat", "blowjob"), (r"reverse cowgirl", "reverse cowgirl"),
+SAID_ACTS = ((r"squirt|female ejaculation", "squirt"), (r"blow ?job|suck|fellat|deepthroat", "blowjob"), (r"reverse cowgirl", "reverse cowgirl"),
              (r"\bri(d|de|des|ding)\b|cowgirl|bounc", "cowgirl"), (r"lick(ing)? (her|pussy)|cunnilingus|eat(ing)? (her )?out", "cunnilingus"),
              (r"\bkiss", "kissing"), (r"finger", "fingering"), (r"scissor|tribad", "scissoring"),
              (r"dildo|toy", "toy"), (r"doggy|from behind", "doggy"), (r"missionary", "missionary"))
+
+# Who's in the panel, as the person says (the tagger misreads close-ups: a hand and a crotch can
+# come out "2boys, bara"): their tags replace whatever it said about who's there.
+CASTS = {"woman": "1girl, solo focus, female", "women": "2girls, yuri", "woman and man": "1girl, 1boy, hetero",
+         "man": "1boy, solo focus, male", "men": "2boys, yaoi"}
+WHO_TAGS = {"1girl", "2girls", "3girls", "multiple girls", "1boy", "2boys", "3boys", "multiple boys", "solo", "solo focus",
+            "male focus", "female focus", "yaoi", "yuri", "hetero", "bara", "muscular male", "mature male", "mature female",
+            "furry male", "furry female", "male", "female", "androgynous", "trap", "otoko no ko", "futanari"}
+
 
 def _act(tags: list[str], said: str):
     """The act whose motion LoRA moves this panel: what the person said first, then the tags,
     then plain thrusting if there's sex in it."""
     import re
     from . import motion
-    by_name = {a.name: a for a in motion.ACTS}
+    by_name = {a.name: a for a in (*motion.ACTS, *motion.CLIMAXES.values())}
     for pattern, name in SAID_ACTS:
         if re.search(pattern, said, re.I) and name in by_name:
             return by_name[name]
+    if set(tags) & set(motion.SQUIRT.tags):
+        return motion.SQUIRT
     act = motion.act_for(tags)
     if act:
         return act
@@ -199,7 +210,7 @@ def _write(frames: np.ndarray, path: Path, fps: int) -> None:
 
 
 def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], motion_text: str,
-                  strict: bool, progress=lambda phase, done, total: None) -> dict:
+                  strict: bool, progress=lambda phase, done, total: None, cast: str = "") -> dict:
     """The clip for one panel; returns its entry for meta["animations"]."""
     from . import motion, safety
     from .comfy import Comfy
@@ -225,6 +236,8 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     finally:
         vision.close()
     tags = [t for t, s in sorted(seen.items(), key=lambda kv: -kv[1]) if s >= 0.35][:25]
+    if cast in CASTS:
+        tags = [t.strip() for t in CASTS[cast].split(",")] + [t for t in tags if t not in WHO_TAGS]
     said = motion_text.strip()
     act = _act(tags, said)
     use_lora = motion.lora_for(act, gen.act_lora, cfg.models_dir) if act else None
@@ -256,7 +269,7 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     _write(looped, dest, LOOP_FPS)
     moved = float(np.abs(np.diff(frames.astype(np.float32), axis=0)).mean())
     print(f"comicanim: {dest.name}: {len(looped)} frames, motion {moved:.2f}", flush=True)
-    return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": said}
+    return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": said, "cast": cast}
 
 
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
@@ -276,7 +289,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
         # Imported comics get the stricter adult checks; a comic made here, its persona's.
         strict = True if meta.get("imported") else bool(row[1])
         entry = animate_panel(cfg, folder, meta, int(params["page"]), params["box"], params.get("motion", ""),
-                              strict, progress)
+                              strict, progress, params.get("cast", ""))
         meta = json.loads((folder / "comic.json").read_text())   # read again: it may have changed meanwhile
         meta["animations"] = (meta.get("animations") or []) + [entry]
         (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))

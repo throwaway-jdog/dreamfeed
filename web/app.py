@@ -507,6 +507,7 @@ def save_comic_marks(req: dict) -> dict:
 
 
 ANIMATE_MOTION = 200      # characters of "what moves"
+ANIMATE_CASTS = ("woman", "women", "woman and man", "man", "men")   # comicanim.CASTS
 
 
 def _finished_comic(gid: int) -> tuple[Path, dict]:
@@ -544,11 +545,15 @@ def queue_comic_animation(req: dict) -> dict:
     bad = safety.request_blocked(motion)
     if bad:
         raise ValueError(f"can't include: {', '.join(bad)}")
+    cast = str(req.get("cast") or "")
+    if cast and cast not in ANIMATE_CASTS:
+        raise ValueError("bad choice of who's in it")
     with db() as conn:
         if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
             raise ValueError("three requests are already waiting; let one finish first")
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
-            {"kind": "comic_animate", "id": gid, "page": page, "box": [x0, y0, x1, y1], "motion": motion}),)).lastrowid
+            {"kind": "comic_animate", "id": gid, "page": page, "box": [x0, y0, x1, y1], "motion": motion,
+             "cast": cast}),)).lastrowid
     return {"job": jid}
 
 

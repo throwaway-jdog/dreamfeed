@@ -584,8 +584,13 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </div>
     <form class="rd-ask" id="rd-ask" hidden>
       <b>Animate this panel</b>
-      <label class="field"><span>What moves <small>optional: e.g. "tail swishing, steam rising". Without it, small natural movements (or the act's own motion).</small></span>
+      <label class="field"><span>What moves <small>optional: e.g. "squirting", "tail swishing, steam rising". Without it, small natural movements (or the act's own motion).</small></span>
         <input class="in" id="rd-motion" maxlength="200"></label>
+      <label class="field"><span>Who's in it <small>if the picture is hard to read, e.g. a close-up</small></span>
+        <select class="in" id="rd-cast">
+          <option value="">Work it out from the picture</option><option value="woman">A woman</option><option value="women">Two women</option>
+          <option value="woman and man">A woman and a man</option><option value="man">A man</option><option value="men">Two men</option>
+        </select></label>
       <div class="ed-err" id="rd-err" role="alert"></div>
       <div class="mk-row"><button type="button" class="secondary" id="rd-cancel">Cancel</button><button class="primary" type="submit" id="rd-go">Animate</button></div>
     </form>
@@ -1467,7 +1472,8 @@ $("rd-cancel").onclick = () => { rd.chosen = null; decorate(); };
 $("rd-ask").onsubmit = async e => {
   e.preventDefault(); if (!rd.chosen) return; $("rd-go").disabled = true; $("rd-err").textContent = "";
   try {
-    await api("api/comics/animate", { id: rd.c.id, page: rd.chosen.page, box: rd.chosen.box, motion: $("rd-motion").value.trim() });
+    await api("api/comics/animate", { id: rd.c.id, page: rd.chosen.page, box: rd.chosen.box, motion: $("rd-motion").value.trim(),
+                                      cast: $("rd-cast").value });
     $("rd-motion").value = ""; stopPicking(); toast("Animating the panel. It plays here when it's done.");
   } catch (err) { $("rd-err").textContent = err.message; }
   $("rd-go").disabled = false;
