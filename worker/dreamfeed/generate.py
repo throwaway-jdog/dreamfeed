@@ -439,11 +439,8 @@ def run_job(cfg: Config, job_id: int) -> None:
         from . import comic
         return comic.run_job(cfg, conn, job_id, params)
     if params.get("kind") == "comic_import":
-        from . import colorize
-        return colorize.run_job(cfg, conn, job_id, params)
-    if params.get("kind") == "comic_colour":
-        from . import colorize
-        return colorize.run_colour_job(cfg, conn, job_id, params)
+        from . import comicimport
+        return comicimport.run_job(cfg, conn, job_id, params)
     if params.get("kind") == "comic_animate":
         from . import comicanim
         return comicanim.run_job(cfg, conn, job_id, params)

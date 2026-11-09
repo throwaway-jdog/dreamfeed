@@ -190,10 +190,6 @@
   "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors": {
    "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
    "sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030"
-  },
-  "controlnet/controlnet-union-sdxl-promax.safetensors": {
-   "url": "https://huggingface.co/xinsir/controlnet-union-sdxl-1.0/resolve/801a4a3fa3d4c936f4feea95b98607bc6726f80c/diffusion_pytorch_model_promax.safetensors",
-   "sha256": "9fae2e50cb431bfcbe05822b59ec2228df545ef27f711dea8949e9f4ed9f7cdc"
   }
  }
 }

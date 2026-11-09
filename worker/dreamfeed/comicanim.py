@@ -10,17 +10,23 @@ it's cut where the motion comes back closest to the start and blended there (or 
 then back) so it loops without a jump. It's kept beside the comic.
 The reader plays it over its panel, looping.
 
+The person can draw loops around what should move (the characters): then only that moves, the
+rest of the clip is the drawing itself (text and speech bubbles stay put), and the reader shows
+the page through everywhere else (the clip's mask). Loops may reach past the panel, for a
+character breaking out of it: the clip then covers both.
+
 Panels are found once, when a comic is saved: the page is cut along its gutters (whatever their
 colour). Panels with no gutter between them come out as one; the reader lets the person draw
 the box instead.
 """
+import datetime as dt
 import json
 import random
 import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 THUMB = 360             # a thumbnail's width
 PANEL_SIDE = 1000       # pages are searched for panels at this long side
@@ -36,6 +42,8 @@ LOOP_FPS = 12           # loops play a little slower than Wan's 16 fps: its moti
 LOOP_CLOSE = 8.0        # mean difference (0-255) from the first frame close enough to loop back to it
 BLEND = 5               # frames blended into the start at the loop's end
 AREA = 480 * 704        # the clip's pixels (Wan's usual size), in the panel's shape
+GROW = 0.02            # an outline is widened this share of the clip's long side (motion past it)
+FEATHER = 0.01          # and its edge softened over this share
 IDLE_MOTION = "small natural movements, breathing, blinking, hair swaying"
 LOOP_WORDS = "continuous repeating motion, still camera"
 
@@ -209,9 +217,33 @@ def _write(frames: np.ndarray, path: Path, fps: int) -> None:
                    input=frames.tobytes(), check=True, timeout=300)
 
 
+def _region(box: list[float], outline: list) -> list[float]:
+    """The panel, grown to take in outlines reaching past it."""
+    if not outline:
+        return box
+    xs = [x for loop in outline for x, _ in loop] + [box[0], box[2]]
+    ys = [y for loop in outline for _, y in loop] + [box[1], box[3]]
+    return [max(0.0, min(xs)), max(0.0, min(ys)), min(1.0, max(xs)), min(1.0, max(ys))]
+
+
+def _mask(outline: list, region: list[float], size: tuple[int, int]) -> Image.Image:
+    """What moves (255) at size, from loops in page shares, widened by GROW and softened."""
+    w, h = size
+    x0, y0, x1, y1 = region
+    m = Image.new("L", size, 0)
+    d = ImageDraw.Draw(m)
+    for loop in outline:
+        d.polygon([((x - x0) / (x1 - x0) * w, (y - y0) / (y1 - y0) * h) for x, y in loop], fill=255)
+    grow = max(1, round(GROW * max(size)))
+    m = m.filter(ImageFilter.MaxFilter(2 * grow + 1))
+    return m.filter(ImageFilter.GaussianBlur(max(1, FEATHER * max(size))))
+
+
 def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], motion_text: str,
-                  strict: bool, progress=lambda phase, done, total: None, cast: str = "") -> dict:
-    """The clip for one panel; returns its entry for meta["animations"]."""
+                  strict: bool, progress=lambda phase, done, total: None, cast: str = "",
+                  outline: list | None = None) -> dict:
+    """The clip for one panel; returns its entry for meta["animations"]. outline: loops (page
+    shares) around what moves; the rest stays as drawn."""
     from . import motion, safety
     from .comfy import Comfy
     from .generate import MOTION
@@ -222,11 +254,11 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     medium = meta.get("medium") or "furry"
     with Image.open(out_dir / meta["pages"][page - 1]) as im:
         img = im.convert("RGB")
+    box = _region(box, outline or [])
     x0, y0, x1, y1 = (round(v * s) for v, s in zip(box, (img.width, img.height, img.width, img.height)))
     if x1 - x0 < 64 or y1 - y0 < 64:
         raise ValueError("that panel is too small to animate")
     panel = img.crop((x0, y0, x1, y1))
-    import datetime as dt
     # Never reused (the reader's cached copy of a clip is kept by its name).
     n = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     still = folder / f"panel-{page}-{n}.png"
@@ -267,16 +299,27 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
         raise RuntimeError(f"Dropped by the safety checks: {safety.explain(*reason)}. Every try is drawn anew, so "
                            "trying again (or describing the motion differently) can pass; otherwise pick another panel.")
     looped = _loop(frames)
+    entry = {}
+    if outline:   # only what was outlined moves; the rest is the drawing
+        size = (looped.shape[2], looped.shape[1])
+        m = _mask(outline, box, size)
+        still = np.asarray(panel.resize(size, Image.LANCZOS), np.float32)
+        a = np.asarray(m, np.float32)[None, ..., None] / 255
+        looped = (looped.astype(np.float32) * a + still[None] * (1 - a)).round().clip(0, 255).astype(np.uint8)
+        mask_file = folder / f"anim-{page}-{n}-mask.png"
+        Image.merge("RGBA", (*Image.new("RGB", size, (255, 255, 255)).split(), m)).save(mask_file)
+        entry["mask"] = str(mask_file.relative_to(out_dir))
     dest = folder / f"anim-{page}-{n}.mp4"
     _write(looped, dest, LOOP_FPS)
     moved = float(np.abs(np.diff(frames.astype(np.float32), axis=0)).mean())
     print(f"comicanim: {dest.name}: {len(looped)} frames, motion {moved:.2f}", flush=True)
-    return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": said, "cast": cast}
+    return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": said, "cast": cast} | entry
 
 
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
-    """{"kind": "comic_animate", "id": the comic's generations row, "page", "box", "motion"}."""
-    from .colorize import _job
+    """{"kind": "comic_animate", "id": the comic's generations row, "page", "box", "motion", "cast",
+    "outline"}."""
+    from .comicimport import _job
     out_dir = cfg.data_dir / "generated"
 
     def work(progress):
@@ -291,7 +334,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
         # Imported comics get the stricter adult checks; a comic made here, its persona's.
         strict = True if meta.get("imported") else bool(row[1])
         entry = animate_panel(cfg, folder, meta, int(params["page"]), params["box"], params.get("motion", ""),
-                              strict, progress, params.get("cast", ""))
+                              strict, progress, params.get("cast", ""), params.get("outline"))
         meta = json.loads((folder / "comic.json").read_text())   # read again: it may have changed meanwhile
         meta["animations"] = (meta.get("animations") or []) + [entry]
         (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))

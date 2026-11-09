@@ -284,39 +284,16 @@ the tail toward the speaker (the image model can't write). About 6 minutes a pag
 lines are checked like captions, and must be consensual (`safety.story_blocked`). Comics stay
 until deleted; they aren't in the feed and don't expire.
 
-**Importing** a black-and-white comic with a colour cover (the same tab; `colorize.py`): paste
-the gallery's link (anything gallery-dl reads, and multporn comics), say whether it's furry or anime, and optionally
-which page is the cover (else the most colourful page is). Every page gets the strict
-adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
-imported. Each black-and-white page is matched, patch by patch, to the colour pages (DINOv2
-features in grey, with surroundings and brightness) and takes their colours as a hint; the image
-model redraws the hint held to the page's own lines (ControlNet Union, line-art mode); then the
-page goes back on top, so lines, shading and lettering are exactly the artist's, bubbles and
-margins stay white, and bare paper (skin and fur in black and white) takes the colour. Coloured
-pages are checked again (a failing one stays as drawn). One seed for the whole comic, so its
-pages are drawn alike. The reader can switch between colour and
-the original. About 30 seconds a page. Tuned on a page of ours turned grey: about 90% of its
-coloured parts get the right colour (75-80% when hard-inked, with no greys).
-`python -m dreamfeed colorize --cover C.png PAGE.png... --out DIR` tries it on files.
-
-**Marking the characters** (the import form's "I'll mark the characters", on by default): the
-import stops once the pages are in and checked, and the comic waits on the Comics page. Its
-marking screen goes page by page, the cover first: name the characters, pick one, scribble over
-her (rough is fine: a mark spreads over the page up to the ink lines around it), and so on for
-each page; marks are saved as you go (`marks.json` beside `comic.json`). **Colour it** queues the
-colouring (a `comic_colour` job): a patch marked as one character only takes colours from that
-character on the cover, so colours don't jump from one to the other where they touch (on a
-tangled test page, 77% right became 84-88%). Unmarked pages are coloured automatically; the
-cover must be marked if any page is. **Test marked pages** colours only the black-and-white
-pages marked so far (with the cover's marks) and puts the comic back to waiting for marks, with a
-"Show the test colouring" switch on each tested page, so the marks can be tried and adjusted before
-colouring the whole comic.
-
-A comic whose pages are all in colour is imported as it is (checked, not coloured, no marking).
+**Importing** a comic (the same tab; `comicimport.py`): paste the gallery's link (anything
+gallery-dl reads, and multporn comics) and say whether it's furry or anime. Every page gets the
+strict adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
+imported. Pages are kept as drawn, to read and animate panels of. (Colouring black-and-white
+comics from their cover was tried and taken out: it wasn't good enough.)
 
 **Reading.** A comic opens a page at a time, fitted to the screen: swipe (or the arrows, or the
 arrow keys) between pages. **Grid** shows every page small (thumbnails made when the comic is
-saved) to jump to one; the comic's delete button is there too.
+saved) to jump to one; the comic's delete button is there too. A comic's card in the list has
+**Rename** and **Delete**.
 
 **Animated panels.** In the reader, **Animate a panel** shows each page's panels (found when the
 comic is saved: cut along the gutters, white, black or coloured; drag a box for panels that
@@ -325,7 +302,12 @@ Pick one, optionally say what moves, and a job (`comic_animate`, `comicanim.py`)
 out and has Wan 2.2 animate it for about four seconds (as asked, or by the act's motion LoRA;
 a sex panel with no position thrusts), then cuts it to a cycle within the clip, blended at the
 seam, played at 12 fps. The clip gets the video checks (stricter ones for imported comics) and
-plays over its panel in the reader, looping; **Remove animation** takes it off again. Works on
+plays over its panel in the reader, looping; **Remove animation** takes it off again.
+Panels can be queued one after another without leaving the picker (queued ones show as such).
+**Draw around them** outlines what should move (one loop per character, reaching past the panel
+for a character breaking out of it): only that moves, the rest of the clip is the drawing itself,
+and the reader masks the clip to the outline (a PNG beside it), so lettering and bubbles stay put.
+Works on
 comics made here and imported ones. `python -m dreamfeed comic-panels` finds the panels (and makes
 the thumbnails) of comics saved before they were kept.
 

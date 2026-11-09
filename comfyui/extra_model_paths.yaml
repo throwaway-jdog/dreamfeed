@@ -9,4 +9,3 @@ dreamfeed:
   vae: vae
   ipadapter: ipadapter
   clip_vision: clip_vision
-  controlnet: controlnet

@@ -262,9 +262,6 @@ def queue_generation(req: dict) -> dict:
             known = {r[0] for r in conn.execute("SELECT handle FROM personas WHERE active = 1")}
             if not set(handles) <= known:
                 raise ValueError("unknown persona")
-        busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
-        if busy >= 3:
-            raise ValueError("three requests are already waiting; let one finish first")
         params = {"images": images, "keep": keep, "mediums": mediums}
         if handles:
             params["personas"] = handles
@@ -279,7 +276,7 @@ MAX_PROMPT = 500
 COMIC_STORY = 600
 COMIC_PAGES = 4
 COMIC_TITLE = 100
-MAX_BODY = 16 * 1024 * 1024   # a request's size (a comic's marks are the biggest)
+MAX_BODY = 16 * 1024 * 1024   # a request's size
 
 
 def _comic_meta(file: str) -> dict:
@@ -292,18 +289,17 @@ def comics() -> dict:
     with db() as conn:
         for r in conn.execute("SELECT g.id, g.caption, g.persona, g.file, g.created_at, g.status, p.name FROM generations g"
                               " LEFT JOIN personas p ON p.handle = g.persona"
-                              " WHERE g.kind = 'comic' AND g.status IN ('comic', 'comic_marking', 'comic_colouring')"
+                              " WHERE g.kind = 'comic' AND g.status = 'comic'"
                               " ORDER BY g.id DESC LIMIT 100"):
             meta = _comic_meta(r["file"])
             out["comics"].append({"id": r["id"], "title": r["caption"] or "", "persona": r["persona"],
                                   "name": r["name"] or r["persona"], "pages": len(meta.get("pages") or [1]),
                                   "cast": meta.get("cast") or [], "story": meta.get("story", ""),
                                   "imported": bool(meta.get("imported")),
-                                  "marking": r["status"] == "comic_marking", "colouring": r["status"] == "comic_colouring",
                                   "panels": meta.get("panels") or {},
-                                  "animations": [{"page": a["page"], "box": a["box"], "name": Path(a["file"]).name}
+                                  "animations": [{"page": a["page"], "box": a["box"], "name": Path(a["file"]).name,
+                                                  "mask": Path(a["mask"]).name if a.get("mask") else None}
                                                  for a in meta.get("animations") or []],
-                                  "originals": bool(meta.get("originals")) and meta["originals"] != meta.get("pages"),
                                   "created": r["created_at"]})
         # Comic jobs that failed in the last day, with why: they'd otherwise just vanish from "being made".
         out["failed"] = []
@@ -311,7 +307,7 @@ def comics() -> dict:
                               " AND params LIKE '%\"kind\": \"comic%' AND finished_at >= datetime('now', '-1 day')"
                               " ORDER BY id DESC LIMIT 10"):
             params = json.loads(r["params"])
-            what = {"comic": "Making a comic", "comic_import": "Importing a comic", "comic_colour": "Colouring a comic",
+            what = {"comic": "Making a comic", "comic_import": "Importing a comic",
                     "comic_animate": f"Animating a panel on page {params.get('page')}"}.get(params.get("kind"))
             if not what:
                 continue
@@ -324,7 +320,7 @@ def comics() -> dict:
         for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
                               " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic%'"):
             params = json.loads(r["params"])
-            if params.get("kind") not in ("comic", "comic_import", "comic_colour", "comic_animate"):
+            if params.get("kind") not in ("comic", "comic_import", "comic_animate"):
                 continue
             item = {"job": r["id"], "status": r["status"], "progress": json.loads(r["progress"]) if r["progress"] else None}
             if params["kind"] == "comic_import":
@@ -332,31 +328,22 @@ def comics() -> dict:
             elif params["kind"] == "comic_animate":
                 title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
                 item |= {"imported": True, "title": title["caption"] if title else "",
-                         "url": f"animating a panel of page {params['page']}"}
-            elif params["kind"] == "comic_colour":
-                title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
-                item |= {"imported": True, "title": title["caption"] if title else "",
-                         "url": f"testing your marks on page{'s' if len(params['pages']) > 1 else ''} "
-                                f"{', '.join(map(str, params['pages']))}" if params.get("test") else "colouring from your marks"}
+                         "url": f"animating a panel of page {params['page']}",
+                         "comic": params["id"], "page": params["page"], "box": params["box"]}
             else:
                 item |= {"cast": params["cast"], "story": params["story"], "pages": params["pages"]}
             out["making"].append(item)
     return out
 
 
-def comic_page(gid: int, n: int, original: bool = False, thumb: bool = False, test: bool = False) -> Path | None:
-    """Page n of a comic; original: an imported comic's page as it was drawn, before colouring;
-    thumb: its small copy (the page itself if there's none yet)."""
+def comic_page(gid: int, n: int, thumb: bool = False) -> Path | None:
+    """Page n of a comic; thumb: its small copy (the page itself if there's none yet)."""
     with db() as conn:
         row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
     if not row:
         return None
     meta = _comic_meta(row["file"])
-    if test:   # a marked page's test colouring
-        file = (meta.get("tests") or {}).get(str(n))
-        path = (GENERATED / file).resolve() if file else None
-        return path if path and path.is_relative_to(GENERATED.resolve()) and path.is_file() else None
-    pages = (meta.get("originals") if original else None) or (meta.get("thumbs") if thumb else None) \
+    pages = (meta.get("thumbs") if thumb else None) \
         or meta.get("pages") or [row["file"]]
     if not 1 <= n <= len(pages):
         return None
@@ -396,15 +383,13 @@ def queue_comic(req: dict) -> dict:
     if not 1 <= pages <= COMIC_PAGES:
         raise ValueError(f"1 to {COMIC_PAGES} pages")
     with db() as conn:
-        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
-            raise ValueError("three requests are already waiting; let one finish first")
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
             {"kind": "comic", "cast": [a.handle, str(cast[1])], "story": story, "pages": pages}),)).lastrowid
     return {"job": jid}
 
 
 def queue_comic_import(req: dict) -> dict:
-    """{"url", "title", "medium", "cover"}: a black-and-white comic with a colour cover, coloured from it."""
+    """{"url", "title", "medium"}: a comic from its gallery's link, kept as drawn."""
     url = str(req.get("url") or "").strip()
     if not re.match(r"https?://[^\s/]+\.[^\s/]+/\S*$", url):
         raise ValueError("paste a link to the comic's gallery")
@@ -415,114 +400,19 @@ def queue_comic_import(req: dict) -> dict:
     medium = req.get("medium")
     if medium not in MEDIUMS:
         raise ValueError("pick furry or anime")
-    cover = req.get("cover")
-    if cover in (None, ""):
-        cover = None
-    else:
-        try:
-            cover = int(cover)
-        except (TypeError, ValueError):
-            raise ValueError("the cover is a page number")
-        if not 1 <= cover <= 200:
-            raise ValueError("the cover is a page number")
     bad = safety.story_blocked(f"{title} {url}")
     if bad:
         raise ValueError(f"the comic can't include: {', '.join(bad)}")
     with db() as conn:
-        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
-            raise ValueError("three requests are already waiting; let one finish first")
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
-            {"kind": "comic_import", "url": url, "title": title, "medium": medium, "cover": cover,
-             "mark": bool(req.get("mark"))}),)).lastrowid
-    return {"job": jid}
-
-
-MARK_COLOURS = 6          # characters a comic's marks can name
-MARK_STROKES = 600        # per page
-MARK_POINTS = 3000        # per stroke
-
-
-def _marking(gid: int, statuses=("comic_marking",)) -> tuple[Path, dict]:
-    """A marked import's folder and comic.json, if it's in one of statuses."""
-    with db() as conn:
-        row = conn.execute("SELECT file, status FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
-    if not row:
-        raise LookupError("no such comic")
-    if row["status"] not in statuses:
-        raise ValueError("that comic isn't waiting for marks")
-    folder = (GENERATED / row["file"]).parent.resolve()
-    if not folder.is_relative_to(GENERATED.resolve()):
-        raise LookupError("no such comic")
-    return folder, read_json(folder / "comic.json")
-
-
-def comic_marks(gid: int) -> dict:
-    """What the marking screen needs: the pages (served at /comic/ID/N), which are in colour,
-    which is the cover, and the marks saved so far."""
-    folder, meta = _marking(gid, ("comic_marking", "comic_colouring"))
-    saved = read_json(folder / "marks.json") or {}
-    return {"title": meta.get("title", ""), "pages": len(meta.get("originals") or []), "colour": meta.get("colour") or [],
-            "cover": meta.get("cover_index", 0) + 1, "characters": saved.get("characters") or [],
-            "marks": saved.get("pages") or {}, "tests": sorted(int(n) for n in meta.get("tests") or {}),
-            "tested": meta.get("tested_at", "")}
-
-
-def save_comic_marks(req: dict) -> dict:
-    """{"id", "characters": [names], "pages": {"N": [{"who", "width", "points"}]}, "go", "test"}:
-    saves the marks; with go, queues the colouring (with test, of the marked black-and-white pages
-    only, and the comic waits for marks again after)."""
-    gid = int(req.get("id", 0))
-    folder, meta = _marking(gid)
-    count = len(meta.get("originals") or [])
-    names = req.get("characters")
-    if not isinstance(names, list) or not 1 <= len(names) <= MARK_COLOURS:
-        raise ValueError(f"name 1 to {MARK_COLOURS} characters")
-    names = [" ".join(str(n).split())[:30] or f"Character {i + 1}" for i, n in enumerate(names)]
-    pages_in = req.get("pages") or {}
-    if not isinstance(pages_in, dict):
-        raise ValueError("bad marks")
-    pages = {}
-    for key, strokes in pages_in.items():
-        if not str(key).isdigit() or not 1 <= int(key) <= count or not isinstance(strokes, list):
-            raise ValueError("bad marks")
-        if len(strokes) > MARK_STROKES:
-            raise ValueError(f"at most {MARK_STROKES} marks a page")
-        clean = []
-        for st in strokes:
-            who, width, pts = st.get("who"), st.get("width"), st.get("points")
-            if not isinstance(who, int) or not 1 <= who <= len(names) or not isinstance(pts, list) or \
-                    not 1 <= len(pts) <= MARK_POINTS or not isinstance(width, (int, float)) or not 0.001 <= width <= 0.2:
-                raise ValueError("bad marks")
-            if not all(isinstance(q, list) and len(q) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in q)
-                       for q in pts):
-                raise ValueError("bad marks")
-            clean.append({"who": who, "width": round(float(width), 4),
-                          "points": [[round(float(x), 4), round(float(y), 4)] for x, y in pts]})
-        if clean:
-            pages[str(int(key))] = clean
-    (folder / "marks.json").write_text(json.dumps({"characters": names, "pages": pages}))
-    if not req.get("go"):
-        return {"saved": True}
-    cover = str(meta.get("cover_index", 0) + 1)
-    if pages and cover not in pages:
-        raise ValueError("mark the characters on the cover too: their colours come from there")
-    job = {"kind": "comic_colour", "id": gid}
-    if req.get("test"):
-        colour = meta.get("colour") or []
-        test = sorted(int(n) for n in pages if n != cover and not colour[int(n) - 1])
-        if not test:
-            raise ValueError("mark a black-and-white page to test")
-        job |= {"test": True, "pages": test}
-    with db() as conn:
-        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
-            raise ValueError("three requests are already waiting; let one finish first")
-        conn.execute("UPDATE generations SET status = 'comic_colouring' WHERE id = ?", (gid,))
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(job),)).lastrowid
+            {"kind": "comic_import", "url": url, "title": title, "medium": medium}),)).lastrowid
     return {"job": jid}
 
 
 ANIMATE_MOTION = 200      # characters of "what moves"
 ANIMATE_CASTS = ("woman", "women", "woman and man", "man", "men")   # comicanim.CASTS
+OUTLINE_LOOPS = 8         # loops drawn around what moves, per panel
+OUTLINE_POINTS = 2000     # per loop
 
 
 def _finished_comic(gid: int) -> tuple[Path, dict]:
@@ -538,8 +428,9 @@ def _finished_comic(gid: int) -> tuple[Path, dict]:
 
 
 def queue_comic_animation(req: dict) -> dict:
-    """{"id", "page" (from 1), "box": [x0, y0, x1, y1] shares of the page, "motion"}: one panel
-    animated into a short loop."""
+    """{"id", "page" (from 1), "box": [x0, y0, x1, y1] shares of the page, "motion", "cast",
+    "outline": [[[x, y], ...], ...] loops drawn around what moves, shares of the page (optional;
+    they may reach past the panel)}: one panel animated into a short loop."""
     gid = int(req.get("id", 0))
     folder, meta = _finished_comic(gid)
     try:
@@ -563,12 +454,23 @@ def queue_comic_animation(req: dict) -> dict:
     cast = str(req.get("cast") or "")
     if cast and cast not in ANIMATE_CASTS:
         raise ValueError("bad choice of who's in it")
+    outline = req.get("outline") or []
+    if not isinstance(outline, list) or len(outline) > OUTLINE_LOOPS:
+        raise ValueError(f"at most {OUTLINE_LOOPS} outlines")
+    loops = []
+    for loop in outline:
+        if not isinstance(loop, list) or not 3 <= len(loop) <= OUTLINE_POINTS or not all(
+                isinstance(q, list) and len(q) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in q) for q in loop):
+            raise ValueError("bad outline")
+        loops.append([[round(float(x), 4), round(float(y), 4)] for x, y in loop])
+    params = {"kind": "comic_animate", "id": gid, "page": page, "box": [x0, y0, x1, y1], "motion": motion, "cast": cast}
+    if loops:
+        params["outline"] = loops
     with db() as conn:
-        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0] >= 3:
-            raise ValueError("three requests are already waiting; let one finish first")
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
-            {"kind": "comic_animate", "id": gid, "page": page, "box": [x0, y0, x1, y1], "motion": motion,
-             "cast": cast}),)).lastrowid
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
+                        (json.dumps(params),)).fetchone()[0]:
+            raise ValueError("this exact animation is already waiting")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(params),)).lastrowid
     return {"job": jid}
 
 
@@ -580,24 +482,43 @@ def delete_comic_animation(req: dict) -> dict:
     if not 0 <= index < len(anims):
         raise LookupError("no such animation")
     gone = anims.pop(index)
-    path = (GENERATED / gone["file"]).resolve()
-    if path.is_relative_to(folder):
-        path.unlink(missing_ok=True)
+    for file in (gone["file"], gone.get("mask")):
+        path = (GENERATED / file).resolve() if file else None
+        if path and path.is_relative_to(folder):
+            path.unlink(missing_ok=True)
     (folder / "comic.json").write_text(json.dumps(meta | {"animations": anims}, ensure_ascii=False, indent=1))
     return {"ok": True}
 
 
 def comic_animation(gid: int, name: str) -> Path | None:
-    """A comic's clip by its file name (names are never reused, so a cached copy is the right one)."""
+    """A comic's clip, or the mask of what moves in it, by its file name (names are never
+    reused, so a cached copy is the right one)."""
     try:
         folder, meta = _finished_comic(gid)
     except LookupError:
         return None
     for a in meta.get("animations") or []:
-        if Path(a["file"]).name == name:
-            path = (GENERATED / a["file"]).resolve()
-            return path if path.is_relative_to(folder) and path.is_file() else None
+        for file in (a["file"], a.get("mask")):
+            if file and Path(file).name == name:
+                path = (GENERATED / file).resolve()
+                return path if path.is_relative_to(folder) and path.is_file() else None
     return None
+
+
+def rename_comic(req: dict) -> dict:
+    """{"id", "title"}"""
+    gid = int(req.get("id", 0))
+    title = " ".join(str(req.get("title") or "").split())[:COMIC_TITLE]
+    if not title:
+        raise ValueError("give it a title")
+    bad = safety.story_blocked(title)
+    if bad:
+        raise ValueError(f"the title can't include: {', '.join(bad)}")
+    folder, meta = _finished_comic(gid)
+    (folder / "comic.json").write_text(json.dumps(meta | {"title": title}, ensure_ascii=False, indent=1))
+    with db() as conn:
+        conn.execute("UPDATE generations SET caption = ? WHERE id = ?", (title, gid))
+    return {"ok": True, "title": title}
 
 
 def delete_comic(req: dict) -> dict:
@@ -626,9 +547,6 @@ def scene_acts(req: dict) -> dict:
 
 def request_animation(req: dict) -> dict:
     with db() as conn:
-        busy = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')").fetchone()[0]
-        if busy >= 3:
-            raise ValueError("three requests are already waiting; let one finish first")
         if "id" in req:
             gid = int(req["id"])
             row = conn.execute("SELECT kind, status FROM generations WHERE id = ?", (gid,)).fetchone()
@@ -1201,22 +1119,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(file)
         if path == "/api/comics":
             return self.send(200, comics())
-        if path.startswith("/api/comics/marks/") and path.rsplit("/", 1)[1].isdigit():
-            try:
-                return self.send(200, comic_marks(int(path.rsplit("/", 1)[1])))
-            except LookupError as e:
-                return self.send(404, {"error": str(e)})
-            except ValueError as e:
-                return self.send(400, {"error": str(e)})
         if path.startswith("/comic/"):
             parts = path.split("/")
-            if len(parts) == 5 and parts[2].isdigit() and parts[3] == "anim" and re.fullmatch(r"[\w.-]+\.mp4", parts[4]):
+            if len(parts) == 5 and parts[2].isdigit() and parts[3] == "anim" and re.fullmatch(r"[\w.-]+\.(mp4|png)", parts[4]):
                 file = comic_animation(int(parts[2]), parts[4])
                 if file:
                     return self.send_file(file)
-            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"], ["thumb"], ["test"]):
-                file = comic_page(int(parts[2]), int(parts[3]), original=parts[4:] == ["original"], thumb=parts[4:] == ["thumb"],
-                                  test=parts[4:] == ["test"])
+            if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["thumb"]):
+                file = comic_page(int(parts[2]), int(parts[3]), thumb=parts[4:] == ["thumb"])
                 if file:
                     return self.send_file(file)
             return self.send(404, {"error": "page not found"})
@@ -1239,7 +1149,7 @@ class Handler(BaseHTTPRequestHandler):
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
                    "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
-                   "/api/comics/import": queue_comic_import, "/api/comics/marks": save_comic_marks,
+                   "/api/comics/import": queue_comic_import, "/api/comics/rename": rename_comic,
                    "/api/comics/animate": queue_comic_animation, "/api/comics/animation-delete": delete_comic_animation,
                    "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
