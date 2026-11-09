@@ -58,7 +58,11 @@ class Comfy:
         replace WAN's for this clip (e.g. width, height, motion_steps). progress(share): how far
         along the clip is, 0 to 1 (see Progress)."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
+        if progress:
+            progress(0.0)
         self.start("video")
+        if progress:
+            progress(Progress.STARTED)
         workflow = _wan_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
                                  end=self.upload(end) if end else None, settings=wan)
         return self._run(workflow, timeout=1800, progress=progress)
@@ -264,9 +268,10 @@ def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: 
 class Progress:
     """How far along a prompt is, from ComfyUI's websocket messages: the models loading (until
     the first sampler step), each sampler step, then what comes after the last sampler (decoding
-    and saving). Weighted by how long each takes on a Wan clip: loading about a fifth, decoding
-    about a tenth."""
-    LOAD, AFTER = 0.2, 0.1
+    and saving). Weighted by how long each takes on a Wan clip (measured: starting ComfyUI and
+    loading about 30%, the steps about 66%, decoding and saving the rest); STARTED once ComfyUI
+    is up, before the models load."""
+    LOAD, AFTER, STARTED = 0.3, 0.04, 0.1
 
     def __init__(self, workflow: dict, report):
         self.report, self.prompt_id = report, None
