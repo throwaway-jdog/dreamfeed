@@ -349,6 +349,8 @@ textarea.in { resize: vertical; min-height: 72px; }
 #mk-show-test { justify-self: center; width: auto; padding: 0 16px; }
 .mk-canvas.testing canvas { display: none; }
 .mk-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.comic-item { display: grid; gap: 4px; align-content: start; }
+.comic-item .card-del { justify-self: start; font-size: 12px; color: var(--muted); min-height: 32px; padding: 0 2px; }
 .comic-card .badge { color: var(--accent); font-weight: 700; font-size: 12px; }
 .range { display: grid; grid-template-columns: 1fr 5ch; gap: 10px; align-items: center; }
 .range input { width: 100%; accent-color: var(--accent); min-height: var(--tap); }
@@ -1325,7 +1327,13 @@ async function refreshComics() {
     if (c.marking) card.append(el("span", "badge", "Mark the characters"));
     if (c.colouring) card.append(el("span", "badge", "Being coloured from your marks"));
     card.onclick = () => c.marking ? openMarker(c) : openComic(c);
-    list.append(card);
+    const del = el("button", "linkish card-del", "Delete"); del.type = "button";
+    del.onclick = async () => {
+      if (!confirm(`Delete "${c.title || "Untitled"}"? Its pages and animations go too.`)) return;
+      try { await api("api/comics/delete", { id: c.id }); toast("Deleted."); refreshComics(); } catch (e) { toast(e.message); }
+    };
+    const item = el("div", "comic-item"); item.append(card, del);
+    list.append(item);
   }
   $("c-none").hidden = d.comics.length > 0;
   if (state.view === "comics" && d.making.length) comicState.timer = setTimeout(refreshComics, 10000);
@@ -1369,7 +1377,7 @@ function decorate() {   // the loops over their panels, or the panels to pick wh
     wrap.querySelectorAll("video, .pbox, .drag").forEach(x => x.remove());
     const anims = (c.animations || []).map((a, k) => ({ ...a, k })).filter(a => a.page === n);
     if (!rd.original && !rd.picking) for (const a of anims) {
-      const v = el("video"); Object.assign(v, { muted: true, loop: true, autoplay: true, playsInline: true, src: `comic/${c.id}/anim/${a.k}` });
+      const v = el("video"); Object.assign(v, { muted: true, loop: true, autoplay: true, playsInline: true, src: `comic/${c.id}/anim/${a.name}` });
       v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); Object.assign(v.style, pct(a.box)); wrap.append(v);
     }
     if (!rd.picking) return;

@@ -226,7 +226,9 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     if x1 - x0 < 64 or y1 - y0 < 64:
         raise ValueError("that panel is too small to animate")
     panel = img.crop((x0, y0, x1, y1))
-    n = len(meta.get("animations") or []) + 1
+    import datetime as dt
+    # Never reused (the reader's cached copy of a clip is kept by its name).
+    n = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     still = folder / f"panel-{page}-{n}.png"
     panel.save(still)
     progress("reading the panel", 0, 1)

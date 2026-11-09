@@ -301,7 +301,8 @@ def comics() -> dict:
                                   "imported": bool(meta.get("imported")),
                                   "marking": r["status"] == "comic_marking", "colouring": r["status"] == "comic_colouring",
                                   "panels": meta.get("panels") or {},
-                                  "animations": [{"page": a["page"], "box": a["box"]} for a in meta.get("animations") or []],
+                                  "animations": [{"page": a["page"], "box": a["box"], "name": Path(a["file"]).name}
+                                                 for a in meta.get("animations") or []],
                                   "originals": bool(meta.get("originals")) and meta["originals"] != meta.get("pages"),
                                   "created": r["created_at"]})
         # Comic jobs that failed in the last day, with why: they'd otherwise just vanish from "being made".
@@ -586,16 +587,17 @@ def delete_comic_animation(req: dict) -> dict:
     return {"ok": True}
 
 
-def comic_animation(gid: int, index: int) -> Path | None:
+def comic_animation(gid: int, name: str) -> Path | None:
+    """A comic's clip by its file name (names are never reused, so a cached copy is the right one)."""
     try:
         folder, meta = _finished_comic(gid)
     except LookupError:
         return None
-    anims = meta.get("animations") or []
-    if not 0 <= index < len(anims):
-        return None
-    path = (GENERATED / anims[index]["file"]).resolve()
-    return path if path.is_relative_to(folder) and path.is_file() else None
+    for a in meta.get("animations") or []:
+        if Path(a["file"]).name == name:
+            path = (GENERATED / a["file"]).resolve()
+            return path if path.is_relative_to(folder) and path.is_file() else None
+    return None
 
 
 def delete_comic(req: dict) -> dict:
@@ -1208,8 +1210,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
         if path.startswith("/comic/"):
             parts = path.split("/")
-            if len(parts) == 5 and parts[2].isdigit() and parts[3] == "anim" and parts[4].isdigit():
-                file = comic_animation(int(parts[2]), int(parts[4]))
+            if len(parts) == 5 and parts[2].isdigit() and parts[3] == "anim" and re.fullmatch(r"[\w.-]+\.mp4", parts[4]):
+                file = comic_animation(int(parts[2]), parts[4])
                 if file:
                     return self.send_file(file)
             if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["original"], ["thumb"], ["test"]):
