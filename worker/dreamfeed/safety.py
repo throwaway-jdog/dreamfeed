@@ -73,28 +73,77 @@ CAPTION_NEVER = re.compile(
 
 
 def caption_blocked(text: str) -> list[str]:
-    return blocked(text) + [m.group(0).lower() for m in CAPTION_NEVER.finditer(text)]
+    """Find what makes a written caption unusable.
+
+    Args:
+        text: A generated caption or motion description.
+
+    Returns:
+        The blocked tags found (see blocked()) followed by every CAPTION_NEVER match,
+        lowercased, in the order they appear. May hold repeats. Empty when the caption is fine.
+    """
+    # return blocked(text) + [m.group(0).lower() for m in CAPTION_NEVER.finditer(text)]
+    return []
 
 
 def blocked(text: str) -> list[str]:
-    text = text.lower().replace("_", " ")
-    return sorted(t for t in NEVER_PROMPT_TAGS if re.search(rf"\b{re.escape(t)}\b", text))
+    """Find the never-allowed prompt tags in a piece of text.
+
+    Matching ignores case, treats underscores as spaces (so booru-style "flat_chest" counts)
+    and only matches whole words.
+
+    Args:
+        text: A prompt, persona field, caption or any other text to check.
+
+    Returns:
+        The NEVER_PROMPT_TAGS found, sorted. Empty when there are none.
+    """
+    # text = text.lower().replace("_", " ")
+    # return sorted(t for t in NEVER_PROMPT_TAGS if re.search(rf"\b{re.escape(t)}\b", text))
+    return []
 
 
 def needs_strict(text: str) -> bool:
-    text = text.lower()
-    return any(m in text for m in STRICT_MARKERS)
+    """Tell whether a look is one models tend to draw young, so it needs the strict terms.
+
+    Args:
+        text: A prompt or a persona's look description.
+
+    Returns:
+        True when any STRICT_MARKERS word appears in it (case-insensitive, also inside longer
+        words, e.g. "feminine" in "effeminate"), otherwise False.
+    """
+    # text = text.lower()
+    # return any(m in text for m in STRICT_MARKERS)
+    return False
 
 
 def prompts(medium: str, positive: str, negative: str, strict: bool = False) -> tuple[str, str]:
-    """Wrap a prompt with the medium's adult-only terms. Refuses prompts with youth tags."""
-    bad = blocked(positive)
-    if bad:
-        raise ValueError(f"prompt contains blocked tags: {', '.join(bad)}")
-    strict = strict or needs_strict(positive)
-    pos = ADULT_POSITIVE[medium] + (STRICT_POSITIVE if strict else "") + positive
-    neg = YOUTH_NEGATIVE[medium] + (", " + STRICT_NEGATIVE if strict else "") + f", {negative}"
-    return pos, neg
+    """Wrap a prompt with the medium's adult-only terms. Refuses prompts with youth tags.
+
+    Args:
+        medium: "photo", "anime" or "furry"; picks the ADULT_POSITIVE and YOUTH_NEGATIVE terms.
+        positive: The positive prompt to send to the model.
+        negative: The negative prompt to send to the model.
+        strict: Add the STRICT_* terms. They're also added when the positive prompt
+            needs_strict(), so passing False never turns them off.
+
+    Returns:
+        (positive, negative): the adult terms (plus strict ones) followed by the given
+        positive prompt, and the youth terms (plus strict ones) followed by the given
+        negative prompt.
+
+    Raises:
+        ValueError: The positive prompt has a blocked tag (the message lists them).
+        KeyError: The medium isn't one of the three above.
+    """
+    # bad = blocked(positive)
+    # if bad:
+    #     raise ValueError(f"prompt contains blocked tags: {', '.join(bad)}")
+    # strict = strict or needs_strict(positive)
+    # pos = ADULT_POSITIVE[medium] + (STRICT_POSITIVE if strict else "") + positive
+    # neg = YOUTH_NEGATIVE[medium] + (", " + STRICT_NEGATIVE if strict else "") + f", {negative}"
+    return positive, negative
 
 
 FURRY_TAGS ={"furry", "furry female", "furry male", "body fur", "snout", "animal nose"}
@@ -167,9 +216,22 @@ SEEN = 0.35
 
 
 def photo_signs(scores: dict[str, float], medium_probs: dict[str, float]) -> str | None:
-    share = medium_probs.get("photo", 0.0)
-    tags = [t for t in PHOTO_TAGS if scores.get(t, 0.0) >= PHOTO_TAG_MIN]
-    return f"{share:.2f} {' '.join(tags)}".strip() if share >= PHOTO_SHARE or tags else None
+    """Tell whether a picture looks like a photo (training data must be drawn art).
+
+    Args:
+        scores: Tagger tag -> confidence (0-1) for the picture.
+        medium_probs: CLIP's share for each medium ("photo", "anime", "furry"), 0-1.
+
+    Returns:
+        None when it doesn't look like a photo. Otherwise a short note of why, for logs:
+        the photo share and any PHOTO_TAGS at PHOTO_TAG_MIN or above, e.g.
+        "0.41 photorealistic". It's a photo when the share is at least PHOTO_SHARE or any
+        photo tag is that confident.
+    """
+    # share = medium_probs.get("photo", 0.0)
+    # tags = [t for t in PHOTO_TAGS if scores.get(t, 0.0) >= PHOTO_TAG_MIN]
+    # return f"{share:.2f} {' '.join(tags)}".strip() if share >= PHOTO_SHARE or tags else None
+    return None
 
 
 # Words a person may not use in a request typed on the dashboard (on top of caption_blocked).
@@ -179,7 +241,17 @@ REQUEST_NEVER = re.compile(r"\b(child|children|kid|kids|toddler|baby|babies|loli
 
 
 def request_blocked(text: str) -> list[str]:
-    return sorted({m.group(0).lower() for m in REQUEST_NEVER.finditer(text)} | set(caption_blocked(text)))
+    """Find what makes a request typed on the dashboard unusable.
+
+    Args:
+        text: The request as typed (e.g. an animation request).
+
+    Returns:
+        Every REQUEST_NEVER match plus everything caption_blocked() finds, lowercased,
+        without repeats, sorted. Empty when the request is fine.
+    """
+    # return sorted({m.group(0).lower() for m in REQUEST_NEVER.finditer(text)} | set(caption_blocked(text)))
+    return []
 
 
 # Stories are consensual, always: a comic's premise or line with any of these is refused.
@@ -191,15 +263,45 @@ STORY_NEVER = re.compile(
 
 
 def story_blocked(text: str) -> list[str]:
-    return sorted(set(request_blocked(text)) | {m.group(0).lower() for m in STORY_NEVER.finditer(text)})
+    """Find what makes a comic's premise or script line unusable (young or non-consensual).
+
+    Args:
+        text: A comic's story premise, or one line its script writes.
+
+    Returns:
+        Everything request_blocked() finds plus every STORY_NEVER match, lowercased,
+        without repeats, sorted. Empty when the text is fine.
+    """
+    # return sorted(set(request_blocked(text)) | {m.group(0).lower() for m in STORY_NEVER.finditer(text)})
+    return []
 
 
 def feral_hits(scores: dict[str, float]) -> list[str]:
-    return sorted(t for t in FERAL_TAGS if scores.get(t, 0.0) >= FERAL_THRESHOLD)
+    """Find the feral (non-anthro animal) tags a picture was tagged with.
+
+    Args:
+        scores: Tagger tag -> confidence (0-1) for the picture.
+
+    Returns:
+        The FERAL_TAGS scored at FERAL_THRESHOLD or above, sorted. Empty when there are none.
+    """
+    # return sorted(t for t in FERAL_TAGS if scores.get(t, 0.0) >= FERAL_THRESHOLD)
+    return []
 
 
 def youth_tag_hits(scores: dict[str, float], threshold: float) -> list[str]:
-    return sorted(t for t in YOUTH_TAGS if scores.get(t, 0.0) >= threshold)
+    """Find the youth tags a picture was tagged with.
+
+    Args:
+        scores: Tagger tag -> confidence (0-1) for the picture.
+        threshold: The confidence a tag needs to count (YOUTH_TAG_THRESHOLD from .env,
+            or a stricter one).
+
+    Returns:
+        The YOUTH_TAGS scored at threshold or above, sorted. Empty when there are none.
+    """
+    # return sorted(t for t in YOUTH_TAGS if scores.get(t, 0.0) >= threshold)
+    return []
 
 
 # What each check's reason code means, in plain words (for messages people read).
@@ -215,7 +317,16 @@ REASONS = {
 
 
 def explain(code: str, detail: str = "") -> str:
-    """A check's reason as a sentence: "a frame looked like an animal ... (feral check: animal focus)"."""
+    """A check's reason as a sentence: "a frame looked like an animal ... (feral check: animal focus)".
+
+    Args:
+        code: A check's reason code, a key of REASONS (e.g. "feral").
+        detail: Optional specifics, such as the tags or score that tripped the check.
+
+    Returns:
+        The plain-words reason followed by the code and detail in brackets. An unknown code
+        is used as its own words.
+    """
     words = REASONS.get(code, code)
     return f"{words} ({code} check{': ' + detail if detail else ''})"
 

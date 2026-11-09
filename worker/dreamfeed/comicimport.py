@@ -110,7 +110,7 @@ def _job(conn, job_id: int, night: str, work) -> None:
                      (night,))
     status, message = "done", None
     try:
-        message = work(lambda phase, d, t: _progress(conn, night, phase, d, t))
+        message = work(lambda phase, d, t, share=None: _progress(conn, night, phase, d, t, share=share))
     except Exception as e:
         status, message = "failed", str(e)[:300]
         print(f"{night}: job {job_id} failed: {message}", flush=True)

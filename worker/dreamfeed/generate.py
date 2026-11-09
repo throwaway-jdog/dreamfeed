@@ -403,10 +403,15 @@ def _set(conn, gid: int, **fields) -> None:
         conn.execute(f"UPDATE generations SET {cols} WHERE id = ?", (*fields.values(), gid))
 
 
-def _progress(conn, night: str, phase: str, done: int, total: int, medium: str | None = None) -> None:
+def _progress(conn, night: str, phase: str, done: int, total: int, medium: str | None = None,
+              share: float | None = None) -> None:
+    """share: how far along the whole phase is, 0 to 1, when it's known finer than done of total
+    (a clip's sampler steps)."""
+    p = {"phase": phase, "done": done, "total": total, "medium": medium}
+    if share is not None:
+        p["share"] = round(share, 3)
     with conn:
-        conn.execute("UPDATE runs SET progress = ? WHERE night = ?",
-                     (json.dumps({"phase": phase, "done": done, "total": total, "medium": medium}), night))
+        conn.execute("UPDATE runs SET progress = ? WHERE night = ?", (json.dumps(p), night))
 
 
 def _cancel_requested(conn, night: str) -> bool:
@@ -555,7 +560,9 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
                      src, handle, caption)).lastrowid
             try:
                 path = comfy.img2vid(out_dir / file, medium, motion_prompt, seed, night, f"video-{gid}",
-                                     strict=bool(strict), loras=loras)
+                                     strict=bool(strict), loras=loras,
+                                     progress=lambda sh, n=n: _progress(conn, night, "animating", n - 1, len(sources),
+                                                                        share=(n - 1 + sh) / len(sources)))
             except ValueError as e:   # safety.prompts refused it
                 _set(conn, gid, status="dropped", reason=f"blocked prompt: {e}")
                 continue

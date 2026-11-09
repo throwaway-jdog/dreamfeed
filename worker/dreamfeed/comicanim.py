@@ -286,7 +286,8 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     try:
         path = comfy.img2vid(still, medium, prompt, random.Random().randrange(2 ** 32), str(folder.relative_to(out_dir)),
                              f"anim-{page}-{n}", strict=strict, loras=[use_lora] if use_lora else [],
-                             wan=LOOP | {"width": w, "height": h})
+                             wan=LOOP | {"width": w, "height": h},
+                             progress=lambda share: progress("animating", 0, 1, share))
     finally:
         comfy.stop()
         still.unlink(missing_ok=True)

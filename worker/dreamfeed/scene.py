@@ -845,7 +845,9 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                 paths[i] = comfy.img2vid(pic, post["medium"], prompt,
                                          seed if seed is not None else rng.randrange(2 ** 32), out.parent.name,
                                          f"{out.stem}-shot{i}", strict=post["strict"], loras=loras,
-                                         end=None if shots[i].climax else pic, wan=SCENE_WAN | (wan or {}))
+                                         end=None if shots[i].climax else pic, wan=SCENE_WAN | (wan or {}),
+                                         progress=(lambda sh, k=made: progress(k, len(jobs), min(1.0, (k + sh) / len(jobs))))
+                                         if progress else None)
                 comfy.stop()
                 made += 1
                 if progress:
@@ -997,7 +999,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
         pictures = [p for p, _ in drawn if p]
         _progress(conn, night, "animating", 0, len(shots))
         path, notes = render(cfg, comfy, post, shots, [p for p, _ in drawn], out_dir / night / f"video-{gid}.mp4",
-                             rng, progress=lambda d, t: _progress(conn, night, "animating", d, t),
+                             rng, progress=lambda d, t, share=None: _progress(conn, night, "animating", d, t, share=share),
                              cancelled=lambda: _cancel_requested(conn, night))
         print(f"scene: {night} {notes}", flush=True)
         if path:

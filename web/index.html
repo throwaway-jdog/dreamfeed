@@ -1263,7 +1263,8 @@ async function refreshComics() {
   const making = $("c-making"); making.replaceChildren();
   for (const m of d.making) {
     const li = el("li"); li.style.padding = "10px 0";
-    const pr = m.progress ? ` · ${m.progress.phase}${m.progress.total > 1 ? ` ${m.progress.done}/${m.progress.total}` : ""}` : "";
+    const pt = m.progress ? progressText(m.progress) : "";
+    const pr = m.progress ? ` · ${m.progress.phase}${pt ? " " + pt : ""}` : "";
     const st = m.status === "running" ? "making" : "waiting";
     if (m.imported) li.append(el("b", null, m.title || "Imported comic"), el("div", "hint", `import · ${st}${pr}`), el("div", "hint", m.url));
     else li.append(el("b", null, `${m.cast[0]} + ${m.cast[1] === "partner" ? "her partner" : m.cast[1]}`),
@@ -1577,7 +1578,13 @@ function clock(iso) {
   return d.toLocaleString(undefined, today ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 const PHASE = { generating: "Generating", animating: "Animating", checking: "Checking ages", ranking: "Picking the best",
-  captioning: "Writing captions", planning: "Planning motion", drawing: "Drawing shots" };
+  captioning: "Writing captions", planning: "Planning motion", drawing: "Drawing shots", downloading: "Downloading",
+  "checking the pages": "Checking the pages", "reading the panel": "Reading the panel", "checking the clip": "Checking the clip" };
+function progressText(p) {   // "3 of 5", "45%", or both: share is finer than done of total when known (a clip's steps)
+  const pc = p.share != null ? `${Math.round(100 * p.share)}%` : "";
+  const of = p.total > 1 ? `${p.done} of ${p.total}` : "";
+  return [of, pc].filter(Boolean).join(" · ");
+}
 let animN = 3;
 document.querySelectorAll("#a-count button").forEach(b => b.onclick = () => {
   animN = +b.dataset.n;
@@ -1599,11 +1606,12 @@ function renderLive(d) {
   if (running) {
     const p = running.progress || { phase: "generating", done: 0, total: 0 };
     const box = el("div", "live"), head = el("div", "head");
-    head.append(el("span", null, `${PHASE[p.phase] || "Working"}${p.total ? ` ${p.done} of ${p.total}` : "…"}`));
+    const t = progressText(p);
+    head.append(el("span", null, `${PHASE[p.phase] || "Working"}${t ? ` ${t}` : "…"}`));
     const stop = el("button", "linkish", "Cancel"); stop.type = "button";
     stop.onclick = async () => { stop.disabled = true; try { await api("api/cancel", { night: running.night }); toast("Stopping after the current image"); } catch (e) { toast(e.message); } refreshDash(); };
     head.append(stop);
-    const meter = el("div", "meter"), bar = el("i"); bar.style.width = `${p.total ? Math.round(100 * p.done / p.total) : 4}%`; meter.append(bar);
+    const meter = el("div", "meter"), bar = el("i"); bar.style.width = `${p.share != null ? Math.max(4, Math.round(100 * p.share)) : p.total ? Math.round(100 * p.done / p.total) : 4}%`; meter.append(bar);
     const label = /^\d/.test(running.night) ? "Tonight's run" : nightLabel(running.night);
     box.append(head, meter, el("div", "sub", `${label}${p.medium ? " · " + (LABEL[p.medium] || p.medium) : ""}`));
     live.append(box);

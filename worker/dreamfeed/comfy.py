@@ -1,7 +1,13 @@
 """Client for the comfyui service: start it on demand, run text-to-image and image-to-video,
 stop it."""
+import base64
 import json
+import os
+import socket
+import struct
+import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -44,21 +50,34 @@ class Comfy:
     def img2vid(self, image: Path, medium: str, prompt: str, seed: int,
                 subdir: str, name: str, strict: bool = False,
                 loras: list[tuple[str, str, float]] = (), end: Path | None = None,
-                wan: dict | None = None) -> Path:
+                wan: dict | None = None, progress=None) -> Path:
         """Animate a (generated, already checked) image into a ~5 second clip. loras: Wan video
         LoRAs as (high-noise file, low-noise file, strength), e.g. a sex act's motion LoRA and
         the persona's style video LoRA, applied in order. Wan only: end makes the clip finish on
         that image (the same image as the start makes a seamless loop). wan: settings that
-        replace WAN's for this clip (e.g. width, height, motion_steps)."""
+        replace WAN's for this clip (e.g. width, height, motion_steps). progress(share): how far
+        along the clip is, 0 to 1 (see Progress)."""
         positive, negative = safety.prompts(medium, prompt, VIDEO_NEGATIVE, strict)
         self.start("video")
         workflow = _wan_workflow(self.upload(image), positive, negative, seed, f"{subdir}/{name}", loras,
                                  end=self.upload(end) if end else None, settings=wan)
-        return self._run(workflow, timeout=1800)
+        return self._run(workflow, timeout=1800, progress=progress)
 
-    def _run(self, workflow: dict, timeout: float = 600) -> Path:
-        prompt_id = self._post(f"{self.api}/prompt",
-                               {"prompt": workflow, "client_id": uuid.uuid4().hex})["prompt_id"]
+    def _run(self, workflow: dict, timeout: float = 600, progress=None) -> Path:
+        """progress(share): how far along the prompt is, 0 to 1, as ComfyUI reports it (Progress)."""
+        client = uuid.uuid4().hex
+        watch = Progress(workflow, progress) if progress else None
+        listener = _listen(self.api, client, watch.message) if watch else None
+        try:
+            prompt_id = self._post(f"{self.api}/prompt", {"prompt": workflow, "client_id": client})["prompt_id"]
+            if watch:
+                watch.prompt_id = prompt_id
+            return self._wait(prompt_id, timeout)
+        finally:
+            if listener:
+                listener.close()
+
+    def _wait(self, prompt_id: str, timeout: float) -> Path:
         deadline = time.time() + timeout
         while time.time() < deadline:
             with urllib.request.urlopen(f"{self.api}/history/{prompt_id}", timeout=30) as resp:
@@ -242,3 +261,118 @@ def _wan_workflow(source: str, positive: str, negative: str, seed: int, prefix: 
     return nodes | _save_video(["decode", 0], w["fps"], prefix)
 
 
+class Progress:
+    """How far along a prompt is, from ComfyUI's websocket messages: the models loading (until
+    the first sampler step), each sampler step, then what comes after the last sampler (decoding
+    and saving). Weighted by how long each takes on a Wan clip: loading about a fifth, decoding
+    about a tenth."""
+    LOAD, AFTER = 0.2, 0.1
+
+    def __init__(self, workflow: dict, report):
+        self.report, self.prompt_id = report, None
+        self.steps = {}   # sampler node: its steps
+        for node, n in workflow.items():
+            i = n.get("inputs", {})
+            if n.get("class_type") == "KSampler":
+                self.steps[node] = i["steps"]
+            elif n.get("class_type") == "KSamplerAdvanced":
+                self.steps[node] = max(1, min(i["end_at_step"], i["steps"]) - i["start_at_step"])
+        self.done = {}
+        self.after = False
+        self.last = -1.0
+
+    def message(self, msg: dict) -> None:
+        data = msg.get("data") or {}
+        if self.prompt_id and data.get("prompt_id") not in (None, self.prompt_id):
+            return
+        if msg.get("type") == "progress" and data.get("node") in self.steps:
+            self.done[data["node"]] = min(int(data.get("value", 0)), self.steps[data["node"]])
+        elif msg.get("type") == "executing" and self.done and data.get("node") not in self.steps \
+                and sum(self.done.values()) >= sum(self.steps.values()):
+            self.after = True
+        else:
+            return
+        total = sum(self.steps.values()) or 1
+        share = self.LOAD + (1 - self.LOAD - self.AFTER) * sum(self.done.values()) / total + (self.AFTER / 2 if self.after else 0)
+        if share - self.last >= 0.01:
+            self.last = share
+            try:
+                self.report(round(min(share, 0.99), 3))
+            except Exception as e:   # progress is only for show
+                print(f"comfy: progress not reported: {e}", flush=True)
+
+
+class _listen:
+    """ComfyUI's websocket for one client id, read on a thread; each JSON message goes to
+    on_message. Only text frames are read (previews are binary). Fails quietly: progress is
+    only for show."""
+
+    def __init__(self, api: str, client: str, on_message):
+        self.sock = None
+        u = urllib.parse.urlparse(api)
+        try:
+            self.sock = socket.create_connection((u.hostname, u.port or 80), timeout=10)
+            key = base64.b64encode(os.urandom(16)).decode()
+            self.sock.sendall((f"GET /ws?clientId={client} HTTP/1.1\r\nHost: {u.netloc}\r\nUpgrade: websocket\r\n"
+                               f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    raise OSError("closed")
+                head += chunk
+            if b" 101 " not in head.split(b"\r\n", 1)[0]:
+                raise OSError(head.split(b"\r\n", 1)[0].decode(errors="replace"))
+            self.buf = head.split(b"\r\n\r\n", 1)[1]
+            self.sock.settimeout(None)
+        except OSError as e:
+            print(f"comfy: no progress ({e})", flush=True)
+            self.close()
+            return
+        self.on_message = on_message
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _exact(self, n: int) -> bytes:
+        while len(self.buf) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise OSError("closed")
+            self.buf += chunk
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+    def _read(self) -> None:
+        try:
+            while True:
+                b0, b1 = self._exact(2)
+                n = b1 & 0x7F
+                if n == 126:
+                    n = struct.unpack(">H", self._exact(2))[0]
+                elif n == 127:
+                    n = struct.unpack(">Q", self._exact(8))[0]
+                mask = self._exact(4) if b1 & 0x80 else None
+                payload = self._exact(n)
+                if mask:
+                    payload = bytes(c ^ mask[i % 4] for i, c in enumerate(payload))
+                op = b0 & 0x0F
+                if op == 8:
+                    return
+                if op == 9:   # ping: pong, masked as a client must
+                    m = os.urandom(4)
+                    self.sock.sendall(bytes([0x8A, 0x80 | len(payload)]) + m + bytes(c ^ m[i % 4] for i, c in enumerate(payload)))
+                elif op == 1:
+                    try:
+                        self.on_message(json.loads(payload))
+                    except ValueError:
+                        pass
+        except (OSError, ValueError, AttributeError):
+            return
+
+    def close(self) -> None:
+        if self.sock:
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.sock.close()
+            self.sock = None
