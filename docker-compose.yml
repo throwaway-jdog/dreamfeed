@@ -195,6 +195,7 @@ services:
       # Signed in as you (README: Following): your subscriptions are what's read.
       REDDIT_REFRESH_TOKEN: ${REDDIT_REFRESH_TOKEN-}
       E621_USERNAME: ${E621_USERNAME-}        # optional: named in e621's user agent, as e621 asks
+      CB_VIDEOS: /videos/cb                    # your own videos of the rooms (posters made here)
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow
@@ -206,6 +207,8 @@ services:
       # look, so a fresh export copied over it (cp, not mv: a file moved in isn't seen until a
       # restart) needs no restart.
       - ${CHATURBATE_COOKIES_FILE:?set CHATURBATE_COOKIES_FILE in .env}:/config/chaturbate-cookies.txt:ro
+      # Your own videos of the rooms you follow, a folder per room (README: Live). Never written.
+      - ${CB_VIDEOS_DIR:?set CB_VIDEOS_DIR in .env}:/videos/cb:ro
     depends_on: [agecheck]
     logging:
       options: { max-size: 10m, max-file: "3" }
@@ -232,12 +235,15 @@ services:
       TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
       E621_USERNAME: ${E621_USERNAME-}        # optional, for the Comics page's e621 search
+      CB_VIDEOS: /videos/cb                    # your own videos of the rooms, on their Live profiles
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
     volumes:
       - ./data:/data        # feed.db (likes/skips), generated images, liked copies, personas.json
       - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora
       - ./models/loras:/loras:ro
       - ./state:/state      # login.json, session.key
+      # Your own videos of the rooms you follow, a folder per room (README: Live). Never written.
+      - ${CB_VIDEOS_DIR:?set CB_VIDEOS_DIR in .env}:/videos/cb:ro
     networks: [default, apps]
     logging:
       options: { max-size: 10m, max-file: "3" }

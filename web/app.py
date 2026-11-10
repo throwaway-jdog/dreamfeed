@@ -11,6 +11,8 @@ GET  /api/dashboard     queue and recent runs
 GET  /api/following     the Chaturbate rooms you follow, live first (kept by the follow service)
 GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
 GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address), or why there isn't one
+GET  /api/live/videos    ?name=ROOM  your own videos of a room you follow (CB_VIDEOS), newest first
+GET  /cb-videos/<room>/<path>   one of them;  /cb-videos/poster/<key>.jpg  its poster
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
 GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, link, cover), to import
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
@@ -45,13 +47,14 @@ import sqlite3
 import sys
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, e621, personas as people, safety   # the worker's own rules (see Dockerfile)
+from dreamfeed import acts, cbvideos, e621, personas as people, safety   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -204,14 +207,17 @@ def following() -> dict:
             for r in conn.execute("SELECT source, name, start_at, end_at FROM live_times"
                                   " WHERE end_at >= datetime('now', ?)", (f"-{LIVE_DAYS} days",)):
                 times.setdefault((r["source"], r["name"]), []).append([_unix(r["start_at"]), _unix(r["end_at"])])
-            for r in conn.execute("SELECT * FROM follows ORDER BY name"):
+            follows = conn.execute("SELECT * FROM follows ORDER BY name").fetchall()
+            videos = cbvideos.scan(r["name"] for r in follows if r["source"] == "chaturbate")
+            for r in follows:
                 thumb = FOLLOW / r["source"] / f"{r['name']}.jpg"
                 rooms.append({"source": r["source"], "name": r["name"], "live": bool(r["live"]),
                               "info": json.loads(r["info"]) if r["info"] else {},
                               "last_live": _unix(r["last_live"]) if r["last_live"] else None,
                               "thumb": f"follow/thumb/{r['source']}/{r['name']}.jpg?t={int(thumb.stat().st_mtime)}"
                                        if thumb.is_file() else None,
-                              "times": times.get((r["source"], r["name"]), [])})
+                              "times": times.get((r["source"], r["name"]), []),
+                              "videos": len(videos.get(r["name"], [])) if r["source"] == "chaturbate" else 0})
     except sqlite3.OperationalError:    # the follow service hasn't started yet
         pass
     rooms.sort(key=lambda r: (not r["live"], -(r["info"].get("viewers") or 0) if r["live"] else -(r["last_live"] or 0)))
@@ -311,6 +317,31 @@ def live_stream(name: str) -> dict:
     ok = (d.get("room_status") == "public" and d.get("is_age_verified") and u.scheme == "https"
           and (u.hostname or "").endswith(".live.mmcdn.com"))
     return {"status": d.get("room_status") or "offline", "hls": hls if ok else None}
+
+
+def _followed() -> list[str]:
+    with db() as conn:
+        return [n for (n,) in conn.execute("SELECT name FROM follows WHERE source = 'chaturbate'")]
+
+
+def live_videos(name: str) -> dict:
+    """A followed room's videos from your own folder, each with its poster and length (made by
+    the follow service; until then none)."""
+    if not ROOM.match(name):
+        raise ValueError("bad room")
+    rooms = _followed()
+    if name not in rooms:
+        raise LookupError("you don't follow that room")
+    index = read_json(cbvideos.posters(DATA) / "index.json") or {}
+    out = []
+    for v in cbvideos.scan(rooms).get(name, []):
+        k = cbvideos.key(v)
+        made = index.get(k) or {}
+        out.append({"title": Path(v["path"]).stem.replace("_", " "), "size": v["size"], "mtime": v["mtime"],
+                    "url": f"cb-videos/{name}/" + urllib.parse.quote(v["path"]),
+                    "duration": made.get("duration") or None,
+                    "poster": f"cb-videos/poster/{k}.jpg" if made.get("poster") else None})
+    return {"videos": out, "folder": cbvideos.root() is not None}
 
 
 FOLLOWING = DATA / "following.json"     # read by the follow service on each round
@@ -1332,7 +1363,8 @@ class Handler(BaseHTTPRequestHandler):
     def send_file(self, file: Path) -> None:
         """Images whole; videos also in byte ranges, which phones need to play them."""
         ctype = {".png": "image/png", ".mp4": "video/mp4", ".webp": "image/webp", ".webm": "video/webm",
-                 ".gif": "image/gif", ".mov": "video/mp4", ".m4v": "video/mp4"}.get(file.suffix.lower(), "image/jpeg")
+                 ".gif": "image/gif", ".mov": "video/mp4", ".m4v": "video/mp4",
+                 ".mkv": "video/x-matroska"}.get(file.suffix.lower(), "image/jpeg")
         size = file.stat().st_size
         start, end = 0, size - 1
         rng = self.headers.get("Range", "")
@@ -1437,6 +1469,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(404, {"error": str(e)})
+        if path == "/api/live/videos":
+            try:
+                return self.send(200, live_videos(self.query().get("name", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(404, {"error": str(e)})
+        if path.startswith("/cb-videos/poster/"):
+            k = path[len("/cb-videos/poster/"):].removesuffix(".jpg")
+            file = cbvideos.posters(DATA) / f"{k}.jpg"
+            if not re.fullmatch(r"[0-9a-f]{20}", k) or not file.is_file():
+                return self.send(404, {"error": "no poster"})
+            return self.send_file(file)
+        if path.startswith("/cb-videos/"):
+            room, _, rel = path[len("/cb-videos/"):].partition("/")
+            file = cbvideos.file(room, urllib.parse.unquote(rel), _followed())
+            if not file:
+                return self.send(404, {"error": "not found"})
+            return self.send_file(file)
         if path == "/api/comics/search":
             q = self.query()
             try:

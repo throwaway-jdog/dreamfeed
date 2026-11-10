@@ -8,7 +8,8 @@ your cookies, the CHATURBATE_COOKIES_FILE mount) and keeps, in feed.db:
 - follows: each room you follow, live or not, with what it's showing while live;
 - live_times: when each one was live, for the "usually live" hours on the Following page.
 A live room's thumbnail is saved in data/generated/follow/ (left out of the backup). The
-Following page plays a room in Chaturbate's own player; nothing of the stream is kept.
+Live tab plays a room in dreamfeed's own player; nothing of the stream is kept. Your own videos
+of the rooms (CB_VIDEOS, see cbvideos.py) get their posters made here too.
 
 These are real people: nothing here goes to training, styles, comics or generation. A room
 Chaturbate doesn't list as age verified is left out.
@@ -25,6 +26,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from . import cbvideos
 from .db import connect
 
 POLL = 120                   # seconds between looks
@@ -182,6 +184,11 @@ def main(argv: list[str]) -> None:
             st["error"] = str(e)
         except (OSError, ValueError) as e:     # network, a site hiccup, a bad answer: next time
             st["error"] = f"Chaturbate didn't answer ({e})"[:300]
+        try:
+            names = [n for (n,) in conn.execute("SELECT name FROM follows WHERE source = 'chaturbate'")]
+            st["videos"] = cbvideos.make_posters(Path(data), names)
+        except OSError as e:
+            print(f"follow: couldn't read the videos folder ({e})", flush=True)
         if st["error"]:
             print(f"follow: {st['error']}", flush=True)
         tmp = status.with_suffix(".tmp")

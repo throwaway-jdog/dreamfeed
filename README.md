@@ -404,6 +404,18 @@ and nothing of a stream is kept: only who you follow, when they were live and ea
 thumbnail (`data/generated/follow/`). A room Chaturbate doesn't list as age verified is left
 out.
 
+**Your own videos of them.** Videos you have of the rooms you follow go in the folder
+`CB_VIDEOS_DIR` (mounted read-only into the web and follow services; dreamfeed never writes
+there): a folder per room, named after it (`<room>/...`, subfolders too), or loose files whose
+names start with the room's (`<room>_2026-11-10.mp4`; the longest room name that fits wins).
+MP4, M4V, MOV, WebM and MKV are listed; MP4 plays in every browser. A room with videos says how
+many: tap that (or the room, in Not live) for its profile, with the videos newest first, each
+with a poster and its length, played in the same player (‹ › go through that room's videos).
+The follow service makes the posters (ffmpeg, a frame from 10% in) on each look, up to 30 at a
+time, in `data/generated/follow/videos/`, and drops them when the videos go. Only rooms you
+follow are shown; nothing from the folder goes to training, styles, comics or generation, and
+it isn't in dreamfeed's backup (back it up where it lives).
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,

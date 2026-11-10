@@ -285,6 +285,23 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .fposts .post .media img, .fposts .post .media video { height: auto; max-height: 80vh; object-fit: contain; background: #000; }
 .fposts .post .out { color: var(--muted); font-size: 13px; display: inline-flex; min-height: 32px; align-items: center; margin-bottom: 4px; }
 .fposts .more { margin: 12px 16px; }
+/* A room's profile: its own videos (CB_VIDEOS), played in the player above it. */
+.live-item { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.live-item .vids { justify-self: start; width: auto; min-height: 36px; padding: 0 12px; font-size: 13px; }
+button.off-row { width: 100%; background: none; border: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.off-row .has { color: var(--accent); }
+.profile { position: fixed; inset: 0; z-index: 29; background: var(--bg); overflow-y: auto; }
+.profile[hidden] { display: none; }
+.profile .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
+.pf-body { padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; }
+.pf-body .note { margin: 0; color: var(--muted); }
+.pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.pf-vid { display: grid; gap: 4px; text-align: left; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; min-width: 0; font: inherit; }
+.pf-vid .shot { position: relative; display: block; }
+.pf-vid img, .pf-vid .ph { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: var(--raise); display: block; }
+.pf-vid .len { position: absolute; right: 6px; bottom: 6px; background: rgb(0 0 0 / .7); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
+.pf-vid b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-vid small { color: var(--muted); font-size: 12px; }
 .player { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
 .player[hidden] { display: none; }
 .player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
@@ -656,6 +673,13 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <div class="panel"><h2>Live now</h2><p class="note" id="f-status"></p><div class="live-list" id="f-live"></div></div>
     <div class="panel" id="f-off-panel" hidden><h2>Not live</h2><ul class="plist" id="f-off"></ul></div>
   </section>
+  <div class="profile" id="profile" hidden role="dialog" aria-modal="true" aria-label="Room">
+    <div class="reader-bar"><span id="pf-title"></span>
+      <button type="button" class="secondary" id="pf-live" hidden>Watch live</button>
+      <a class="secondary" id="pf-open" target="_blank" rel="noreferrer noopener">Chaturbate</a>
+      <button type="button" class="secondary" id="pf-close">Close</button></div>
+    <div class="pf-body"><p class="note" id="pf-info"></p><div class="pf-grid" id="pf-grid"></div></div>
+  </div>
   <div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="Live room">
     <div class="reader-bar"><span id="pl-title"></span>
       <a class="secondary" id="pl-open" target="_blank" rel="noreferrer noopener">Open on Chaturbate</a>
@@ -1370,15 +1394,22 @@ function liveCard(r) {
   b.append(shot, row, el("span", "title", i.title || ""));
   const usual = usualHours(r.times); if (usual) b.append(el("small", null, usual));
   b.onclick = () => openRoom(r);
-  return b;
+  const item = el("div", "live-item"); item.append(b);
+  if (r.videos) {
+    const v = el("button", "secondary vids", `${r.videos} video${r.videos === 1 ? "" : "s"}`); v.type = "button";
+    v.onclick = () => openProfile(r); item.append(v);
+  }
+  return item;
 }
 function offRow(r) {
-  const li = el("li", "off-row"), d = el("div");
-  if (r.thumb) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = r.thumb; li.append(img); }
-  else li.append(el("span", "ph"));
+  const li = el("li"), row = r.videos ? el("button", "off-row") : el("div", "off-row"), d = el("div");
+  li.append(row);
+  if (r.thumb) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = r.thumb; row.append(img); }
+  else row.append(el("span", "ph"));
   const last = r.last_live ? `last live ${relTime(new Date(r.last_live * 1000).toISOString())} ago` : "not seen live yet";
   d.append(el("b", null, r.name), el("small", null, [last, usualHours(r.times)].filter(Boolean).join(" · ")));
-  li.append(d);
+  if (r.videos) { d.append(el("small", "has", `${r.videos} video${r.videos === 1 ? "" : "s"}`)); row.type = "button"; row.onclick = () => openProfile(r); }
+  row.append(d);
   return li;
 }
 // The hours of the day (your time) they're usually live: those they were live in on at least
@@ -1461,7 +1492,7 @@ function hlsLib() {
   return pl.lib;
 }
 function openRoom(r) {
-  pl.rooms = (follow.live || []).slice(); pl.i = Math.max(0, pl.rooms.findIndex(x => x.name === r.name));
+  pl.mode = "live"; pl.rooms = (follow.live || []).slice(); pl.i = Math.max(0, pl.rooms.findIndex(x => x.name === r.name));
   if (!pl.rooms.length) pl.rooms = [r];
   $("player").hidden = false; playRoom();
 }
@@ -1471,8 +1502,9 @@ function stopVideo() {
   const v = $("pl-video"); v.pause(); v.removeAttribute("src"); v.load();
 }
 async function playRoom() {
+  if (pl.mode === "file") return playFile();
   const r = pl.rooms[pl.i], i = r.info || {}, gen = ++pl.gen, v = $("pl-video");
-  stopVideo();
+  stopVideo(); v.onerror = null; $("pl-open").hidden = false; v.loop = false;
   $("pl-title").textContent = r.name;
   $("pl-info").textContent = [i.title, (i.tags || []).map(t => "#" + t).join(" ")].filter(Boolean).join("  ");
   $("pl-open").href = `https://chaturbate.com/${encodeURIComponent(r.name)}/`;
@@ -1501,10 +1533,65 @@ $("pl-sound").onclick = () => { pl.muted = false; const v = $("pl-video"); v.mut
 $("pl-video").onvolumechange = () => { pl.muted = $("pl-video").muted; $("pl-sound").hidden = !pl.muted; };
 $("pl-prev").onclick = () => { pl.i = (pl.i - 1 + pl.rooms.length) % pl.rooms.length; playRoom(); };
 $("pl-next").onclick = () => { pl.i = (pl.i + 1) % pl.rooms.length; playRoom(); };
+// A video from the room's profile: ‹ › go through that room's videos. With sound, since it
+// was a tap that opened it (muted only if the browser refuses).
+function playFile() {
+  const f = pl.rooms[pl.i], gen = ++pl.gen, v = $("pl-video");
+  stopVideo();
+  $("pl-title").textContent = `${pf.room.name}: ${f.title}`;
+  $("pl-info").textContent = [vidDate(f), vidLength(f.duration), vidSize(f.size)].filter(Boolean).join(" · ");
+  $("pl-open").hidden = true;
+  $("pl-prev").disabled = $("pl-next").disabled = pl.rooms.length < 2;
+  plMsg("");
+  v.onplaying = null;
+  v.onerror = () => { if (gen === pl.gen) plMsg("This browser can't play this video (MP4 plays everywhere)."); };
+  v.muted = false; v.src = f.url;
+  v.play().catch(() => { if (gen !== pl.gen) return; v.muted = true; $("pl-sound").hidden = false; v.play().catch(() => {}); });
+  $("pl-sound").hidden = true;
+}
+function vidLength(s) {
+  if (!s) return "";
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+function vidSize(b) { return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`; }
+function vidDate(f) { return new Date(f.mtime * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); }
+
+/* A room's profile: when they're on, and your own videos of them. */
+const pf = { room: null, videos: [], gen: 0 };
+async function openProfile(r) {
+  const gen = ++pf.gen;
+  pf.room = r; pf.videos = [];
+  $("pf-title").textContent = r.name;
+  $("pf-open").href = `https://chaturbate.com/${encodeURIComponent(r.name)}/`;
+  $("pf-live").hidden = !r.live;
+  const last = r.live ? "Live now" : r.last_live ? `Last live ${relTime(new Date(r.last_live * 1000).toISOString())} ago` : "Not seen live yet";
+  const about = [last, usualHours(r.times)].filter(Boolean).join(" · ");
+  $("pf-info").textContent = about + " · loading videos…";
+  $("pf-grid").replaceChildren();
+  $("profile").hidden = false;
+  let d;
+  try { d = await api(`api/live/videos?name=${encodeURIComponent(r.name)}`); } catch (err) { if (gen === pf.gen) $("pf-info").textContent = `${about} · ${err.message}`; return; }
+  if (gen !== pf.gen) return;
+  pf.videos = d.videos;
+  $("pf-info").textContent = `${about} · ${d.videos.length} video${d.videos.length === 1 ? "" : "s"}`;
+  $("pf-grid").replaceChildren(...d.videos.map((f, i) => {
+    const b = el("button", "pf-vid"), shot = el("span", "shot"); b.type = "button";
+    if (f.poster) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = f.poster; shot.append(img); }
+    else shot.append(el("span", "ph"));
+    if (f.duration) shot.append(el("span", "len", vidLength(f.duration)));
+    b.append(shot, el("b", null, f.title), el("small", null, `${vidDate(f)} · ${vidSize(f.size)}`));
+    b.onclick = () => { pl.mode = "file"; pl.rooms = pf.videos.slice(); pl.i = i; $("player").hidden = false; playFile(); };
+    return b;
+  }));
+}
+function closeProfile() { pf.gen++; $("profile").hidden = true; }
+$("pf-close").onclick = closeProfile;
+$("pf-live").onclick = () => openRoom(pf.room);
 function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }
 $("pl-close").onclick = closeRoom;
 document.addEventListener("keydown", e => {
-  if ($("player").hidden) return;
+  if ($("player").hidden) { if (e.key === "Escape" && !$("profile").hidden) closeProfile(); return; }
   if (e.key === "Escape") closeRoom();
   else if (e.key === "ArrowRight") $("pl-next").click();
   else if (e.key === "ArrowLeft") $("pl-prev").click();
