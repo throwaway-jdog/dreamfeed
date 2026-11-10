@@ -12,10 +12,11 @@ GET  /api/following     the Chaturbate rooms you follow, live first (kept by the
 GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
 GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address), or why there isn't one
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
-GET  /api/comics/search ?q=TEXT&page=N  comics on multporn matching TEXT (title, link, cover), to import
+GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, link, cover), to import
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
-POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} change them
+POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
+                        {"e621": {"searches": ["tag tag", ...], "top": N}} change them
 GET  /api/following/posts  ?source=all|x|reddit&offset=N  checked posts from your X and Reddit feeds, newest first
 GET  /follow/media/<source>/<post>/<file>  a post's picture, video or video poster
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
@@ -31,6 +32,7 @@ POST /api/styles/cancel {"name": N} stop a style job
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
+POST /api/comics/update {"id": N} look for new pages of an imported comic now
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
                         {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
 (POSTs are JSON only.)
@@ -49,7 +51,7 @@ from pathlib import Path
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, personas as people, safety   # the worker's own persona rules (see Dockerfile)
+from dreamfeed import acts, e621, personas as people, safety   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -75,7 +77,7 @@ MEDIUMS = ("anime", "furry")
 HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 FOLLOW = GENERATED / "follow"
 FOLLOW_MEDIA = FOLLOW / "media"
-FEED_SOURCES = ("x", "reddit")
+FEED_SOURCES = ("x", "reddit", "e621")
 LIVE_DAYS = 28         # live times this far back give a room's usual hours
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
 # The one thing from elsewhere a page may load: a live room's video, straight from Chaturbate's
@@ -222,13 +224,24 @@ SEARCH_AGENT = {"User-Agent": "dreamfeed (comic search)"}
 _covers: dict[str, bytes] = {}      # search covers already fetched (a few hundred at most)
 
 
-def comic_search(q: str, page: int) -> dict:
+def comic_search(q: str, page: int, site: str = "multporn") -> dict:
     """multporn's search for q: its comics and manga (not videos or games), each {"title", "url",
     "thumb"}. A search with words the dashboard never takes is refused, and so is a result
     whose title has them."""
     import html
     import urllib.parse
     import urllib.request
+    if site == "e621":
+        try:
+            d = e621.pools(q, page)
+        except OSError as e:
+            raise LookupError(f"e621 didn't answer ({e})")
+        d["results"] = [r for r in d["results"] if not safety.story_blocked(r["title"])]   # (what Import takes)
+        for r in d["results"]:
+            r["thumb"] = "comic-search/thumb?u=" + urllib.parse.quote(r.pop("cover") or "", safe="") if r.get("cover") else None
+        return d
+    if site != "multporn":
+        raise ValueError("bad site")
     q = q.strip()
     if not 1 <= len(q) <= 100:
         raise ValueError("type what to look for (up to 100 characters)")
@@ -248,7 +261,7 @@ def comic_search(q: str, page: int) -> dict:
         if not link or not link.group(1).startswith(COMIC_PATHS):
             continue
         title = html.unescape(link.group(2)).strip()
-        if safety.request_blocked(title):
+        if safety.story_blocked(title):     # what Import would refuse isn't offered
             continue
         out.append({"title": title, "url": MULTPORN + link.group(1),
                     "thumb": "comic-search/thumb?u=" + urllib.parse.quote(html.unescape(img.group(1)), safe="") if img else None})
@@ -256,14 +269,20 @@ def comic_search(q: str, page: int) -> dict:
 
 
 def comic_cover(u: str) -> bytes | None:
+    """A search result's cover: multporn's, or the preview of an e621 pool's first post (whose
+    tags e621.pools already checked)."""
     import urllib.request
-    if not u.startswith(MULTPORN + "/sites/default/files/") or ".." in u:
+    multporn, e6 = u.startswith(MULTPORN + "/sites/default/files/"), u.startswith("https://static1.e621.net/data/preview/")
+    if not (multporn or e6) or ".." in u:
         return None
     if u not in _covers:
         try:
-            with urllib.request.urlopen(urllib.request.Request(u, headers=SEARCH_AGENT), timeout=30) as r:
-                data = r.read(4 << 20)
-        except OSError:
+            if e6:
+                data = e621.fetch(u, 4 << 20)
+            else:
+                with urllib.request.urlopen(urllib.request.Request(u, headers=SEARCH_AGENT), timeout=30) as r:
+                    data = r.read(4 << 20)
+        except (OSError, ValueError):
             return None
         if data[:3] != b"\xff\xd8\xff":     # covers are JPEGs
             return None
@@ -307,14 +326,37 @@ def follow_settings() -> dict:
         subs = json.loads((FOLLOW / "reddit-subs.json").read_text())
     except (OSError, ValueError):
         subs = []
+    e = read_json(FOLLOWING).get("e621") or {}
     return {"reddit": {"follow": d.get("follow") or [], "top": d.get("top") or 10,
-                       "subscribed": [s for s in subs if isinstance(s, str)] if isinstance(subs, list) else []}}
+                       "subscribed": [s for s in subs if isinstance(s, str)] if isinstance(subs, list) else []},
+            "e621": {"searches": e.get("searches") or [], "top": e.get("top") or 10}}
+
+
+def _write_following(data: dict) -> None:
+    tmp = FOLLOWING.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1))
+    tmp.replace(FOLLOWING)
 
 
 def save_follow_settings(req: dict) -> dict:
+    if isinstance(req.get("e621"), dict):
+        e = req["e621"]
+        if not isinstance(e.get("searches"), list):
+            raise ValueError('send {"e621": {"searches": [...], "top": N}}')
+        searches = []
+        for q in e["searches"]:
+            q = " ".join(str(q).split())
+            e621.query(q)           # refused: ValueError
+            if q.lower() not in {x.lower() for x in searches}:
+                searches.append(q)
+        if len(searches) > MAX_FOLLOW:
+            raise ValueError(f"at most {MAX_FOLLOW}")
+        _write_following({**read_json(FOLLOWING), "e621": {"searches": searches,
+                                                           "top": int(_num(e.get("top", 10), 1, 100, "top"))}})
+        return follow_settings()
     r = req.get("reddit")
     if not isinstance(r, dict) or not isinstance(r.get("follow"), list):
-        raise ValueError('send {"reddit": {"follow": [...], "top": N}}')
+        raise ValueError('send {"reddit": {"follow": [...], "top": N}} or {"e621": {...}}')
     out = []
     for item in r["follow"]:
         m = REDDIT_NAME.match(str(item).strip())
@@ -326,10 +368,7 @@ def save_follow_settings(req: dict) -> dict:
     if len(out) > MAX_FOLLOW:
         raise ValueError(f"at most {MAX_FOLLOW}")
     top = _num(r.get("top", 10), 1, 100, "top")
-    data = {**read_json(FOLLOWING), "reddit": {"follow": out, "top": int(top)}}   # (subscribed isn't stored here)
-    tmp = FOLLOWING.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=1))
-    tmp.replace(FOLLOWING)
+    _write_following({**read_json(FOLLOWING), "reddit": {"follow": out, "top": int(top)}})   # (subscribed isn't stored here)
     return follow_settings()
 
 
@@ -499,6 +538,7 @@ def comics() -> dict:
                                   "name": r["name"] or r["persona"], "pages": len(meta.get("pages") or [1]),
                                   "cast": meta.get("cast") or [], "story": meta.get("story", ""),
                                   "imported": bool(meta.get("imported")),
+                                  "updated": meta.get("updated"),
                                   "panels": meta.get("panels") or {},
                                   "outlines": meta.get("outlines") or {},
                                   "animations": [{"page": a["page"], "box": a["box"], "name": Path(a["file"]).name,
@@ -514,6 +554,7 @@ def comics() -> dict:
                 continue
             params = json.loads(r["params"])
             what = {"comic": "Making a comic", "comic_import": "Importing a comic",
+                    "comic_update": "Looking for new pages",
                     "comic_animate": f"Animating a panel on page {params.get('page')}"}.get(params.get("kind"))
             if not what:
                 continue
@@ -526,11 +567,16 @@ def comics() -> dict:
         for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
                               " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic%'"):
             params = json.loads(r["params"])
-            if params.get("kind") not in ("comic", "comic_import", "comic_animate"):
+            if params.get("kind") not in ("comic", "comic_import", "comic_animate", "comic_update"):
                 continue
             item = {"job": r["id"], "status": r["status"], "progress": json.loads(r["progress"]) if r["progress"] else None}
             if params["kind"] == "comic_import":
                 item |= {"imported": True, "title": params.get("title") or "", "url": params["url"]}
+            elif params["kind"] == "comic_update":
+                title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone() \
+                    if params.get("id") else None
+                item |= {"imported": True, "title": title["caption"] if title else "Every imported comic",
+                         "url": "looking for new pages"}
             elif params["kind"] == "comic_animate":
                 title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
                 item |= {"imported": True, "title": title["caption"] if title else "",
@@ -612,6 +658,24 @@ def queue_comic_import(req: dict) -> dict:
     with db() as conn:
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
             {"kind": "comic_import", "url": url, "title": title, "medium": medium}),)).lastrowid
+    return {"job": jid}
+
+
+def queue_comic_update(req: dict) -> dict:
+    """{"id": N}: look for new pages of that imported comic now (they're looked for daily anyway)."""
+    try:
+        gid = int(req["id"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('send {"id": number}')
+    _, meta = _finished_comic(gid)
+    if not meta.get("imported"):
+        raise ValueError("only imported comics have a source to look at")
+    with db() as conn:
+        if conn.execute("SELECT 1 FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
+                        (json.dumps({"kind": "comic_update", "id": gid}),)).fetchone():
+            raise ValueError("already looking")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
+                           (json.dumps({"kind": "comic_update", "id": gid}),)).lastrowid
     return {"job": jid}
 
 
@@ -1376,7 +1440,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/comics/search":
             q = self.query()
             try:
-                return self.send(200, comic_search(q.get("q", ""), max(0, int(q.get("page", "0") or 0))))
+                return self.send(200, comic_search(q.get("q", ""), max(0, int(q.get("page", "0") or 0)), q.get("site", "multporn")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
@@ -1424,7 +1488,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
                    "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
                    "/api/comics/import": queue_comic_import, "/api/comics/rename": rename_comic,
-                   "/api/comics/animate": queue_comic_animation, "/api/comics/animation-delete": delete_comic_animation,
+                   "/api/comics/animate": queue_comic_animation, "/api/comics/update": queue_comic_update, "/api/comics/animation-delete": delete_comic_animation,
                    "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,

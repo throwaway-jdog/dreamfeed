@@ -63,8 +63,10 @@ def main() -> None:
         cfg.generation()   # fail at start, not at 1am, if generation settings are missing
         recover(cfg)
         print("dreamfeed: waiting for dashboard requests", flush=True)
+        from .comicimport import due_update
         while True:
             if not training(cfg):
+                due_update(cfg)          # once a day: new pages of imported comics
                 job = next_job(cfg)
                 if job:
                     child("job", str(job))

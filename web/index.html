@@ -273,7 +273,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row img, .off-row .ph { width: 56px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: var(--bg); filter: grayscale(1); opacity: .6; }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#f-source { grid-template-columns: repeat(3, 1fr); }
+#f-source { grid-template-columns: repeat(4, 1fr); }
 .fposts #f-source { margin: 10px 14px; }
 .fposts > .note { margin: 0; padding: 0 14px 8px; color: var(--muted); font-size: 13px; }
 .fposts > .note:empty { display: none; }
@@ -507,6 +507,20 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="ed-err" id="rf-err" role="alert"></div>
     </div>
 
+    <div class="panel" id="e6-panel">
+      <h2>e621</h2>
+      <p class="note">Tag searches in your Feed, like an artist's name or <code>wolf solo</code>. Each is read once a day for its top-scored posts of the day. Posts tagged young, cub, feral and the like are never downloaded; the rest get the checks.</p>
+      <ul class="plist" id="e6-list"></ul>
+      <form class="cs-row" id="e6-form" novalidate><input class="in" id="e6-q" maxlength="300" placeholder="tags, e.g. wolf solo" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button class="primary" type="submit">Add</button></form>
+      <div class="field"><span>Top posts a day from each</span>
+        <div class="seg" id="e6-top" role="group" aria-label="Top posts a day">
+          <button type="button" data-n="5" aria-pressed="false">5</button><button type="button" data-n="10" aria-pressed="false">10</button>
+          <button type="button" data-n="25" aria-pressed="false">25</button><button type="button" data-n="50" aria-pressed="false">50</button>
+        </div></div>
+      <div class="ed-err" id="e6-err" role="alert"></div>
+    </div>
+
     <div class="panel" hidden>
       <h2>Video</h2>
       <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, or make a scene of about 40 seconds from it.</p>
@@ -599,7 +613,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </form>
     <div class="panel" id="cs-panel">
       <h2>Find a comic</h2>
-      <p class="note">Search multporn and import what you like. Its pages are checked like every import.</p>
+      <p class="note">Search multporn or e621's comics and import what you like. Its pages are checked like every import.</p>
+      <div class="seg two" id="cs-site" role="group" aria-label="Where">
+        <button type="button" data-site="multporn" aria-pressed="true">multporn</button><button type="button" data-site="e621" aria-pressed="false">e621</button></div>
       <form class="mk-row cs-row" id="cs-form" novalidate><input class="in" id="cs-q" type="search" maxlength="100" placeholder="Title, artist or character" enterkeyhint="search">
         <button class="primary" type="submit" id="cs-go">Search</button></form>
       <div class="field"><span>Drawn as</span>
@@ -630,7 +646,8 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   <section class="timeline fposts" id="posts" hidden aria-label="Feed">
     <div class="seg" id="f-source" role="group" aria-label="From">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
-      <button type="button" data-s="reddit" aria-pressed="false">Reddit</button></div>
+      <button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
+      <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
     <p class="note" id="f-feeds"></p>
     <div id="f-posts"></div>
     <button type="button" class="secondary more" id="f-more" hidden>More</button>
@@ -919,7 +936,7 @@ function toast(msg, action, onAction) {
 
 function nightLabel(n) {
   if (n.startsWith("test-")) return "Test batch";
-  const job = { comicanim: "Panel animation", comicimport: "Comic import", comicjob: "Comic" }[n.split("-")[0]];
+  const job = { comicanim: "Panel animation", comicimport: "Comic import", comicjob: "Comic", comicupdate: "New comic pages" }[n.split("-")[0]];
   if (job) return job;
   const v = n.match(/^video-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
   if (v) {
@@ -1402,7 +1419,7 @@ async function loadPosts(reset) {
     if (gen !== fp.gen) return;
     const feeds = d.feeds || {};
     $("f-feeds").textContent = !feeds.at ? "X and Reddit are read every 15 minutes; posts show here once they pass the checks."
-      : ["x", "reddit"].map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
+      : ["x", "reddit", "e621"].map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
     $("f-posts").append(...d.posts.map(postCard));
     fp.offset += d.posts.length; fp.more = d.more; $("f-more").hidden = !d.more;
     if (!fp.offset) $("f-posts").append(el("p", "note", "No posts yet."));
@@ -1412,7 +1429,8 @@ async function loadPosts(reset) {
 function postCard(p) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
   const av = el("span", "av sm", (p.author || "?").slice(0, 1).toUpperCase());
-  head.append(el("span", "name", p.author), el("span", "where", p.source === "reddit" ? `r/${p.place}` : "X"),
+  head.append(el("span", "name", p.author || "?"),
+              el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : "X"),
               el("span", "time", "· " + relTime(p.posted_at)));
   body.append(head);
   if (p.text) body.append(el("p", "text", p.text));
@@ -1425,7 +1443,7 @@ function postCard(p) {
     body.append(box);
   }
   if (p.link) {
-    const out = el("a", "out", p.source === "reddit" ? "Open on Reddit" : "Open on X");
+    const out = el("a", "out", { reddit: "Open on Reddit", e621: "Open on e621" }[p.source] || "Open on X");
     out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; body.append(out);
   }
   a.append(av, body);
@@ -1494,10 +1512,30 @@ document.addEventListener("keydown", e => {
 
 /* ---------- the Reddit list (Dashboard) ---------- */
 const rf = { follow: [], top: 10, subscribed: [] };
+const e6 = { searches: [], top: 10 };
 async function loadReddit() {
-  try { Object.assign(rf, (await api("api/following/settings")).reddit); renderReddit(); }
+  try { const d = await api("api/following/settings"); Object.assign(rf, d.reddit); Object.assign(e6, d.e621); renderReddit(); renderE6(); }
   catch (err) { $("rf-err").textContent = err.message; }
 }
+function renderE6() {
+  $("e6-list").replaceChildren(...e6.searches.map(q => {
+    const li = el("li", "rf-row"), rm = el("button", "secondary", "Remove"); rm.type = "button";
+    rm.onclick = () => saveE6(e6.searches.filter(x => x !== q), e6.top);
+    li.append(el("b", null, q), rm); return li;
+  }));
+  if (!e6.searches.length) $("e6-list").append(el("li", "note", "None yet."));
+  document.querySelectorAll("#e6-top button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.n === e6.top)));
+}
+async function saveE6(searches, top) {
+  $("e6-err").textContent = "";
+  try { Object.assign(e6, (await api("api/following/settings", { e621: { searches, top } })).e621); renderE6(); return true; }
+  catch (err) { $("e6-err").textContent = err.message; return false; }
+}
+$("e6-form").onsubmit = async e => {
+  e.preventDefault(); const v = $("e6-q").value.trim(); if (!v) return;
+  if (await saveE6([...e6.searches, v], e6.top)) { $("e6-q").value = ""; toast("Added. Its top posts come in within 15 minutes."); }
+};
+document.querySelectorAll("#e6-top button").forEach(b => b.onclick = () => saveE6(e6.searches, +b.dataset.n));
 function renderReddit() {
   $("rf-list").replaceChildren(...rf.follow.map(name => {
     const li = el("li", "rf-row"), rm = el("button", "secondary", "Remove"); rm.type = "button";
@@ -1558,13 +1596,18 @@ document.querySelectorAll("#ci-medium button, #cs-medium button").forEach(btn =>
   comicState.medium = btn.dataset.m;
   document.querySelectorAll("#ci-medium button, #cs-medium button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === btn.dataset.m)));
 });
-const cs = { q: "", page: 0 };
+const cs = { q: "", page: 0, site: "multporn" };
+document.querySelectorAll("#cs-site button").forEach(b => b.onclick = () => {
+  cs.site = b.dataset.site;
+  document.querySelectorAll("#cs-site button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  if (cs.q) { cs.page = 0; $("cs-list").replaceChildren(); searchComics(); }
+});
 $("cs-form").onsubmit = e => { e.preventDefault(); cs.q = $("cs-q").value.trim(); cs.page = 0; $("cs-list").replaceChildren(); searchComics(); };
 $("cs-more").onclick = () => { cs.page++; searchComics(); };
 async function searchComics() {
   $("cs-err").textContent = ""; $("cs-go").disabled = $("cs-more").disabled = true;
   try {
-    const d = await api(`api/comics/search?q=${encodeURIComponent(cs.q)}&page=${cs.page}`);
+    const d = await api(`api/comics/search?q=${encodeURIComponent(cs.q)}&page=${cs.page}&site=${cs.site}`);
     $("cs-list").append(...d.results.map(r => {
       const it = el("div", "cs-item"), img = el("img"), go = el("button", "secondary", "Import");
       img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
@@ -1575,7 +1618,9 @@ async function searchComics() {
               go.textContent = "Importing…"; toast("The comic is being imported. It shows up below when it's in."); refreshComics(); }
         catch (err) { go.disabled = false; toast(err.message); }
       };
-      it.append(img, el("b", null, r.title), go);
+      it.append(img, el("b", null, r.title));
+      if (r.pages) it.append(el("small", "hint", `${r.pages} pages`));
+      it.append(go);
       return it;
     }));
     if (!$("cs-list").children.length) $("cs-err").textContent = "Nothing found.";
@@ -1624,6 +1669,8 @@ async function refreshComics() {
     const img = el("img"); img.loading = "lazy"; img.alt = ""; img.src = `comic/${c.id}/1/thumb`;
     card.append(img, el("b", null, c.title || "Untitled"),
                 el("small", null, `${c.imported ? "imported" : c.cast.map(h => h === "partner" ? "her partner" : "@" + h).join(" + ")} · ${c.pages} page${c.pages > 1 ? "s" : ""}`));
+    const upd = c.updated && (Date.now() - new Date(c.updated.at.replace(" ", "T") + "Z")) < 3 * 86400e3;
+    if (upd) card.append(el("span", "badge", `${c.updated.new} new page${c.updated.new > 1 ? "s" : ""}`));
     card.onclick = () => openComic(c);
     const ren = el("button", "linkish card-del", "Rename"); ren.type = "button";
     ren.onclick = async () => {
@@ -1778,6 +1825,15 @@ function buildGrid() {
     if (n === rd.page) b.setAttribute("aria-current", "true");
     b.onclick = () => { rd.grid = false; showView(); goTo(n, true); };
     grid.append(b);
+  }
+  if (c.imported) {
+    const look = el("button", "secondary del", "Check for new pages"); look.type = "button";
+    look.onclick = async () => {
+      look.disabled = true;
+      try { await api("api/comics/update", { id: c.id }); toast("Looking for new pages. New ones are added at the end."); refreshComics(); }
+      catch (err) { look.disabled = false; toast(err.message); }
+    };
+    grid.append(look);
   }
   const del = el("button", "secondary del", "Delete this comic"); del.type = "button";
   del.onclick = async () => {

@@ -446,6 +446,9 @@ def run_job(cfg: Config, job_id: int) -> None:
     if params.get("kind") == "comic_import":
         from . import comicimport
         return comicimport.run_job(cfg, conn, job_id, params)
+    if params.get("kind") == "comic_update":
+        from . import comicimport
+        return comicimport.run_update_job(cfg, conn, job_id, params)
     if params.get("kind") == "comic_animate":
         from . import comicanim
         return comicanim.run_job(cfg, conn, job_id, params)

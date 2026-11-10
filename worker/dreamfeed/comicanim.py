@@ -151,17 +151,21 @@ def add_panels(meta: dict, out_dir: Path) -> dict:
     return meta | {"panels": panels, "thumbs": thumbs}
 
 
-def add_outlines(meta: dict, out_dir: Path, progress=lambda phase, done, total: None, device: str = "cuda") -> dict:
-    """meta with "outlines": {"N": loops} for each page, round the characters in its panels with
-    the lettering left out (lettering.outlines), offered by the reader to start from. A comic is
-    kept without them if it fails."""
+def add_outlines(meta: dict, out_dir: Path, progress=lambda phase, done, total: None, device: str = "cuda",
+                 pages: set[int] | None = None) -> dict:
+    """meta with "outlines": {"N": loops} for each page (or just these pages, the others kept as
+    they were), round the characters in its panels with the lettering left out
+    (lettering.outlines), offered by the reader to start from. A comic is kept without them if
+    it fails."""
     from .cutout import Cutout
     from .lettering import Lettering, outlines
-    found = {}
+    found = dict(meta.get("outlines") or {}) if pages is not None else {}
     try:
         cut, letters = Cutout(device), Lettering(device)
         try:
             for n, page in enumerate(meta.get("pages") or [], 1):
+                if pages is not None and n not in pages:
+                    continue
                 progress("outlining the characters", n - 1, len(meta["pages"]))
                 with Image.open(out_dir / page) as im:
                     img = im.convert("RGB")

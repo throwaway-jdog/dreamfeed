@@ -2,7 +2,8 @@
 follow feeds` (the follow service runs it every FEEDS_EVERY seconds, as a child that exits
 when done, so the checking models' memory is given back).
 
-1. New posts are downloaded: X with gallery-dl and your cookies (the Following timeline,
+1. New posts are downloaded (e621: the Dashboard's tag searches, through e621.py, their
+   top-scored posts of each day, those with tags dreamfeed never allows left out first): X with gallery-dl and your cookies (the Following timeline,
    x.com/home); Reddit for the subreddits and users on the Dashboard (data/following.json),
    once a day each, the top `top` posts of the last day: through Reddit's API with your own
    app (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET; app-only, no account), pictures, galleries,
@@ -37,7 +38,9 @@ VIDEOS = {".mp4", ".webm", ".mov", ".m4v", ".gif"}
 FEEDS = {
     "x": {"url": "https://x.com/home", "cookies": Path("/config/x-cookies.txt"), "name": "X"},
     "reddit": {"name": "Reddit"},
+    "e621": {"name": "e621"},
 }
+E621_EVERY = 24 * 3600     # each search is read once a day: its top-scored posts of that day
 # Reddit's rules for scripts: a user agent that says what it is.
 REDDIT_AGENT = "linux:dreamfeed:1.0 (personal feed reader)"
 REDDIT_RSS = {"r": "https://www.reddit.com/r/{}/top/.rss?t=day&limit={}",
@@ -61,9 +64,11 @@ def settings() -> dict:
         d = json.loads((Path(os.environ["DATA_DIR"]) / "following.json").read_text())
     except (OSError, ValueError, KeyError):
         d = {}
-    r = d.get("reddit") or {}
+    r, e = d.get("reddit") or {}, d.get("e621") or {}
     return {"follow": [w for w in r.get("follow") or [] if isinstance(w, str) and w[:2] in ("r/", "u/")],
-            "top": max(1, min(100, int(r.get("top") or 10)))}
+            "top": max(1, min(100, int(r.get("top") or 10))),
+            "e621": {"searches": [q for q in e.get("searches") or [] if isinstance(q, str) and q.strip()],
+                     "top": max(1, min(100, int(e.get("top") or 10)))}}
 
 
 def reddit_follow() -> list[str]:
@@ -72,6 +77,8 @@ def reddit_follow() -> list[str]:
 
 def _signed_in(source: str) -> str | None:
     """Why this feed can't be read, or None."""
+    if source == "e621":
+        return None if settings()["e621"]["searches"] else "no e621 searches yet (add them on the Dashboard)"
     if source == "reddit":
         return None if reddit_follow() or (_api_creds() and _signed_in_as_you()) else \
             "no subreddits or users yet (sign in to Reddit, or add them on the Dashboard)"
@@ -86,6 +93,8 @@ def download(source: str, incoming: Path, archive: Path) -> str | None:
     incoming.mkdir(parents=True, exist_ok=True)
     if source == "reddit":
         return _reddit(incoming, archive.with_suffix(".seen"))
+    if source == "e621":
+        return _e621(incoming, archive.with_suffix(".seen"))
     conf = {"extractor": {
         "base-directory": str(incoming), "directory": [], "archive": str(archive), "cookies-update": False,
         "filename": "{category}_{filename}.{extension}",
@@ -335,6 +344,48 @@ def _reddit_file(url: str, stem: str, incoming: Path, meta: str, gap: float | No
     dest.with_name(dest.name + ".json").write_text(meta)
 
 
+def _e621(incoming: Path, seen_file: Path) -> str | None:
+    """Each search due (not read in the last E621_EVERY): its top-scored posts of the last day
+    that have no tag dreamfeed never allows (e621.blocked), as many as the Dashboard says."""
+    import time
+    from . import e621
+    seen = seen_file.read_text().split() if seen_file.is_file() else []
+    last_file = seen_file.with_suffix(".last")
+    try:
+        last = json.loads(last_file.read_text())
+    except (OSError, ValueError):
+        last = {}
+    s = settings()["e621"]
+    known, errors, new = set(seen), [], []
+    for search in s["searches"]:
+        if time.time() - last.get(search, 0) < E621_EVERY:
+            continue
+        try:
+            posts = e621.get("/posts.json", {"tags": f"{e621.query(search)} date:day order:score",
+                                             "limit": min(320, s["top"] * 3)}).get("posts") or []
+        except (OSError, ValueError) as e:
+            errors.append(f"{search}: {e}")
+            continue
+        last[search] = time.time()
+        for p in [p for p in posts if not e621.blocked(p)][:s["top"]]:
+            pid = str(p.get("id") or "")
+            if not pid.isdigit() or pid in known:
+                continue
+            known.add(pid); new.append(pid)
+            got = e621.media(p)
+            if not got:
+                continue
+            try:
+                dest = incoming / f"{pid}_01.{got[1]}"
+                dest.write_bytes(e621.fetch(got[0]))
+                dest.with_name(dest.name + ".json").write_text(json.dumps({**e621.details(p), "place": search}))
+            except (OSError, ValueError) as e:
+                print(f"follow: e621 post {pid}: {e}", flush=True)
+    seen_file.write_text("\n".join((seen + new)[-SEEN_KEEP:]))
+    last_file.write_text(json.dumps({q: t for q, t in last.items() if q in s["searches"]}))
+    return "; ".join(errors)[:200] if errors and not new else None
+
+
 def _redgifs(url: str, post_id: str, incoming: Path, meta: str) -> None:
     """A redgifs clip a Reddit post links to, with the post's details (gallery-dl reads redgifs'
     own API)."""
@@ -356,10 +407,10 @@ def _post(source: str, md: dict) -> dict:
         return {"post_id": str(md["tweet_id"]), "author": author.get("name") or "", "place": None,
                 "text": md.get("content") or "", "posted_at": str(md.get("date") or ""),
                 "link": f"https://x.com/{author.get('name')}/status/{md['tweet_id']}"}
-    p = md.get("_parent") or md
-    return {"post_id": str(p["id"]), "author": p.get("author") or "", "place": p.get("subreddit"),
-            "text": p.get("title") or "", "posted_at": str(p.get("date") or ""),
-            "link": "https://www.reddit.com" + p["permalink"] if p.get("permalink") else None}
+    p = md.get("_parent") or md        # Reddit and e621: details written by _reddit and _e621
+    link = p.get("link") or ("https://www.reddit.com" + p["permalink"] if p.get("permalink") else None)
+    return {"post_id": str(p["id"]), "author": p.get("author") or "", "place": p.get("subreddit") or p.get("place"),
+            "text": p.get("title") or "", "posted_at": str(p.get("date") or ""), "link": link}
 
 
 def _frames(path: Path) -> list[Image.Image]:

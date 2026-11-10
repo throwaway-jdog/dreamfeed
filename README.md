@@ -2,8 +2,8 @@
 
 A private, phone-first page for who you follow and for comics:
 
-- **Feed:** posts from your X Following timeline and your Reddit front page, every file
-  through the adults-only checks before it shows (see Following).
+- **Feed:** posts from your X Following timeline, your Reddit subscriptions and e621 tag
+  searches, every file through the adults-only checks before it shows (see Following).
 - **Live:** the Chaturbate rooms you follow, played in dreamfeed's own player.
 - **Comics:** comics made here from **fictional personas** (each with a name, a fixed look and
   a trained style), and comics imported from a link or found with multporn's search, with
@@ -300,10 +300,19 @@ strict adults-only checks; failing pages are dropped, and if more than a fifth f
 imported. Pages are kept as drawn, to read and animate panels of. (Colouring black-and-white
 comics from their cover was tried and taken out: it wasn't good enough.)
 
-**Find a comic** (the same tab) searches multporn and lists its comics and manga with their
-covers (the covers come through dreamfeed); **Import** queues one like a pasted link. A search
-with words the dashboard never takes is refused, and results with them in the title are left
-out; the pages get the same checks either way.
+**Find a comic** (the same tab) searches multporn or e621 (its pools of the "series" kind) and
+lists their comics with covers (the covers come through dreamfeed; an e621 pool whose cover has
+a tag dreamfeed never allows is left out); **Import** queues one like a pasted link. A search
+with words the dashboard never takes is refused, and results whose title Import would refuse
+are left out; the pages get the same checks either way.
+
+**New pages.** Once a day the worker looks at every imported comic's source again (a
+`comic_update` job, "New comic pages" on Recent runs): the source's pages are listed without
+downloading, and only the ones it hasn't listed before are downloaded, checked like an
+import's (one by one: a few failing doesn't stop the rest) and added at the end, with their
+panels and outlines. The comic shows "N new pages" for 3 days. **Check for new pages** in the
+reader's grid does it for one comic now. Comics imported before this have their pages' names to
+go by (a page the checks dropped back then is looked at once more, and dropped again).
 
 **Reading.** A comic opens a page at a time, fitted to the screen: swipe (or the arrows, or the
 arrow keys) between pages. **Grid** shows every page small (thumbnails made when the comic is
@@ -365,6 +374,15 @@ browser lands on (it won't load) in quotes after it. The token it prints goes in
 `REDDIT_REFRESH_TOKEN` (your password is never stored; revoke it under Reddit's authorized
 apps). Without the app it falls back to the subreddits' public RSS feeds: pictures and
 redgifs only (galleries and Reddit's videos aren't in them), and one request every 11 seconds.
+
+### e621
+
+The Dashboard's **e621** panel takes tag searches (an artist, a character, `wolf solo`); each is
+read once a day through e621's API for its top-scored posts of the day, as many as the panel
+says. A post with a tag dreamfeed never allows (the youth tags such as `young` and `cub`, and
+`feral` and `bestiality`: `e621.NEVER`) is left out before anything is downloaded, searches ask
+e621 to leave those out too, and a search using one is refused; the rest get the checks.
+Videos come as e621's 720p MP4. `E621_USERNAME` (optional) names you in the user agent.
 
 ### Live: Chaturbate
 

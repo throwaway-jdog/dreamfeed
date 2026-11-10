@@ -194,6 +194,7 @@ services:
       REDDIT_USERNAME: ${REDDIT_USERNAME-}
       # Signed in as you (README: Following): your subscriptions are what's read.
       REDDIT_REFRESH_TOKEN: ${REDDIT_REFRESH_TOKEN-}
+      E621_USERNAME: ${E621_USERNAME-}        # optional: named in e621's user agent, as e621 asks
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow
@@ -230,6 +231,7 @@ services:
       GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env}   # shown on the dashboard
       TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
+      E621_USERNAME: ${E621_USERNAME-}        # optional, for the Comics page's e621 search
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
     volumes:
       - ./data:/data        # feed.db (likes/skips), generated images, liked copies, personas.json
