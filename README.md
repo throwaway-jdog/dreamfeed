@@ -357,7 +357,13 @@ From Reddit it takes pictures, galleries (up to 20 pictures), Reddit's own video
 and redgifs clips, through Reddit's API with your own app: a "personal use script" at
 reddit.com/prefs/apps, its id and secret in `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`
 (and your username in `REDDIT_USERNAME`, for its user agent). It reads as the app itself, with
-no account. Without the app it falls back to the subreddits' public RSS feeds: pictures and
+no account, unless you sign in: then the subreddits you're subscribed to are read (plus any on
+the Dashboard), and the Dashboard lists them. To sign in once, give the app the redirect uri
+`http://localhost:6414/`, run `docker compose exec follow python -m dreamfeed follow
+reddit-login`, open the address it prints and allow it, then run the same with the address your
+browser lands on (it won't load) in quotes after it. The token it prints goes in
+`REDDIT_REFRESH_TOKEN` (your password is never stored; revoke it under Reddit's authorized
+apps). Without the app it falls back to the subreddits' public RSS feeds: pictures and
 redgifs only (galleries and Reddit's videos aren't in them), and one request every 11 seconds.
 
 ### Live: Chaturbate

@@ -493,7 +493,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 
     <div class="panel" id="rf-panel">
       <h2>Reddit</h2>
-      <p class="note">Subreddits and users in your Feed. Each is read once a day for its top posts of the day; pictures and redgifs clips are kept (galleries and Reddit videos aren't), after the checks.</p>
+      <p class="note">Each subreddit is read once a day for its top posts of the day: pictures, galleries, videos and redgifs clips, after the checks.</p>
+      <p class="note" id="rf-subs"></p>
+      <span class="hint" id="rf-also">Also read</span>
       <ul class="plist" id="rf-list"></ul>
       <form class="cs-row" id="rf-form" novalidate><input class="in" id="rf-name" maxlength="80" placeholder="r/name or u/name" autocomplete="off" autocapitalize="none" spellcheck="false">
         <button class="primary" type="submit">Add</button></form>
@@ -1491,7 +1493,7 @@ document.addEventListener("keydown", e => {
 });
 
 /* ---------- the Reddit list (Dashboard) ---------- */
-const rf = { follow: [], top: 10 };
+const rf = { follow: [], top: 10, subscribed: [] };
 async function loadReddit() {
   try { Object.assign(rf, (await api("api/following/settings")).reddit); renderReddit(); }
   catch (err) { $("rf-err").textContent = err.message; }
@@ -1503,6 +1505,10 @@ function renderReddit() {
     li.append(el("b", null, name), rm); return li;
   }));
   if (!rf.follow.length) $("rf-list").append(el("li", "note", "None yet."));
+  $("rf-subs").textContent = rf.subscribed.length
+    ? `Signed in: your ${rf.subscribed.length} subscriptions are read (${rf.subscribed.slice(0, 8).join(", ")}${rf.subscribed.length > 8 ? ", …" : ""}).`
+    : "Not signed in to Reddit: only these are read.";
+  $("rf-also").textContent = rf.subscribed.length ? "Also read" : "Read";
   document.querySelectorAll("#rf-top button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.n === rf.top)));
 }
 async function saveReddit(follow, top) {

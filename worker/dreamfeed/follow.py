@@ -157,6 +157,9 @@ def main(argv: list[str]) -> None:
     if argv == ["feeds"]:
         from .followfeeds import main as feeds
         return feeds()
+    if argv[:1] == ["reddit-login"]:
+        from .followfeeds import login
+        return login(argv[1:])
     data = os.environ.get("DATA_DIR", "").strip()
     if not data:
         sys.exit("follow: DATA_DIR is not set")

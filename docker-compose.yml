@@ -192,6 +192,8 @@ services:
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
       REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET-}
       REDDIT_USERNAME: ${REDDIT_USERNAME-}
+      # Signed in as you (README: Following): your subscriptions are what's read.
+      REDDIT_REFRESH_TOKEN: ${REDDIT_REFRESH_TOKEN-}
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow

@@ -300,8 +300,15 @@ REDDIT_NAME = re.compile(r"^(?:https?://(?:www\.|old\.)?reddit\.com)?/?(?:(r|u|u
 
 
 def follow_settings() -> dict:
+    """The Dashboard's list and top-posts setting, and the subscriptions the follow service last
+    found when signed in to Reddit as you (empty if it isn't)."""
     d = read_json(FOLLOWING).get("reddit") or {}
-    return {"reddit": {"follow": d.get("follow") or [], "top": d.get("top") or 10}}
+    try:
+        subs = json.loads((FOLLOW / "reddit-subs.json").read_text())
+    except (OSError, ValueError):
+        subs = []
+    return {"reddit": {"follow": d.get("follow") or [], "top": d.get("top") or 10,
+                       "subscribed": [s for s in subs if isinstance(s, str)] if isinstance(subs, list) else []}}
 
 
 def save_follow_settings(req: dict) -> dict:
@@ -319,7 +326,7 @@ def save_follow_settings(req: dict) -> dict:
     if len(out) > MAX_FOLLOW:
         raise ValueError(f"at most {MAX_FOLLOW}")
     top = _num(r.get("top", 10), 1, 100, "top")
-    data = {**read_json(FOLLOWING), "reddit": {"follow": out, "top": int(top)}}
+    data = {**read_json(FOLLOWING), "reddit": {"follow": out, "top": int(top)}}   # (subscribed isn't stored here)
     tmp = FOLLOWING.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=1))
     tmp.replace(FOLLOWING)

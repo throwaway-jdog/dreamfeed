@@ -73,7 +73,8 @@ def reddit_follow() -> list[str]:
 def _signed_in(source: str) -> str | None:
     """Why this feed can't be read, or None."""
     if source == "reddit":
-        return None if reddit_follow() else "no subreddits or users yet (add them on the Dashboard)"
+        return None if reddit_follow() or (_api_creds() and _signed_in_as_you()) else \
+            "no subreddits or users yet (sign in to Reddit, or add them on the Dashboard)"
     cookies = FEEDS[source]["cookies"]
     if not cookies.is_file() or not any(line.strip() and not line.startswith("# ") for line in cookies.open()):
         return f"no {FEEDS[source]['name']} cookies yet"
@@ -135,18 +136,80 @@ def _api_creds() -> tuple[str, str] | None:
     return (cid, secret) if cid and secret else None
 
 
-def _api_token(creds: tuple[str, str]) -> str:
-    """An app-only token (the app reading public posts as itself; no account), good for an hour."""
+def _token_request(creds: tuple[str, str], form: dict) -> dict:
     import base64
+    import urllib.parse
     import urllib.request
-    req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", data=b"grant_type=client_credentials",
+    req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", data=urllib.parse.urlencode(form).encode(),
                                  headers={"User-Agent": _agent(),
                                           "Authorization": "Basic " + base64.b64encode(":".join(creds).encode()).decode()})
     with urllib.request.urlopen(req, timeout=30) as r:
-        d = json.load(r)
+        return json.load(r)
+
+
+def _signed_in_as_you() -> str:
+    return os.environ.get("REDDIT_REFRESH_TOKEN", "").strip()
+
+
+def _api_token(creds: tuple[str, str]) -> str:
+    """A token good for an hour: as you, if you've signed in (REDDIT_REFRESH_TOKEN, from
+    `follow reddit-login`), else the app reading public posts as itself."""
+    refresh = _signed_in_as_you()
+    d = _token_request(creds, {"grant_type": "refresh_token", "refresh_token": refresh} if refresh
+                       else {"grant_type": "client_credentials"})
     if not d.get("access_token"):
         raise OSError(f"Reddit refused the app: {d.get('error') or d}")
     return d["access_token"]
+
+
+def subscriptions(token: str) -> list[str]:
+    """The subreddits (and people's profiles) you're subscribed to, as "r/name" and "u/name"."""
+    out, after = [], ""
+    for _ in range(20):                         # up to 2000
+        d = json.loads(_fetch(f"{REDDIT_API}/subreddits/mine/subscriber?limit=100&raw_json=1&after={after}",
+                              {"Authorization": f"bearer {token}"}, gap=API_GAP)).get("data") or {}
+        for c in d.get("children") or []:
+            name = str((c.get("data") or {}).get("display_name") or "")
+            out.append(f"u/{name[2:]}" if name.startswith("u_") else f"r/{name}")
+        after = d.get("after") or ""
+        if not after:
+            break
+    return sorted(set(out), key=str.lower)
+
+
+LOGIN_SCOPES = "identity read mysubreddits"
+LOGIN_REDIRECT = "http://localhost:6414/"
+
+
+def login(argv: list[str]) -> None:
+    """`follow reddit-login`: prints the address to approve dreamfeed on reddit.com.
+    `follow reddit-login ADDRESS`: the address your browser was sent back to; prints the
+    refresh token for REDDIT_REFRESH_TOKEN in .env."""
+    import secrets
+    import sys
+    import urllib.parse
+    creds = _api_creds()
+    if not creds:
+        sys.exit("set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET first")
+    state_file = Path(os.environ["DATA_DIR"]) / "generated" / "follow" / ".reddit-login"
+    if not argv:
+        state = secrets.token_urlsafe(12)
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(state)
+        print("https://www.reddit.com/api/v1/authorize?" + urllib.parse.urlencode(
+            {"client_id": creds[0], "response_type": "code", "state": state, "redirect_uri": LOGIN_REDIRECT,
+             "duration": "permanent", "scope": LOGIN_SCOPES}))
+        return
+    q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(argv[0]).query))
+    if q.get("error"):
+        sys.exit(f"Reddit said: {q['error']}")
+    if not state_file.is_file() or q.get("state") != state_file.read_text():
+        sys.exit("that isn't the address from this sign-in: run `follow reddit-login` again")
+    d = _token_request(creds, {"grant_type": "authorization_code", "code": q.get("code", ""), "redirect_uri": LOGIN_REDIRECT})
+    state_file.unlink()
+    if not d.get("refresh_token"):
+        sys.exit(f"Reddit refused: {d.get('error') or d}")
+    print(d["refresh_token"])
 
 
 def _api_posts(listing: bytes) -> list[dict]:
@@ -210,7 +273,16 @@ def _reddit(incoming: Path, seen_file: Path) -> str | None:
     known, errors, new = set(seen), [], []
     s = settings()
     creds, token = _api_creds(), None
-    for who in s["follow"]:
+    follow = list(s["follow"])
+    if creds and _signed_in_as_you():             # signed in: your subscriptions, and the Dashboard's extras
+        try:
+            token = _api_token(creds)
+            subs = subscriptions(token)
+            (seen_file.parent / "reddit-subs.json").write_text(json.dumps(subs))
+            follow += [w for w in subs if w.lower() not in {f.lower() for f in follow}]
+        except (OSError, ValueError) as e:
+            errors.append(f"your subscriptions: {e}")
+    for who in follow:
         if time.time() - last.get(who, 0) < REDDIT_EVERY:
             continue
         kind, _, name = who.partition("/")
@@ -238,7 +310,7 @@ def _reddit(incoming: Path, seen_file: Path) -> str | None:
                 except (OSError, subprocess.SubprocessError) as e:
                     print(f"follow: reddit post {p['id']}: {e}", flush=True)
     seen_file.write_text("\n".join((seen + new)[-SEEN_KEEP:]))
-    last_file.write_text(json.dumps({w: t for w, t in last.items() if w in s["follow"]}))
+    last_file.write_text(json.dumps({w: t for w, t in last.items() if w in follow}))
     return "; ".join(errors)[:200] if errors and not new else None
 
 
