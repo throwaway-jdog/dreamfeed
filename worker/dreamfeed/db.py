@@ -95,6 +95,36 @@ CREATE TABLE IF NOT EXISTS previews (         -- an X account's recent media, fe
     dropped     INTEGER,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS x_users (          -- X accounts seen in posts: who they are, for posts and profiles
+    handle      TEXT PRIMARY KEY COLLATE NOCASE,
+    nick        TEXT,
+    bio         TEXT,
+    location    TEXT,
+    followers   INTEGER,
+    following   INTEGER,
+    posts       INTEGER,
+    image_url   TEXT,                        -- their profile picture there
+    avatar      INTEGER NOT NULL DEFAULT 0,  -- 1: saved (passed the checks), -1: failed them
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS browses (          -- a subreddit looked at now (Browse now), checked post by post
+    id          INTEGER PRIMARY KEY,
+    sub         TEXT NOT NULL,
+    sort        TEXT NOT NULL,               -- hot | new | top (of the day)
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | failed
+    error       TEXT,
+    total       INTEGER,                     -- posts in the listing
+    checked     INTEGER NOT NULL DEFAULT 0,
+    kept        INTEGER NOT NULL DEFAULT 0,
+    dropped     INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS browse_posts (
+    browse      INTEGER NOT NULL,
+    post        INTEGER NOT NULL,            -- follow_posts.id
+    n           INTEGER NOT NULL,            -- its place in the listing
+    PRIMARY KEY (browse, post)
+);
 CREATE TABLE IF NOT EXISTS save_actions (     -- save or unsave a Reddit post on Reddit, tapped in dreamfeed
     id          INTEGER PRIMARY KEY,
     post        INTEGER NOT NULL,            -- follow_posts.id

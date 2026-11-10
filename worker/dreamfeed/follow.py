@@ -16,7 +16,8 @@ Reddit accounts they link for free (cbprofile.py: one profile across sites), and
 previews asked for in Discover (followfeeds.preview), never alongside the feeds: both need the
 checks' models. Follows and unfollows tapped in dreamfeed are sent to Chaturbate from here
 (signed in as you, one at a time, within TICK seconds), and the list here changes with them;
-so are Reddit saves (followfeeds.reddit_saves).
+so are Reddit saves (followfeeds.reddit_saves). Browse now (followfeeds.browse) starts within
+TICK seconds too: the feeds make way for it between posts.
 
 These are real people: nothing here goes to training, styles, comics or generation. A room
 Chaturbate doesn't list as age verified is left out.
@@ -42,6 +43,7 @@ TICK = 5                     # seconds between checks for highlight requests
 HIGHLIGHT_LIMIT = 6 * 3600   # a cut taking longer than this is stopped
 BIOS_PER_ROUND = 3           # rooms whose bios are read each round (each once a day)
 PREVIEW_LIMIT = 1800         # a preview taking longer than this is stopped
+BROWSE_LIMIT = 1200          # so is a browse
 FEEDS_EVERY = 900            # seconds between reading the X and Reddit feeds
 TRAINING_STALE = 8 * 3600    # as the worker's: a training lock older than this is left over
 EVERYONE = 3600              # seconds between listing every room followed (offline ones too)
@@ -174,6 +176,9 @@ def main(argv: list[str]) -> None:
     if argv[:1] == ["highlight"] and len(argv) == 2:
         from .cbhighlights import run
         return run(int(argv[1]))
+    if argv[:1] == ["browse"] and len(argv) == 2:
+        from .followfeeds import browse
+        return browse(int(argv[1]))
     if argv[:1] == ["preview"] and len(argv) == 2:
         from .followfeeds import preview
         return preview(int(argv[1]))
@@ -192,9 +197,11 @@ def main(argv: list[str]) -> None:
     feeds = None           # the feeds' child while it runs (the live rooms keep being looked at)
     cutting = None         # the highlights' child: (process, job, started)
     previewing = None      # the previews' child: (process, job, started)
+    browsing = None        # Browse now's child: (process, job, started)
     with conn:             # cut off by a restart: again from the start
         conn.execute("UPDATE highlights SET status = 'queued', progress = NULL WHERE status = 'running'")
         conn.execute("UPDATE previews SET status = 'queued' WHERE status = 'running'")
+        conn.execute("UPDATE browses SET status = 'queued' WHERE status = 'running'")
     print("follow: watching the rooms you follow on Chaturbate", flush=True)
     next_look = 0.0
     while True:
@@ -210,7 +217,11 @@ def main(argv: list[str]) -> None:
             if feeds.returncode:
                 print(f"follow: reading the feeds failed (exit {feeds.returncode}), trying again next time", flush=True)
             feeds = None
-        previewing = _previews(conn, previewing, start=feeds is None and not busy(conn, Path(data)))
+        # A profile's posts and Browse now don't wait for the feeds (they make way between posts),
+        # only for jobs and training; one at a time (the checks' models: followfeeds.vision_lock).
+        free = not busy(conn, Path(data))
+        browsing = _child(conn, browsing, "browses", "browse", BROWSE_LIMIT, start=free)
+        previewing = _child(conn, previewing, "previews", "preview", PREVIEW_LIMIT, start=free and browsing is None)
         if time.time() < next_look:
             time.sleep(TICK)
             continue
@@ -307,27 +318,28 @@ def _bios(conn) -> None:
             conn.execute("UPDATE follows SET bio_at = datetime('now') WHERE source = 'chaturbate' AND name = ?", (name,))
 
 
-def _previews(conn, previewing, start: bool):
-    """Starts the next preview request (when start: no feeds, job or training); notices when one ends."""
+def _child(conn, running, table: str, command: str, limit: float, start: bool):
+    """Starts the next queued request of table (as `follow COMMAND <id>`) when start and none is
+    going; notices when one ends or overstays limit."""
     import subprocess
-    if previewing:
-        proc, job, started = previewing
+    if running:
+        proc, job, started = running
         if proc.poll() is None:
-            if time.time() - started < PREVIEW_LIMIT:
-                return previewing
+            if time.time() - started < limit:
+                return running
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
         with conn:
-            conn.execute("UPDATE previews SET status = 'failed', error = coalesce(error, 'stopped (took too long or crashed)')"
-                         " WHERE id = ? AND status = 'running'", (job,))
+            conn.execute(f"UPDATE {table} SET status = 'failed', error = coalesce(error, 'stopped (took too long or crashed)')"
+                         " WHERE id = ? AND status IN ('queued', 'running')", (job,))
     if not start:
         return None
-    row = conn.execute("SELECT id FROM previews WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+    row = conn.execute(f"SELECT id FROM {table} WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
     if not row:
         return None
     with conn:
-        conn.execute("UPDATE previews SET status = 'running' WHERE id = ?", (row[0],))
-    proc = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "preview", str(row[0])], start_new_session=True)
+        conn.execute(f"UPDATE {table} SET status = 'running' WHERE id = ?", (row[0],))
+    proc = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", command, str(row[0])], start_new_session=True)
     return proc, row[0], time.time()
 
 

@@ -277,6 +277,15 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 #f-source.no-e621 { grid-template-columns: repeat(3, 1fr); }
 #f-source.no-e621 [data-s="e621"] { display: none; }
 .fposts #f-mode { margin: 10px 14px 0; }
+.br-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin: 10px 14px 0; }
+.br-form[hidden] { display: none; }
+.br-form .secondary { width: auto; padding: 0 14px; }
+.br-recent { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+.br-recent:empty { display: none; }
+.br-recent button { min-height: 32px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--rule); background: none; color: inherit; font-size: 13px; cursor: pointer; }
+#browse #br-sorts { margin: 10px 14px 0; }
+#browse .br-status { margin: 8px 14px; color: var(--muted); font-size: 13px; }
+.fposts .post .where.go { cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
 .fposts .post .acts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .fposts .post .save { background: none; border: 0; padding: 0; min-height: 32px; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
 .fposts .post .save[aria-pressed="true"] { color: var(--accent); }
@@ -316,6 +325,12 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .pf-acts .secondary { width: auto; min-height: 36px; padding: 0 12px; font-size: 13px; }
 .pf-acts small { color: var(--muted); font-size: 12px; flex-basis: 100%; }
 .pf-acts small.err { color: var(--accent); }
+.pf-head { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px; align-items: center; }
+.pf-head[hidden] { display: none; }
+.pf-head > div { display: grid; gap: 2px; min-width: 0; }
+.pf-head b { font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-head small { color: var(--muted); font-size: 13px; }
+.pf-head p { margin: 4px 0 0; font-size: 14px; overflow-wrap: anywhere; white-space: pre-line; }
 .pf-about { margin: 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
 .pf-about.open { -webkit-line-clamp: unset; }
 .pf-sec { display: grid; gap: 8px; }
@@ -736,6 +751,11 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
       <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
+    <form class="br-form" id="br-form" hidden>
+      <input class="in" id="br-sub" placeholder="Browse a subreddit now: r/…" maxlength="24" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <select class="in" id="br-sort" aria-label="Sort"><option value="hot">Hot</option><option value="new">New</option><option value="top">Top today</option></select>
+      <button type="submit" class="secondary">Browse</button>
+      <div class="br-recent" id="br-recent"></div></form>
     <p class="note" id="f-feeds"></p>
     <div id="f-posts"></div>
     <button type="button" class="secondary more" id="f-more" hidden>More</button>
@@ -760,6 +780,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <a class="secondary" id="pf-open" target="_blank" rel="noreferrer noopener">Chaturbate</a>
       <button type="button" class="secondary" id="pf-close">Close</button></div>
     <div class="pf-body">
+      <div class="pf-head" id="pf-head" hidden></div>
       <p class="note" id="pf-info"></p>
       <p class="pf-about" id="pf-about" hidden></p>
       <div class="pf-sec"><h3>Accounts</h3><div class="pf-links" id="pf-links"></div>
@@ -771,6 +792,15 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="pf-sec" id="pf-vid-sec" hidden><h3 id="pf-vcount">Your videos</h3><div class="pf-grid" id="pf-grid"></div></div>
       <div class="pf-sec fposts" id="pf-post-sec" hidden><h3>Posts</h3><div id="pf-posts"></div></div>
     </div>
+  </div>
+  <div class="profile fposts" id="browse" hidden role="dialog" aria-modal="true" aria-label="Subreddit">
+    <div class="reader-bar"><span id="br-title"></span>
+      <a class="secondary" id="br-open" target="_blank" rel="noreferrer noopener">Reddit</a>
+      <button type="button" class="secondary" id="br-close">Close</button></div>
+    <div class="seg three" id="br-sorts" role="group" aria-label="Sort">
+      <button type="button" data-o="hot" aria-pressed="true">Hot</button><button type="button" data-o="new" aria-pressed="false">New</button><button type="button" data-o="top" aria-pressed="false">Top today</button></div>
+    <p class="note br-status" id="br-status"></p>
+    <div id="br-posts"></div>
   </div>
   <div class="mv-bar" id="mv-bar" hidden><span id="mv-count">Pick up to 4 rooms</span>
     <button type="button" class="primary" id="mv-go" disabled>Watch</button><button type="button" class="secondary" id="mv-cancel">Cancel</button></div>
@@ -1656,6 +1686,7 @@ document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
 });
 document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
   fp.source = b.dataset.s;
+  $("br-form").hidden = fp.source !== "reddit"; if (fp.source === "reddit") loadRecentBrowses();
   document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
@@ -1700,6 +1731,48 @@ async function loadPeople(box, gen) {
   }));
   box.replaceChildren(el("h3", null, "People you might like"), strip);
 }
+/* Browse now: a subreddit as it is now, its posts shown one by one as they pass the checks. */
+const br = { id: null, sub: "", sort: "hot", timer: null, gen: 0 };
+$("br-form").onsubmit = e => { e.preventDefault(); const v = $("br-sub").value.trim(); if (v) openBrowse(v, $("br-sort").value); };
+async function loadRecentBrowses() {
+  try {
+    const d = await api("api/reddit/browses");
+    $("br-recent").replaceChildren(...d.browses.map(b => {
+      const c = el("button", null, `r/${b.sub} · ${{ hot: "Hot", new: "New", top: "Top" }[b.sort]}`); c.type = "button";
+      c.onclick = () => openBrowse(b.sub, b.sort); return c;
+    }));
+  } catch {}
+}
+document.querySelectorAll("#br-sorts button").forEach(b => b.onclick = () => openBrowse(br.sub, b.dataset.o));
+async function openBrowse(sub, sort) {
+  sub = sub.replace(/^\/?r\//i, "").replace(/\/$/, "");
+  const gen = ++br.gen; clearTimeout(br.timer);
+  br.sub = sub; br.sort = sort;
+  document.querySelectorAll("#br-sorts button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.o === sort)));
+  $("br-title").textContent = `r/${sub}`; $("br-open").href = `https://www.reddit.com/r/${encodeURIComponent(sub)}/${sort === "top" ? "top/?t=day" : sort + "/"}`;
+  $("br-posts").replaceChildren(); $("br-status").textContent = "Asking Reddit…";
+  $("browse").hidden = false; $("browse").scrollTop = 0;
+  let d;
+  try { d = await api("api/reddit/browse", { sub, sort }); } catch (err) { if (gen === br.gen) $("br-status").textContent = err.message; return; }
+  if (gen !== br.gen) return;
+  br.id = d.id; pollBrowse(gen);
+}
+async function pollBrowse(gen) {
+  let d;
+  try { d = await api(`api/reddit/browse?id=${br.id}`); } catch (err) { if (gen === br.gen) $("br-status").textContent = err.message; return; }
+  if (gen !== br.gen) return;
+  // Keep the listing's order; cards already shown stay as they are (a playing video keeps playing).
+  const box = $("br-posts"), shown = new Map([...box.children].map(c => [c._pid, c]));
+  box.replaceChildren(...d.posts.map(p => shown.get(p.id) || Object.assign(postCard(p), { _pid: p.id })));
+  const going = d.status === "queued" || d.status === "running";
+  $("br-status").textContent = d.status === "failed" ? `Didn't work: ${d.error || "?"}`
+    : d.status === "queued" ? (d.waiting ? "Waiting for a job or training to finish (the checks make way for them)…" : "Starting…")
+    : d.total == null ? "Reading the subreddit…"
+    : `${going ? "Checking" : "Checked"} ${d.checked} of ${d.total}: ${d.kept} shown, ${d.dropped} dropped by the checks${going ? "…" : ""}`;
+  if (going) br.timer = setTimeout(() => pollBrowse(gen), 2000);
+}
+function closeBrowse() { br.gen++; clearTimeout(br.timer); $("browse").hidden = true; for (const v of $("br-posts").querySelectorAll("video")) v.pause(); }
+$("br-close").onclick = closeBrowse;
 async function refreshSync(p, show, tries = 0) {
   try {
     const d = await api(`api/following/posts?mode=saved&source=reddit&offset=0`);
@@ -1711,13 +1784,19 @@ async function refreshSync(p, show, tries = 0) {
 }
 function postCard(p) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
-  const av = el("span", "av sm", (p.author || "?").slice(0, 1).toUpperCase());
+  const av = el("span", "av sm", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
+  if (p.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = p.avatar; av.append(im); }
+  if (p.author && (p.source === "x" || p.source === "reddit")) {
+    av.style.cursor = "pointer"; av.onclick = () => openPerson(p.source === "x" ? { x: p.author } : { reddit: p.author });
+  }
   const who = el("span", "name", p.author || "?");
   if (p.author && (p.source === "x" || p.source === "reddit")) {
     who.classList.add("who"); who.onclick = () => openPerson(p.source === "x" ? { x: p.author } : { reddit: p.author });
   }
   head.append(who,
-              el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : "X"),
+              (() => { const w = el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : "X");
+                       if (p.source === "reddit" && p.place) { w.classList.add("go"); w.onclick = () => openBrowse(p.place, "hot"); }
+                       return w; })(),
               el("span", "time", "· " + relTime(p.posted_at)));
   body.append(head);
   if (p.text) body.append(el("p", "text", p.text));
@@ -1840,10 +1919,10 @@ function openProfile(r) { pf.card = r; openPerson({ room: r.name }); }
 async function openPerson(key) {
   const gen = ++pf.gen;
   clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); pf.toldFail = false;
-  pf.key = key; pf.videos = []; pf.data = null; pf.room = key.room ? { name: key.room } : null;
+  pf.key = key; pf.videos = []; pf.data = null; pf.autoFetched = false; pf.room = key.room ? { name: key.room } : null;
   if (!key.room) pf.card = null;
   $("pf-title").textContent = key.room || (key.x ? "@" + key.x : "u/" + key.reddit);
-  $("pf-info").textContent = "Loading…"; $("pf-about").hidden = true;
+  $("pf-info").textContent = "Loading…"; $("pf-about").hidden = true; $("pf-head").hidden = true;
   for (const id of ["pf-links", "pf-grid", "pf-posts"]) $(id).replaceChildren();
   for (const id of ["pf-prev-sec", "pf-vid-sec", "pf-post-sec"]) $(id).hidden = true;
   $("pf-live").hidden = true; $("pf-open").hidden = true;
@@ -1876,6 +1955,12 @@ async function loadPerson(gen) {
     b.followers ? `${Number(b.followers).toLocaleString()} followers` : "", room && !d.followed ? "not followed" : ""].filter(Boolean).join(" · ");
   $("pf-about").textContent = b.about || ""; $("pf-about").hidden = !b.about;
   renderLinks(d);
+  renderXHead(d);
+  if (k.x && !pf.autoFetched) {        // opened from an X name: their latest posts, fetched now
+    pf.autoFetched = true;
+    try { await api("api/discover/preview", { handle: k.x, auto: true }); d = await api(`api/profile?${q}`); if (gen !== pf.gen) return; pf.data = d; }
+    catch {}
+  }
   renderPreview(d, gen);
   $("pf-post-sec").hidden = !d.posts.length;
   $("pf-posts").replaceChildren(...d.posts.map(postCard));
@@ -1932,26 +2017,40 @@ async function linkAccount(room, source, handle, remove, quiet) {
   if (!quiet) loadPerson(pf.gen);
   return true;
 }
-// An X account you don't follow: its recent media, fetched on request through the checks.
+// Who an X account is: picture, name, bio and counts (from its posts, as X gave them).
+function renderXHead(d) {
+  const users = d.xusers || {}, h = (pf.key.x || "").toLowerCase(), u = users[h] || Object.values(users)[0];
+  const head = $("pf-head");
+  if (!u) { head.hidden = true; return; }
+  const av = el("span", "av lg", u.avatar ? null : (u.handle || "?").slice(0, 1).toUpperCase()), info = el("div");
+  if (u.avatar) { const im = el("img"); im.alt = ""; im.src = u.avatar; av.append(im); }
+  const n = x => x == null ? null : Number(x).toLocaleString();
+  info.append(el("b", null, u.nick || u.handle), el("small", null, "@" + u.handle + (u.location ? " · " + u.location : "")),
+    el("small", null, [n(u.followers) && `${n(u.followers)} followers`, n(u.following) && `${n(u.following)} following`,
+                       n(u.posts) && `${n(u.posts)} posts`].filter(Boolean).join(" · ")));
+  if (u.bio) info.append(el("p", null, u.bio));
+  head.replaceChildren(av, info); head.hidden = false;
+  if (!d.room) $("pf-title").textContent = u.nick || "@" + u.handle;
+}
+// An X account's latest media posts, fetched through the checks (on opening it, or on request).
 function renderPreview(d, gen) {
   const sec = $("pf-prev-sec"), rows = [];
   let waiting = false;
   for (const h of d.x) {
     const p = d.previews[h] || {};
-    if (p.following) continue;
-    const row = el("div", "pf-prev"), go = el("button", "secondary", p.status === "done" ? "Fetch again" : "Preview their media");
+    const row = el("div", "pf-prev"), go = el("button", "secondary", p.status === "done" ? "Fetch again" : "Get their latest posts");
     go.type = "button";
     go.onclick = async () => { try { await api("api/discover/preview", { handle: h }); } catch (err) { return toast(err.message); } loadPerson(pf.gen); };
-    const what = p.status === "queued" ? "Waiting its turn (after the feeds, a job or training)…"
-      : p.status === "running" ? "Fetching and checking…"
-      : p.status === "done" ? `${p.kept} post${p.kept === 1 ? "" : "s"} kept, ${p.dropped} dropped by the checks`
-      : p.status === "failed" ? `Didn't work: ${p.error || "?"}` : "You don't follow them on X.";
+    const what = p.status === "queued" ? "Getting their latest posts (waits for a job or training if one's going)…"
+      : p.status === "running" ? "Fetching and checking their latest posts; they show as they pass…"
+      : p.status === "done" ? `Latest posts: ${p.kept} shown, ${p.dropped} dropped by the checks`
+      : p.status === "failed" ? `Didn't work: ${p.error || "?"}` : p.following ? "You follow them on X." : "You don't follow them on X.";
     row.append(el("small", "note", `@${h}: ${what}`));
     if (!["queued", "running"].includes(p.status)) row.append(go); else waiting = true;
     rows.push(row);
   }
   sec.replaceChildren(...rows); sec.hidden = !rows.length;
-  if (waiting) pf.ptimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 8000);
+  if (waiting) pf.ptimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 3000);
 }
 function renderProfile(gen) {
   clearTimeout(pf.timer);
@@ -2022,7 +2121,7 @@ function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }
 $("pl-close").onclick = closeRoom;
 document.addEventListener("keydown", e => {
   if ($("player").hidden) {
-    if (e.key === "Escape") { if (!$("multi").hidden) closeMulti(); else if (!$("profile").hidden) closeProfile(); }
+    if (e.key === "Escape") { if (!$("multi").hidden) closeMulti(); else if (!$("browse").hidden) closeBrowse(); else if (!$("profile").hidden) closeProfile(); }
     return;
   }
   if (e.key === "Escape") closeRoom();

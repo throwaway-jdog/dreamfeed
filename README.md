@@ -377,6 +377,19 @@ The Feed has three parts, each with All, X, Reddit (and e621) to pick from:
 A Reddit post from a subreddit whose name has words dreamfeed never takes (young, feral and
 the like) isn't fetched at all.
 
+**Browse now (Reddit).** With Reddit picked, type a subreddit (or tap one on a post) to see it
+as it is now: Hot, New or the day's Top. Its 25 posts are fetched and checked one by one and
+each shows as soon as it passes (the first within seconds, all in a minute or two); posts
+already here show at once. The follow service runs it straight away: the feeds make way
+between posts, and only a job or training makes it wait (the checks' models are loaded by one
+thing at a time). Browsed posts aren't added to Following or For you; they expire like the rest.
+
+**X profiles.** Tap an X name or picture (Following, For you, anywhere) for their profile:
+their picture, name, bio and counts, and their latest posts, fetched as you open it (30 media
+files, the first 6 checked and shown in seconds, then the rest; not again within half an
+hour, Fetch again for more). Profile pictures come with their posts and are checked like
+them: one that fails isn't shown (`data/generated/follow/avatars/`).
+
 From Reddit it takes pictures, galleries (up to 20 pictures), Reddit's own videos (with sound)
 and redgifs clips, through Reddit's API with your own app: a "personal use script" at
 reddit.com/prefs/apps, its id and secret in `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`

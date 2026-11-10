@@ -15,6 +15,9 @@ GET  /api/live/videos    ?name=ROOM  your own videos of a room you follow (CB_VI
 GET  /cb-videos/<room>/<path>   one of them;  /cb-videos/poster/<key>.jpg  its poster
 GET  /api/discover/cb   ?mode=foryou|top|search&q=WORDS&gender=f|m|c|t&offset=N  live rooms you don't follow
 GET  /api/discover/x    X accounts you might like: linked from your rooms, mentioned by your follows
+GET  /api/reddit/browse  ?id=N  a Browse now: its posts so far (checked) and how far it's got
+GET  /api/reddit/browses   the last few subreddits browsed
+GET  /follow/avatar/x/<handle>.jpg  an X account's profile picture (checked like posts)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
@@ -43,6 +46,7 @@ POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of 
 POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
 POST /api/live/restore  {"undo": token} put it back
 POST /api/profile/link  {"room", "source": "x"|"reddit", "handle", "remove": bool} link or unlink an account
+POST /api/reddit/browse {"sub": "r/name", "sort": "hot"|"new"|"top"} look at a subreddit now ({"id"})
 POST /api/following/save {"id": N, "save": bool} keep a post in Saved (and save it on Reddit, for Reddit's)
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
 POST /api/discover/preview {"handle": H} fetch an X account's recent media (checked) for its profile
@@ -495,6 +499,56 @@ def follow_posts(source: str, offset: int, mode: str = "following") -> dict:
     return {"posts": posts, "more": len(rows) > PAGE_SIZE, "feeds": read_json(FOLLOW / "feeds.json")}
 
 
+SUBREDDIT = re.compile(r"^(?:/?r/)?([A-Za-z0-9_]{2,21})/?$")
+BROWSE_SORTS = ("hot", "new", "top")
+
+
+def start_browse(req: dict) -> dict:
+    """{"sub", "sort": hot|new|top}: look at a subreddit now; its posts show as they pass the
+    checks (the follow service). Asked again within 5 minutes, the same browse is shown."""
+    m = SUBREDDIT.match(str(req.get("sub", "")).strip())
+    sort = str(req.get("sort", "hot"))
+    if not m or sort not in BROWSE_SORTS:
+        raise ValueError("a subreddit's name, like r/yiff")
+    sub = m.group(1)
+    words = sub.replace("_", " ").lower()
+    if (safety.request_blocked(words) or safety.story_blocked(words)
+            or any(w in words for w in e621.NEVER if len(w) > 3)):
+        raise ValueError("not a subreddit dreamfeed reads")
+    with db() as conn:
+        hit = conn.execute("SELECT id FROM browses WHERE lower(sub) = lower(?) AND sort = ? AND (status IN ('queued', 'running')"
+                           " OR (status = 'done' AND created_at >= datetime('now', '-5 minutes'))) ORDER BY id DESC LIMIT 1",
+                           (sub, sort)).fetchone()
+        if hit:
+            return {"id": hit["id"]}
+        return {"id": conn.execute("INSERT INTO browses(sub, sort) VALUES (?, ?)", (sub, sort)).lastrowid}
+
+
+def browse_status(job: int) -> dict:
+    with db() as conn:
+        b = conn.execute("SELECT * FROM browses WHERE id = ?", (job,)).fetchone()
+        if not b:
+            raise LookupError("no such browse")
+        rows = conn.execute("SELECT p.* FROM browse_posts bp JOIN follow_posts p ON p.id = bp.post WHERE bp.browse = ? ORDER BY bp.n",
+                            (job,)).fetchall()
+        try:                # (as the follow service's busy(): a job, a run or training)
+            training = time.time() - (DATA / "lora" / ".training").stat().st_mtime < 8 * 3600
+        except OSError:
+            training = False
+        waiting = b["status"] == "queued" and (training or bool(conn.execute(
+            "SELECT 1 FROM jobs WHERE status = 'running' UNION SELECT 1 FROM runs WHERE status = 'running'").fetchone()))
+        return {"id": b["id"], "sub": b["sub"], "sort": b["sort"], "status": b["status"], "error": b["error"],
+                "total": b["total"], "checked": b["checked"], "kept": b["kept"], "dropped": b["dropped"], "waiting": waiting,
+                "posts": [_post_json(r, conn) for r in rows]}
+
+
+def recent_browses() -> dict:
+    with db() as conn:
+        rows = conn.execute("SELECT sub, sort, max(id) AS id, max(created_at) AS at FROM browses WHERE status != 'failed'"
+                            " GROUP BY lower(sub), sort ORDER BY id DESC LIMIT 8").fetchall()
+    return {"browses": [dict(r) for r in rows]}
+
+
 def save_post(req: dict) -> dict:
     """{"id", "save": bool}: keep a post (past the 14 days) in Saved; a Reddit post is saved on
     Reddit too (sent by the follow service)."""
@@ -510,6 +564,18 @@ def save_post(req: dict) -> dict:
     return {"saved": save}
 
 
+AVATARS = FOLLOW / "avatars" / "x"
+
+
+def _avatar(handle: str) -> str | None:
+    """An X account's profile picture (kept only if it passed the checks), or None."""
+    f = AVATARS / f"{handle.lower()}.jpg"
+    try:
+        return f"follow/avatar/x/{handle.lower()}.jpg?t={int(f.stat().st_mtime)}"
+    except OSError:
+        return None
+
+
 def _post_json(r, conn=None) -> dict:
     sync = None
     if conn is not None and r["source"] == "reddit":
@@ -518,6 +584,7 @@ def _post_json(r, conn=None) -> dict:
     return {"id": r["id"], "source": r["source"], "author": r["author"], "place": r["place"], "text": r["text"],
             "link": r["link"], "posted_at": r["posted_at"], "discovered": bool(r["discovered"]),
             "saved": bool(r["saved"]), "sync": sync,
+            "avatar": _avatar(r["author"]) if r["source"] == "x" and r["author"] else None,
             "media": [{"kind": m["kind"], "url": "follow/media/" + m["file"],
                        "poster": "follow/media/" + m["poster"] if m.get("poster") else None}
                       for m in json.loads(r["media"])]}
@@ -698,6 +765,11 @@ def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
             out["posts"] = [_post_json(r, conn) for r in rows]
             following = {a.lower() for (a,) in conn.execute(
                 f"SELECT DISTINCT author FROM follow_posts WHERE source = 'x' AND discovered = 0 AND lower(author) IN ({marks(len(xs)) or 'NULL'})", [*xs])}
+            out["xusers"] = {}
+            for u in conn.execute(f"SELECT * FROM x_users WHERE lower(handle) IN ({marks(len(xs)) or 'NULL'})", [*xs]):
+                out["xusers"][u["handle"].lower()] = {"handle": u["handle"], "nick": u["nick"], "bio": u["bio"], "location": u["location"],
+                                                      "followers": u["followers"], "following": u["following"], "posts": u["posts"],
+                                                      "avatar": _avatar(u["handle"])}
             for h in xs:
                 p = conn.execute("SELECT status, error, kept, dropped, created_at FROM previews WHERE lower(handle) = ? ORDER BY id DESC LIMIT 1", (h,)).fetchone()
                 out["previews"][h] = {"following": h in following, **(dict(p) if p else {})}
@@ -740,7 +812,13 @@ def queue_preview(req: dict) -> dict:
         raise ValueError("bad X handle")
     with db() as conn:
         if conn.execute("SELECT 1 FROM previews WHERE lower(handle) = lower(?) AND status IN ('queued', 'running')", (m.group(1),)).fetchone():
+            if req.get("auto"):
+                return {"ok": True}
             raise ValueError("already being fetched")
+        # auto (opening their profile): not again within half an hour
+        if req.get("auto") and conn.execute("SELECT 1 FROM previews WHERE lower(handle) = lower(?) AND status = 'done'"
+                                            " AND created_at >= datetime('now', '-30 minutes')", (m.group(1),)).fetchone():
+            return {"ok": True}
         conn.execute("INSERT INTO previews(source, handle) VALUES ('x', ?)", (m.group(1),))
     return {"ok": True}
 
@@ -1842,6 +1920,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(502, {"error": str(e)})
+        if path == "/api/reddit/browse":
+            try:
+                return self.send(200, browse_status(int(self.query().get("id", "0") or 0)))
+            except (ValueError, LookupError) as e:
+                return self.send(404, {"error": str(e)})
+        if path == "/api/reddit/browses":
+            return self.send(200, recent_browses())
         if path == "/api/discover/x":
             return self.send(200, discover_x())
         if path == "/api/profile":
@@ -1850,6 +1935,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", "")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
+        if path.startswith("/follow/avatar/x/"):
+            name = path[len("/follow/avatar/x/"):].removesuffix(".jpg")
+            file = AVATARS / f"{name}.jpg"
+            if not re.fullmatch(r"[a-z0-9_]{1,15}", name) or not file.is_file():
+                return self.send(404, {"error": "no picture"})
+            return self.send_file(file)
         if path.startswith("/cb-thumb/"):
             name = path[len("/cb-thumb/"):].removesuffix(".jpg")
             data = cb_thumb(name) if ROOM.match(name) else None
@@ -1935,7 +2026,8 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/discover/preview": queue_preview,
-                   "/api/live/follow": follow_room, "/api/following/save": save_post}
+                   "/api/live/follow": follow_room, "/api/following/save": save_post,
+                   "/api/reddit/browse": start_browse}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

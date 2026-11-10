@@ -427,7 +427,11 @@ def _post(source: str, md: dict) -> dict:
     if source == "x":
         author = md.get("author") or {}
         named = [m.get("name") for m in md.get("mentions") or []] + [md.get("reply_to")]
-        return {"post_id": str(md["tweet_id"]), "author": author.get("name") or "", "place": None,
+        user = {"handle": author.get("name"), "nick": author.get("nick"), "bio": author.get("description"),
+                "location": author.get("location"), "followers": author.get("followers_count"),
+                "following": author.get("friends_count"), "posts": author.get("statuses_count"),
+                "image_url": author.get("profile_image")}
+        return {"post_id": str(md["tweet_id"]), "author": author.get("name") or "", "place": None, "user": user,
                 "mentions": sorted({n for n in named if n and n != author.get("name")}),
                 "text": md.get("content") or "", "posted_at": str(md.get("date") or ""),
                 "link": f"https://x.com/{author.get('name')}/status/{md['tweet_id']}"}
@@ -435,6 +439,49 @@ def _post(source: str, md: dict) -> dict:
     link = p.get("link") or ("https://www.reddit.com" + p["permalink"] if p.get("permalink") else None)
     return {"post_id": str(p["id"]), "author": p.get("author") or "", "place": p.get("subreddit") or p.get("place"),
             "text": p.get("title") or "", "posted_at": str(p.get("date") or ""), "link": link, "via": p.get("via")}
+
+
+AVATAR_HOSTS = ("pbs.twimg.com",)
+AVATAR_SIDE = 256
+
+
+def _save_user(conn, user: dict, vision, cfg, folder: Path) -> None:
+    """An X account's details, and its profile picture: fetched when new or changed and kept only
+    if it passes the same checks as posts (else none is shown)."""
+    import io
+    import urllib.parse
+    import urllib.request
+    handle = str(user.get("handle") or "")
+    if not X_HANDLE.match(handle):
+        return
+    old = conn.execute("SELECT image_url, avatar FROM x_users WHERE handle = ?", (handle,)).fetchone()
+    url = str(user.get("image_url") or "")
+    with conn:
+        conn.execute("INSERT INTO x_users(handle, nick, bio, location, followers, following, posts, image_url)"
+                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(handle) DO UPDATE SET nick = excluded.nick,"
+                     " bio = excluded.bio, location = excluded.location, followers = excluded.followers,"
+                     " following = excluded.following, posts = excluded.posts, image_url = excluded.image_url,"
+                     " updated_at = datetime('now')",
+                     (handle, str(user.get("nick") or "")[:100], str(user.get("bio") or "")[:1000],
+                      str(user.get("location") or "")[:100], user.get("followers"), user.get("following"),
+                      user.get("posts"), url))
+    if old and old[0] == url and old[1] != 0:       # the same picture as before, already looked at
+        return
+    if urllib.parse.urlparse(url).hostname not in AVATAR_HOSTS:
+        return
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "dreamfeed"}), timeout=30) as r:
+        data = r.read(5 << 20)
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    ok = _problem(vision, cfg, [img]) is None
+    dest = folder / f"{handle.lower()}.jpg"
+    if ok:
+        folder.mkdir(parents=True, exist_ok=True)
+        img.thumbnail((AVATAR_SIDE, AVATAR_SIDE))
+        img.save(dest, quality=88)
+    else:
+        dest.unlink(missing_ok=True)
+    with conn:
+        conn.execute("UPDATE x_users SET avatar = ? WHERE handle = ?", (1 if ok else -1, handle))
 
 
 def _place_blocked(subreddit: str) -> bool:
@@ -486,11 +533,12 @@ def _problem(vision, cfg, frames) -> tuple[str, str] | None:
 
 
 def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, discovered: bool = False,
-              via: str | None = None) -> tuple[int, int]:
+              via: str | None = None, yields: bool = False) -> tuple[int, int]:
     """The downloaded files, checked and kept or deleted, post by post: (kept, dropped). If a
     job or training starts meanwhile it stops, and the rest wait in incoming for next time.
     discovered: not from your own feeds (via: foryou, X's For you; preview, a profile's preview),
-    shown in the Feed's For you and on profiles, never with your Following posts."""
+    shown in the Feed's For you and on profiles, never with your Following posts.
+    yields: stop between posts while a Browse now waits (the feeds' rounds; the rest next time)."""
     from .follow import busy
     for meta in incoming.glob("*.json"):       # details whose file is gone
         if not meta.with_suffix("").exists():
@@ -514,6 +562,9 @@ def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, disco
     for pid, post in posts.items():
         if busy(conn, cfg.data_dir):
             print(f"follow: {source}: stopped for a job or training; the rest next time", flush=True)
+            break
+        if yields and browsing(conn):
+            print(f"follow: {source}: stopped for Browse now; the rest next time", flush=True)
             break
         reason, frames_of = None, {}
         for f in post["files"]:
@@ -551,6 +602,11 @@ def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, disco
                          " mentions, discovered, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                          (source, pid, post["author"], post["place"], post["text"][:2000], post["link"], post["posted_at"],
                           json.dumps(items), json.dumps(post.get("mentions") or []), int(discovered or bool(v)), v))
+        if post.get("user"):
+            try:
+                _save_user(conn, post["user"], vision, cfg, media.parent / "avatars" / "x")
+            except (OSError, ValueError) as e:
+                print(f"follow: x/{post['user'].get('handle')}: profile picture: {e}", flush=True)
         kept += 1
     return kept, dropped
 
@@ -575,7 +631,7 @@ def main() -> None:
     root = cfg.data_dir / "generated" / "follow"
     media = root / "media"
     status = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}
-    vision = None
+    vision = lock = None
     try:
         for source in FEEDS:
             why = _signed_in(source)
@@ -587,23 +643,33 @@ def main() -> None:
             if error:
                 status[source] = {"error": f"{FEEDS[source]['name']}: {error}"}
                 continue
+            if browsing(conn):          # Browse now first: these wait in incoming for next time
+                status[source] = {"kept": 0, "dropped": 0}
+                continue
             if vision is None and any(incoming.iterdir()):
+                lock = vision_lock()
                 vision = Vision(cfg.models_dir)
             feed = FEEDS[source]
             kept, dropped = check_new(conn, feed.get("as", source), incoming, media, vision, cfg,
-                                      discovered=bool(feed.get("via")), via=feed.get("via")) if vision else (0, 0)
+                                      discovered=bool(feed.get("via")), via=feed.get("via"), yields=True) if vision else (0, 0)
+            if vision is not None and browsing(conn):     # its models' memory, for the browse
+                vision.close(); vision = None
+                lock.close(); lock = None
             status[source] = {"kept": kept, "dropped": dropped}
             print(f"follow: {source}: {kept} new posts, {dropped} dropped by the checks", flush=True)
         expire(conn, media)
     finally:
         if vision is not None:
             vision.close()
+        if lock is not None:
+            lock.close()
         tmp = root / "feeds.tmp"
         tmp.write_text(json.dumps(status))
         tmp.replace(root / "feeds.json")
 
 
-PREVIEW_POSTS = 30        # media posts read for a preview
+PREVIEW_POSTS = 30        # media files read for a profile's latest posts
+PREVIEW_FIRST = 6         # the first batch of them (shown while the rest download)
 X_HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
@@ -623,7 +689,7 @@ def preview(job_id: int) -> None:
     handle = row[0]
     root = cfg.data_dir / "generated" / "follow"
     incoming = root / "incoming" / f"preview-{job_id}"
-    vision = None
+    vision = lock = None
     try:
         if not X_HANDLE.match(handle):
             raise RuntimeError("not an X handle")
@@ -637,18 +703,28 @@ def preview(job_id: int) -> None:
         }, "downloader": {"part-directory": str(incoming / ".part"), "filesize-max": MAX_SIZE}}
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(conf, f)
+        kept = dropped = 0
+        error = None
         try:
-            r = subprocess.run(["gallery-dl", "--config-ignore", "--config", f.name, "--cookies", str(FEEDS["x"]["cookies"]),
-                                "--range", f"1-{PREVIEW_POSTS}", "--write-metadata", f"https://x.com/{handle}/media"],
-                               capture_output=True, text=True, timeout=900)
+            # A few first, checked and shown, then the rest: the profile fills in as it goes.
+            for first, last in ((1, PREVIEW_FIRST), (PREVIEW_FIRST + 1, PREVIEW_POSTS)):
+                r = subprocess.run(["gallery-dl", "--config-ignore", "--config", f.name, "--cookies", str(FEEDS["x"]["cookies"]),
+                                    "--range", f"{first}-{last}", "--write-metadata", f"https://x.com/{handle}/media"],
+                                   capture_output=True, text=True, timeout=900)
+                shutil.rmtree(incoming / ".part", ignore_errors=True)
+                if not any(incoming.iterdir()):
+                    errors = [line for line in r.stderr.splitlines() if "][error]" in line]
+                    error = errors[-1].split("][error]", 1)[1].strip()[:200] if errors else None
+                    break
+                if vision is None:
+                    lock = vision_lock()
+                    vision = Vision(cfg.models_dir)
+                k, d = check_new(conn, "x", incoming, root / "media", vision, cfg, discovered=True, via="preview")
+                kept, dropped = kept + k, dropped + d
         finally:
             Path(f.name).unlink(missing_ok=True)
-            shutil.rmtree(incoming / ".part", ignore_errors=True)
-        if not any(incoming.iterdir()):
-            errors = [line for line in r.stderr.splitlines() if "][error]" in line]
-            raise RuntimeError(errors[-1].split("][error]", 1)[1].strip()[:200] if errors else "no pictures or videos there")
-        vision = Vision(cfg.models_dir)
-        kept, dropped = check_new(conn, "x", incoming, root / "media", vision, cfg, discovered=True, via="preview")
+        if not kept and not dropped:
+            raise RuntimeError(error or "no pictures or videos there")
         with conn:
             conn.execute("UPDATE previews SET status = 'done', kept = ?, dropped = ? WHERE id = ?", (kept, dropped, job_id))
         print(f"follow: preview of x/{handle}: {kept} posts, {dropped} dropped by the checks", flush=True)
@@ -659,6 +735,8 @@ def preview(job_id: int) -> None:
     finally:
         if vision is not None:
             vision.close()
+        if lock is not None:
+            lock.close()
         shutil.rmtree(incoming, ignore_errors=True)
 
 
@@ -691,3 +769,106 @@ def reddit_saves(conn) -> None:
         with conn:
             conn.execute("UPDATE save_actions SET status = ?, error = ? WHERE id = ?", ("failed" if err else "done", err, job))
         print(f"follow: {action} reddit post {pid}: {err or 'done'}", flush=True)
+
+
+def vision_lock():
+    """Held while the checks' models are loaded (the feeds, a preview, a browse): one at a time,
+    for the follow service's memory. Waits for it; close the returned file to let go."""
+    import fcntl
+    f = open(Path(os.environ["DATA_DIR"]) / "generated" / "follow" / ".vision.lock", "a")
+    fcntl.flock(f, fcntl.LOCK_EX)
+    return f
+
+
+def browsing(conn) -> bool:
+    """A Browse now or a profile's posts are waiting or being fetched (the feeds make way)."""
+    return bool(conn.execute("SELECT 1 FROM browses WHERE status IN ('queued', 'running')"
+                             " UNION SELECT 1 FROM previews WHERE status IN ('queued', 'running') LIMIT 1").fetchone())
+
+
+BROWSE_SORTS = {"hot": "/hot?", "new": "/new?", "top": "/top?t=day&"}
+BROWSE_POSTS = 25
+SUBREDDIT = re.compile(r"^[A-Za-z0-9_]{2,21}$")
+
+
+def browse(job_id: int) -> None:
+    """`follow browse <job>`: a subreddit as it is now (hot, new or the day's top), its posts
+    fetched and checked one by one, each shown as soon as it passes (the browses tables)."""
+    import torch
+    from .config import Config, need
+    from .db import connect
+    from .vision import Vision
+    torch.set_num_threads(int(need("FOLLOW_THREADS")))
+    cfg = Config()
+    conn = connect(cfg.db_path)
+    row = conn.execute("SELECT sub, sort FROM browses WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        return
+    sub, sort = row
+    root = cfg.data_dir / "generated" / "follow"
+    incoming = root / "incoming" / f"browse-{job_id}"
+    vision = lock = None
+
+    def bump(**kw) -> None:
+        with conn:
+            conn.execute("UPDATE browses SET " + ", ".join(f"{k} = {k} + ?" for k in kw) + " WHERE id = ?", (*kw.values(), job_id))
+
+    try:
+        if not SUBREDDIT.match(sub) or sort not in BROWSE_SORTS or _place_blocked(sub):
+            raise RuntimeError("not a subreddit dreamfeed reads")
+        creds = _api_creds()
+        if not creds:
+            raise RuntimeError("Browse now needs your Reddit app (README: Following)")
+        token = _api_token(creds)
+        posts = _api_posts(_fetch(f"{REDDIT_API}/r/{sub}{BROWSE_SORTS[sort]}limit={BROWSE_POSTS}&raw_json=1",
+                                  {"Authorization": f"bearer {token}"}, gap=API_GAP))
+        with conn:                     # (from the start again, after a restart)
+            conn.execute("UPDATE browses SET total = ?, checked = 0, kept = 0, dropped = 0 WHERE id = ?", (len(posts), job_id))
+            conn.execute("DELETE FROM browse_posts WHERE browse = ?", (job_id,))
+        for n, p in enumerate(posts):
+            have = conn.execute("SELECT id FROM follow_posts WHERE source = 'reddit' AND post_id = ?", (p["id"],)).fetchone()
+            if have:                   # already here (your feeds, or an earlier browse)
+                with conn:
+                    conn.execute("INSERT OR IGNORE INTO browse_posts(browse, post, n) VALUES (?, ?, ?)", (job_id, have[0], n))
+                bump(checked=1, kept=1)
+                continue
+            if not re.fullmatch(r"[a-z0-9]{3,12}", p["id"]) or _place_blocked(p.get("subreddit") or "") or not p["media"]:
+                bump(checked=1)
+                continue
+            shutil.rmtree(incoming, ignore_errors=True)
+            incoming.mkdir(parents=True)
+            urls = p.pop("media")[:MAX_GALLERY]
+            p["via"] = "browse"
+            meta = json.dumps(p)
+            for i, url in enumerate(urls, 1):
+                try:
+                    _reddit_file(url, f"{p['id']}_{i:02d}", incoming, meta, gap=API_GAP)
+                except (OSError, subprocess.SubprocessError) as e:
+                    print(f"follow: browse r/{sub}: post {p['id']}: {e}", flush=True)
+            if not any(incoming.iterdir()):
+                bump(checked=1)
+                continue
+            if vision is None:
+                lock = vision_lock()
+                vision = Vision(cfg.models_dir)
+            kept, dropped = check_new(conn, "reddit", incoming, root / "media", vision, cfg, discovered=True, via="browse")
+            got = conn.execute("SELECT id FROM follow_posts WHERE source = 'reddit' AND post_id = ?", (p["id"],)).fetchone()
+            if got:
+                with conn:
+                    conn.execute("INSERT OR IGNORE INTO browse_posts(browse, post, n) VALUES (?, ?, ?)", (job_id, got[0], n))
+            bump(checked=1, kept=int(bool(got)), dropped=dropped)
+            if not kept and not dropped:   # stopped for a job or training
+                raise RuntimeError("stopped: a job or training started (the checks make way for it)")
+        with conn:
+            conn.execute("UPDATE browses SET status = 'done' WHERE id = ?", (job_id,))
+        print(f"follow: browse r/{sub} ({sort}): done", flush=True)
+    except Exception as e:      # shown where it was asked for
+        with conn:
+            conn.execute("UPDATE browses SET status = 'failed', error = ? WHERE id = ?", (str(e)[:300], job_id))
+        print(f"follow: browse r/{sub} failed: {e}", flush=True)
+    finally:
+        if vision is not None:
+            vision.close()
+        if lock is not None:
+            lock.close()
+        shutil.rmtree(incoming, ignore_errors=True)
