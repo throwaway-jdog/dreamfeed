@@ -2,10 +2,11 @@
 follow feeds` (the follow service runs it every FEEDS_EVERY seconds, as a child that exits
 when done, so the checking models' memory is given back).
 
-1. gallery-dl reads each feed (X: the Following timeline, x.com/home, with your cookies;
-   Reddit: your front page, the subreddits you're subscribed to, through Reddit's API with your
-   own app: REDDIT_CLIENT_ID, REDDIT_REFRESH_TOKEN, REDDIT_USERNAME) and downloads the pictures,
-   videos and GIFs of posts it hasn't seen (its archive remembers them).
+1. New posts are downloaded: X with gallery-dl and your cookies (the Following timeline,
+   x.com/home); Reddit from the public RSS feeds of the subreddits and users in REDDIT_FOLLOW
+   (no account: Reddit's API needs an approved app), their pictures (i.redd.it) and redgifs
+   (gallery-dl); galleries and Reddit's own videos aren't in the RSS feed's link, so they're
+   left out. What's been read is remembered (gallery-dl's archive; reddit.seen).
 2. Every file goes through the adults-only checks (checks.problem, strict), a video's
    VIDEO_FRAMES frames spread over it, and a face in a drawing gets the age estimate too. A
    post with any file that fails is deleted, all of it.
@@ -34,21 +35,35 @@ IMAGES = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEOS = {".mp4", ".webm", ".mov", ".m4v", ".gif"}
 FEEDS = {
     "x": {"url": "https://x.com/home", "cookies": Path("/config/x-cookies.txt"), "name": "X"},
-    # Through Reddit's API (oauth.reddit.com) as you, with your own app; no cookies.
-    "reddit": {"url": "https://www.reddit.com/", "cookies": None, "name": "Reddit"},
+    "reddit": {"name": "Reddit"},
 }
-REDDIT = ("REDDIT_CLIENT_ID", "REDDIT_REFRESH_TOKEN", "REDDIT_USERNAME")
+# Reddit's rules for scripts: a user agent that says what it is.
+REDDIT_AGENT = "linux:dreamfeed:1.0 (personal feed reader)"
+REDDIT_RSS = "https://www.reddit.com/{}/new/.rss?limit=25"
+REDDIT_GAP = 7             # seconds between Reddit requests (unsigned readers get very few)
+REDDIT_IMAGES = ("i.redd.it",)
+REDDIT_LINKED = ("redgifs.com", "www.redgifs.com", "v3.redgifs.com")
+SEEN_KEEP = 5000
+ATOM = {"a": "http://www.w3.org/2005/Atom"}
 
 
-def _reddit() -> dict:
-    return {k: os.environ.get(k, "").strip() for k in REDDIT}
+def reddit_follow() -> list[str]:
+    """REDDIT_FOLLOW: "r/name" and "u/name", comma-separated (a bare name is a subreddit)."""
+    import re
+    out = []
+    for item in os.environ.get("REDDIT_FOLLOW", "").split(","):
+        item = item.strip().strip("/").removeprefix("user/").replace("user/", "u/")
+        kind, _, name = item.rpartition("/")
+        kind = {"": "r", "r": "r", "u": "u"}.get(kind)
+        if kind and re.fullmatch(r"[A-Za-z0-9_-]{2,30}", name):
+            out.append(f"{kind}/{name}")
+    return out
 
 
 def _signed_in(source: str) -> str | None:
     """Why this feed can't be read, or None."""
     if source == "reddit":
-        missing = [k for k, v in _reddit().items() if not v]
-        return f"Reddit isn't set up yet ({', '.join(missing)} in .env)" if missing else None
+        return None if reddit_follow() else "no subreddits or users to follow yet (REDDIT_FOLLOW in .env)"
     cookies = FEEDS[source]["cookies"]
     if not cookies.is_file() or not any(line.strip() and not line.startswith("# ") for line in cookies.open()):
         return f"no {FEEDS[source]['name']} cookies yet"
@@ -58,27 +73,19 @@ def _signed_in(source: str) -> str | None:
 def download(source: str, incoming: Path, archive: Path) -> str | None:
     """The feed's new files into incoming, each with its post's details (FILE.json); an error, or None."""
     incoming.mkdir(parents=True, exist_ok=True)
+    if source == "reddit":
+        return _reddit(incoming, archive.with_suffix(".seen"))
     conf = {"extractor": {
         "base-directory": str(incoming), "directory": [], "archive": str(archive), "cookies-update": False,
         "filename": "{category}_{filename}.{extension}",
-        "parent-directory": True, "parent-metadata": "_parent",      # a linked redgifs keeps its Reddit post
         "twitter": {"text-tweets": False, "retweets": False, "quoted": False, "filename": "{tweet_id}_{num}.{extension}"},
-        "reddit": {"comments": 0, "videos": True, "whitelist": ["imgur", "redgifs"], "filename": "{id}_{num}.{extension}"},
     }, "downloader": {"part-directory": str(incoming / ".part"), "filesize-max": MAX_SIZE}}
-    cmd = ["gallery-dl", "--config-ignore", "--config"]
-    auth = []
-    if source == "reddit":
-        r = _reddit()
-        # Reddit's API rules: a user agent naming the app and whose it is.
-        conf["extractor"]["reddit"].update({"client-id": r["REDDIT_CLIENT_ID"], "refresh-token": r["REDDIT_REFRESH_TOKEN"],
-                                           "user-agent": f"linux:dreamfeed:1.0 (by /u/{r['REDDIT_USERNAME']})"})
-    else:
-        auth = ["--cookies", str(FEEDS[source]["cookies"])]
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(conf, f)
     try:
-        r = subprocess.run([*cmd, f.name, *auth, "--range", f"1-{MAX_FILES}", "--abort", str(STOP_AFTER_SEEN),
-                            "--write-metadata", FEEDS[source]["url"]], capture_output=True, text=True, timeout=1800)
+        r = subprocess.run(["gallery-dl", "--config-ignore", "--config", f.name, "--cookies", str(FEEDS[source]["cookies"]),
+                            "--range", f"1-{MAX_FILES}", "--abort", str(STOP_AFTER_SEEN), "--write-metadata",
+                            FEEDS[source]["url"]], capture_output=True, text=True, timeout=1800)
     finally:
         Path(f.name).unlink(missing_ok=True)
         shutil.rmtree(incoming / ".part", ignore_errors=True)
@@ -86,6 +93,89 @@ def download(source: str, incoming: Path, archive: Path) -> str | None:
     if r.returncode and errors and not any(incoming.iterdir()):
         return errors[-1].split("][error]", 1)[1].strip()[:200]
     return None
+
+
+def _fetch(url: str) -> bytes:
+    """Reddit, politely: one request at a time, REDDIT_GAP apart, once more after a 429."""
+    import time
+    import urllib.error
+    import urllib.request
+    for attempt in range(2):
+        time.sleep(REDDIT_GAP)
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": REDDIT_AGENT}), timeout=60) as r:
+                return r.read(200 << 20)
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt:
+                raise
+            time.sleep(min(60, float(e.headers.get("x-ratelimit-reset") or 30)))
+    raise OSError("rate limited")
+
+
+def _entries(feed: bytes) -> list[dict]:
+    """An RSS (Atom) feed's posts: {"id", "author", "subreddit", "title", "date", "permalink", "media"}."""
+    import html
+    import re
+    import xml.etree.ElementTree as ET
+    out = []
+    for e in ET.fromstring(feed).findall("a:entry", ATOM):
+        content = html.unescape(e.findtext("a:content", "", ATOM))
+        media = re.search(r'<a href="([^"]+)">\[link\]</a>', content)
+        link = (e.find("a:link", ATOM).get("href") if e.find("a:link", ATOM) is not None else "") or ""
+        sub = re.search(r"/r/([^/]+)/comments/", link)
+        when = (e.findtext("a:published", "", ATOM) or "")[:19].replace("T", " ")
+        out.append({"id": e.findtext("a:id", "", ATOM).removeprefix("t3_"), "title": e.findtext("a:title", "", ATOM),
+                    "author": e.findtext("a:author/a:name", "", ATOM).removeprefix("/u/"),
+                    "subreddit": sub.group(1) if sub else None, "date": when,
+                    "permalink": link.removeprefix("https://www.reddit.com"), "media": media.group(1) if media else None})
+    return out
+
+
+def _reddit(incoming: Path, seen_file: Path) -> str | None:
+    import re
+    import urllib.parse
+    seen = seen_file.read_text().split() if seen_file.is_file() else []
+    known, errors, new = set(seen), [], []
+    for who in reddit_follow():
+        try:
+            posts = _entries(_fetch(REDDIT_RSS.format(who.replace("u/", "user/"))))
+        except (OSError, ValueError) as e:
+            errors.append(f"{who}: {e}")
+            continue
+        for p in posts:
+            if not re.fullmatch(r"[a-z0-9]{3,12}", p["id"]) or p["id"] in known:
+                continue
+            known.add(p["id"]); new.append(p["id"])
+            url = p.pop("media") or ""
+            host = urllib.parse.urlparse(url).hostname or ""
+            meta = json.dumps(p)
+            try:
+                if host in REDDIT_IMAGES:
+                    ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
+                    if ext in IMAGES | VIDEOS:
+                        dest = incoming / f"{p['id']}_1{ext}"
+                        dest.write_bytes(_fetch(url))
+                        dest.with_name(dest.name + ".json").write_text(meta)
+                elif host in REDDIT_LINKED:
+                    _redgifs(url, p["id"], incoming, meta)
+            except (OSError, subprocess.SubprocessError) as e:
+                print(f"follow: reddit post {p['id']}: {e}", flush=True)
+    seen_file.write_text("\n".join((seen + new)[-SEEN_KEEP:]))
+    return "; ".join(errors)[:200] if errors and not new else None
+
+
+def _redgifs(url: str, post_id: str, incoming: Path, meta: str) -> None:
+    """A redgifs clip a Reddit post links to, with the post's details (gallery-dl reads redgifs'
+    own API)."""
+    folder = incoming / f".redgifs-{post_id}"
+    subprocess.run(["gallery-dl", "--config-ignore", "-D", str(folder), "-o", f"filesize-max={MAX_SIZE}",
+                    "-o", "extractor.redgifs.format=[\"hd\",\"sd\"]", url], capture_output=True, timeout=600)
+    clips = sorted(f for f in folder.iterdir() if f.suffix.lower() in VIDEOS) if folder.is_dir() else []
+    for n, f in enumerate(clips, 1):              # (redgifs' are .m4v)
+        dest = incoming / f"{post_id}_{n}{f.suffix.lower()}"
+        shutil.move(f, dest)
+        dest.with_name(dest.name + ".json").write_text(meta)
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 def _post(source: str, md: dict) -> dict:
@@ -189,7 +279,8 @@ def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg) -> tu
         for f in post["files"]:
             dest = folder / f.name
             shutil.move(f, dest)
-            item = {"file": str(dest.relative_to(media)), "kind": "image" if f.suffix.lower() in IMAGES else "video"}
+            # A GIF shows as a picture (it plays itself) but is checked frame by frame like a video.
+            item = {"file": str(dest.relative_to(media)), "kind": "video" if f.suffix.lower() in VIDEOS - {".gif"} else "image"}
             if item["kind"] == "video":
                 poster = dest.with_suffix(".poster.jpg")
                 frames_of[f][0].save(poster, quality=85)

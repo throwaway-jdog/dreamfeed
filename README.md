@@ -339,8 +339,10 @@ rooms you follow.
 
 ### Feed: X and Reddit
 
-Every 15 minutes the `follow` service reads both feeds, X with your cookies (`X_COOKIES_FILE`,
-the same export styles use) and Reddit through its API, and downloads the pictures, videos and
+Every 15 minutes the `follow` service reads both, X with your cookies (`X_COOKIES_FILE`, the
+same export styles use: your Following timeline) and Reddit from the public RSS feeds of the
+subreddits and users in `REDDIT_FOLLOW` (`r/name, u/name`; no account, since Reddit's API now
+needs an approved app), and downloads the pictures, videos and
 GIFs of new posts (text-only posts and reposts are left out). **Every file goes through the
 adults-only checks before it shows**, strict, as for imported comics: a video's 4 frames spread
 over it, and the age estimate for faces in photos and in drawings close to photos. A post with
@@ -350,15 +352,9 @@ done, and wait while a job, a nightly run or training is going. Posts are kept 1
 `data/generated/follow/media/`. All, X or Reddit picks which are shown; Open on X/Reddit goes
 to the post.
 
-Reddit, once: make an **installed app** at reddit.com/prefs/apps with the redirect URI
-`http://localhost:6414/` and put its id in `REDDIT_CLIENT_ID` and your username in
-`REDDIT_USERNAME`. Then get a refresh token as yourself (read access only):
-
-       docker compose exec follow gallery-dl -o extractor.oauth.reddit.client-id=$REDDIT_CLIENT_ID oauth:reddit
-
-open the address it prints, allow it, and copy the address your browser lands on (it won't
-load: it's the server's own localhost) into `docker compose exec follow curl -s 'ADDRESS'`. The
-token it prints goes in `REDDIT_REFRESH_TOKEN`; then `docker compose up -d follow`.
+From Reddit it takes the posts' own pictures (i.redd.it) and redgifs clips; galleries and
+Reddit's own videos can't be read from the RSS feed, so they're left out. Reddit gives readers
+without an account very few requests, so it reads one feed every 7 seconds.
 
 ### Live: Chaturbate
 
