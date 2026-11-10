@@ -40,7 +40,8 @@ LOOP_MIN = 16           # frames a loop is at least
 SETTLE = 3              # first frames left out (the clip moving off the drawing)
 LOOP_FPS = 12           # loops play a little slower than Wan's 16 fps: its motion LoRAs run fast
 LOOP_CLOSE = 8.0        # mean difference (0-255) from the first frame close enough to loop back to it
-BLEND = 5               # frames blended into the start at the loop's end
+BLEND = 5               # frames from past the loop's end blended over its start
+BLEND_MIN = 2           # frames past the loop's end it needs at least
 AREA = 480 * 704        # the clip's pixels (Wan's usual size), in the panel's shape
 GROW = 0.02            # an outline is widened this share of the clip's long side (motion past it)
 FEATHER = 0.01          # and its edge softened over this share
@@ -184,27 +185,32 @@ def _act(tags: list[str], said: str):
     return None
 
 
-def _loop(frames: np.ndarray) -> np.ndarray:
-    """A clip's frames made into a loop without a jump: the longest-lasting cycle in it (two
-    frames at least LOOP_MIN apart that look alike, as in thrusting), its last frames blended
-    into its first; if nothing comes back close, forward then backward. The first frames are
-    skipped: the clip settles there from the drawing."""
+def _loop(frames: np.ndarray, weight: np.ndarray | None = None) -> np.ndarray:
+    """A clip's frames made into a loop without a jump: the longest-lasting cycle in it (frames i
+    and j at least LOOP_MIN apart that look alike and move alike: their neighbours match too, as
+    in thrusting), the frames after j blended over its first ones so the wrap is one ordinary
+    step; if nothing comes back close, forward then backward. weight (0-1, frame size): where to
+    compare (what's outlined). The first frames are skipped: the clip settles there from the drawing."""
     small = np.stack([np.asarray(Image.fromarray(f).resize((96, 96)), dtype=np.float32) for f in frames])
+    wt = np.ones((96, 96), np.float32) if weight is None else \
+        np.asarray(Image.fromarray((weight * 255).astype(np.uint8)).resize((96, 96)), np.float32) / 255 + 1e-3
+    wt = wt[..., None] / wt.sum() / 3
+    n = len(frames)
+    far = np.stack([(np.abs(small - f) * wt).sum(axis=(1, 2, 3)) for f in small])    # far[i, j]
     best = None
-    for i in range(SETTLE, min(SETTLE + 12, len(frames) - LOOP_MIN)):
-        far = np.abs(small[i + LOOP_MIN:] - small[i]).mean(axis=(1, 2, 3))
-        for k in np.argsort(far)[:3]:
-            j = i + LOOP_MIN + int(k)
-            score = far[k] - 0.02 * (j - i)        # alike first, then longer
-            if far[k] <= LOOP_CLOSE and (best is None or score < best[0]):
+    for i in range(max(SETTLE, 1), min(SETTLE + 12, n - LOOP_MIN)):
+        for j in range(i + LOOP_MIN, n - BLEND_MIN):
+            alike = (far[i - 1, j - 1] + far[i, j] + far[i + 1, j + 1]) / 3
+            score = alike - 0.02 * (j - i)        # alike first, then longer
+            if alike <= LOOP_CLOSE and (best is None or score < best[0]):
                 best = (score, i, j)
     if best:
         _, i, j = best
         out = frames[i:j].astype(np.float32)
-        blend = min(BLEND, (j - i) // 3)
-        for t in range(blend):   # the last frames fade into the first ones
+        blend = min(BLEND, (j - i) // 3, n - j)
+        for t in range(blend):   # the clip going on past j, fading into the loop's own start
             k = (t + 1) / (blend + 1)
-            out[-blend + t] = out[-blend + t] * (1 - k) + frames[i + t] * k
+            out[t] = frames[j + t] * (1 - k) + frames[i + t] * k
         return out.clip(0, 255).astype(np.uint8)
     return np.concatenate([frames[SETTLE:], frames[-2:SETTLE:-1]])
 
@@ -299,11 +305,11 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
         print(f"comicanim: page {page} dropped: {reason[0]}: {reason[1]}", flush=True)
         raise RuntimeError(f"Dropped by the safety checks: {safety.explain(*reason)}. Every try is drawn anew, so "
                            "trying again (or describing the motion differently) can pass; otherwise pick another panel.")
-    looped = _loop(frames)
+    size = (frames.shape[2], frames.shape[1])
+    m = _mask(outline, box, size) if outline else None
+    looped = _loop(frames, np.asarray(m, np.float32) / 255 if m is not None else None)
     entry = {}
     if outline:   # only what was outlined moves; the rest is the drawing
-        size = (looped.shape[2], looped.shape[1])
-        m = _mask(outline, box, size)
         still = np.asarray(panel.resize(size, Image.LANCZOS), np.float32)
         a = np.asarray(m, np.float32)[None, ..., None] / 255
         looped = (looped.astype(np.float32) * a + still[None] * (1 - a)).round().clip(0, 255).astype(np.uint8)
