@@ -143,12 +143,16 @@ class Smoother:
 
 def smoothed(frames: np.ndarray, loop: bool = False, device: str = "cuda") -> np.ndarray | None:
     """Smoother.double, loading the model for it; None if that fails (the clip is kept as it is)."""
+    import time
     try:
+        start = time.time()
         s = Smoother(device)
         try:
-            return s.double(frames, loop)
+            out = s.double(frames, loop)
         finally:
             s.close()
+        print(f"smooth: {len(frames)} frames to {len(out)} in {time.time() - start:.1f}s", flush=True)
+        return out
     except Exception as e:
         print(f"smooth: kept as drawn ({e})", flush=True)
         return None
