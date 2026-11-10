@@ -618,6 +618,9 @@ def check_videos(cfg: Config, conn, night: str) -> dict:
                 path.unlink(missing_ok=True)
                 _set(conn, gid, status="dropped", reason=f"{reason[0]}: {reason[1]}")
                 continue
+            from .comfy import WAN
+            from .smooth import smooth_file
+            smooth_file(path, WAN["fps"])   # 32 fps: a frame made between each two
             poster = path.with_name(path.stem + ".thumb.jpg")
             first = frames[0].copy()
             first.thumbnail((THUMB_WIDTH, THUMB_WIDTH * 2))

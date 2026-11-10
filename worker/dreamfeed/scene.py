@@ -871,8 +871,16 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
                      "cancelled" if cancelled() else f"dropped after {SHOT_TRIES} tries")
     if not clips:
         return None, notes
+    from .smooth import smoothed
+    smooth = {}   # a frame made between each two: 32 fps (a loop's last frame is its first)
+    for i in sorted(clips):
+        made = smoothed(clips[i] if shots[i].climax else clips[i][:-1], loop=not shots[i].climax)
+        if made is None:   # all of them or none: the scene has one speed
+            smooth = None
+            break
+        smooth[i] = made if shots[i].climax else np.concatenate([made, made[:1]])
+    clips, fps = (smooth, WAN["fps"] * 2) if smooth else (clips, WAN["fps"])
     h, w = next(iter(clips.values())).shape[1:3]
-    fps = WAN["fps"]
     writer = subprocess.Popen(
         ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
          "-r", str(fps), "-i", "-", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
@@ -1003,8 +1011,8 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
                              cancelled=lambda: _cancel_requested(conn, night))
         print(f"scene: {night} {notes}", flush=True)
         if path:
-            from .comfy import WAN
-            seconds = round(len(_frames(path)) / WAN["fps"])
+            from .smooth import fps_of
+            seconds = round(len(_frames(path)) / fps_of(path))
             _set(conn, gid, status="generated", file=str(path.relative_to(out_dir)),
                  checkpoint=f"wan2.2-i2v scene {seconds}s")
         else:

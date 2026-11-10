@@ -300,6 +300,7 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     from .comfy import Comfy
     from .generate import MOTION
     from .scene import _check_shots, _frames
+    from .smooth import smoothed
     from .vision import Vision
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
@@ -360,6 +361,10 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
         ImageFilter.GaussianBlur(max(1, FEATHER * max(size) / 2)))
     m = ImageChops.multiply(m, ImageOps.invert(still_part))
     looped = _loop(frames, np.asarray(m, np.float32) / 255)
+    progress("smoothing", 0, 1)
+    smooth = smoothed(looped, loop=True)   # a frame made between each two, the last and first too
+    fps = LOOP_FPS * 2 if smooth is not None else LOOP_FPS
+    looped = smooth if smooth is not None else looped
     entry = {}
     if outline or np.asarray(still_part).max() > 0:   # only that moves; the rest is the drawing
         still = np.asarray(panel.resize(size, Image.LANCZOS), np.float32)
@@ -369,7 +374,7 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
         Image.merge("RGBA", (*Image.new("RGB", size, (255, 255, 255)).split(), m)).save(mask_file)
         entry["mask"] = str(mask_file.relative_to(out_dir))
     dest = folder / f"anim-{page}-{n}.mp4"
-    _write(looped, dest, LOOP_FPS)
+    _write(looped, dest, fps)
     moved = float(np.abs(np.diff(frames.astype(np.float32), axis=0)).mean())
     print(f"comicanim: {dest.name}: {len(looped)} frames, motion {moved:.2f}", flush=True)
     return {"page": page, "box": box, "file": str(dest.relative_to(out_dir)), "motion": said, "cast": cast} | entry

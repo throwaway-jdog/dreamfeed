@@ -132,6 +132,11 @@ image-to-video clip:
   speed. lightx2v on every step makes clips fast but nearly still. About 5 minutes a clip
   (it was 2.5); in a test, the same picture moved about ten times as much.
 
+- **Smoothing.** Once a clip passes its checks, a frame is made between each two (RIFE 4.25,
+  `smooth.py`; optical flow, not a cross-fade), so it plays at 32 fps instead of Wan's 16.
+  Scenes are smoothed shot by shot, and comic panel loops too (the wrap included), at 24 fps.
+  If smoothing fails, the clip is kept as drawn.
+
 Every clip is checked on at least 8 frames, like images, before it reaches the feed.
 
 From a post with two characters, the viewer's Animate can also make a **scene** of about 40
