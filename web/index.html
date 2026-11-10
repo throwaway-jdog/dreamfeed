@@ -386,6 +386,9 @@ textarea.in { resize: vertical; min-height: 72px; }
 .card-acts { display: flex; gap: 14px; }
 .comic-item .card-del { justify-self: start; font-size: 12px; color: var(--muted); min-height: 32px; padding: 0 2px; }
 .comic-card .badge { color: var(--accent); font-weight: 700; font-size: 12px; }
+.rf-row { display: flex; align-items: center; gap: 10px; min-height: 48px; }
+.rf-row b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rf-row .secondary { width: auto; min-height: 36px; padding: 0 12px; }
 .cs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .cs-row .primary { padding: 0 18px; }
 .cs-item { display: grid; gap: 6px; align-content: start; }
@@ -486,6 +489,20 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button class="primary" type="button" id="g-go">Generate</button>
       <p class="note" id="g-est"></p>
       </div>
+    </div>
+
+    <div class="panel" id="rf-panel">
+      <h2>Reddit</h2>
+      <p class="note">Subreddits and users in your Feed. Each is read once a day for its top posts of the day; pictures and redgifs clips are kept (galleries and Reddit videos aren't), after the checks.</p>
+      <ul class="plist" id="rf-list"></ul>
+      <form class="cs-row" id="rf-form" novalidate><input class="in" id="rf-name" maxlength="80" placeholder="r/name or u/name" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button class="primary" type="submit">Add</button></form>
+      <div class="field"><span>Top posts a day from each</span>
+        <div class="seg" id="rf-top" role="group" aria-label="Top posts a day">
+          <button type="button" data-n="5" aria-pressed="false">5</button><button type="button" data-n="10" aria-pressed="false">10</button>
+          <button type="button" data-n="25" aria-pressed="false">25</button><button type="button" data-n="50" aria-pressed="false">50</button>
+        </div></div>
+      <div class="ed-err" id="rf-err" role="alert"></div>
     </div>
 
     <div class="panel" hidden>
@@ -1281,7 +1298,7 @@ function setView(v) {
   if (v !== "feed") state.persona = "";
   renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
-  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); }
+  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); loadReddit(); }
   else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
   else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
@@ -1472,6 +1489,32 @@ document.addEventListener("keydown", e => {
   else if (e.key === "ArrowRight") $("pl-next").click();
   else if (e.key === "ArrowLeft") $("pl-prev").click();
 });
+
+/* ---------- the Reddit list (Dashboard) ---------- */
+const rf = { follow: [], top: 10 };
+async function loadReddit() {
+  try { Object.assign(rf, (await api("api/following/settings")).reddit); renderReddit(); }
+  catch (err) { $("rf-err").textContent = err.message; }
+}
+function renderReddit() {
+  $("rf-list").replaceChildren(...rf.follow.map(name => {
+    const li = el("li", "rf-row"), rm = el("button", "secondary", "Remove"); rm.type = "button";
+    rm.onclick = () => saveReddit(rf.follow.filter(x => x !== name), rf.top);
+    li.append(el("b", null, name), rm); return li;
+  }));
+  if (!rf.follow.length) $("rf-list").append(el("li", "note", "None yet."));
+  document.querySelectorAll("#rf-top button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.n === rf.top)));
+}
+async function saveReddit(follow, top) {
+  $("rf-err").textContent = "";
+  try { Object.assign(rf, (await api("api/following/settings", { reddit: { follow, top } })).reddit); renderReddit(); return true; }
+  catch (err) { $("rf-err").textContent = err.message; return false; }
+}
+$("rf-form").onsubmit = async e => {
+  e.preventDefault(); const v = $("rf-name").value.trim(); if (!v) return;
+  if (await saveReddit([...rf.follow, v], rf.top)) { $("rf-name").value = ""; toast("Added. Its top posts come in within 15 minutes."); }
+};
+document.querySelectorAll("#rf-top button").forEach(b => b.onclick = () => saveReddit(rf.follow, +b.dataset.n));
 
 /* ---------- comics ---------- */
 const comicState = { personas: [], pages: 1, timer: null, medium: "furry" };

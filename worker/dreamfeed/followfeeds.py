@@ -3,8 +3,9 @@ follow feeds` (the follow service runs it every FEEDS_EVERY seconds, as a child 
 when done, so the checking models' memory is given back).
 
 1. New posts are downloaded: X with gallery-dl and your cookies (the Following timeline,
-   x.com/home); Reddit from the public RSS feeds of the subreddits and users in REDDIT_FOLLOW
-   (no account: Reddit's API needs an approved app), their pictures (i.redd.it) and redgifs
+   x.com/home); Reddit from the public RSS feeds of the subreddits and users on the
+   Dashboard (data/following.json; no account: Reddit's API needs an approved app), once a
+   day each, the top `top` posts of the last day, their pictures (i.redd.it) and redgifs
    (gallery-dl); galleries and Reddit's own videos aren't in the RSS feed's link, so they're
    left out. What's been read is remembered (gallery-dl's archive; reddit.seen).
 2. Every file goes through the adults-only checks (checks.problem, strict), a video's
@@ -39,31 +40,36 @@ FEEDS = {
 }
 # Reddit's rules for scripts: a user agent that says what it is.
 REDDIT_AGENT = "linux:dreamfeed:1.0 (personal feed reader)"
-REDDIT_RSS = "https://www.reddit.com/{}/new/.rss?limit=25"
-REDDIT_GAP = 7             # seconds between Reddit requests (unsigned readers get very few)
+REDDIT_RSS = {"r": "https://www.reddit.com/r/{}/top/.rss?t=day&limit={}",
+              "u": "https://www.reddit.com/user/{}/submitted/.rss?sort=top&t=day&limit={}"}
+REDDIT_EVERY = 24 * 3600   # each one is read once a day: its top posts of that day
+REDDIT_GAP = 11            # seconds between Reddit requests (unsigned readers get about one per 10 s)
 REDDIT_IMAGES = ("i.redd.it",)
 REDDIT_LINKED = ("redgifs.com", "www.redgifs.com", "v3.redgifs.com")
 SEEN_KEEP = 5000
 ATOM = {"a": "http://www.w3.org/2005/Atom"}
 
 
+def settings() -> dict:
+    """What the Dashboard set (data/following.json, written by the web app):
+    {"reddit": {"follow": ["r/name", "u/name"], "top": N}}."""
+    try:
+        d = json.loads((Path(os.environ["DATA_DIR"]) / "following.json").read_text())
+    except (OSError, ValueError, KeyError):
+        d = {}
+    r = d.get("reddit") or {}
+    return {"follow": [w for w in r.get("follow") or [] if isinstance(w, str) and w[:2] in ("r/", "u/")],
+            "top": max(1, min(100, int(r.get("top") or 10)))}
+
+
 def reddit_follow() -> list[str]:
-    """REDDIT_FOLLOW: "r/name" and "u/name", comma-separated (a bare name is a subreddit)."""
-    import re
-    out = []
-    for item in os.environ.get("REDDIT_FOLLOW", "").split(","):
-        item = item.strip().strip("/").removeprefix("user/").replace("user/", "u/")
-        kind, _, name = item.rpartition("/")
-        kind = {"": "r", "r": "r", "u": "u"}.get(kind)
-        if kind and re.fullmatch(r"[A-Za-z0-9_-]{2,30}", name):
-            out.append(f"{kind}/{name}")
-    return out
+    return settings()["follow"]
 
 
 def _signed_in(source: str) -> str | None:
     """Why this feed can't be read, or None."""
     if source == "reddit":
-        return None if reddit_follow() else "no subreddits or users to follow yet (REDDIT_FOLLOW in .env)"
+        return None if reddit_follow() else "no subreddits or users yet (add them on the Dashboard)"
     cookies = FEEDS[source]["cookies"]
     if not cookies.is_file() or not any(line.strip() and not line.startswith("# ") for line in cookies.open()):
         return f"no {FEEDS[source]['name']} cookies yet"
@@ -132,16 +138,28 @@ def _entries(feed: bytes) -> list[dict]:
 
 
 def _reddit(incoming: Path, seen_file: Path) -> str | None:
+    """Each subreddit and user due (not read in the last REDDIT_EVERY): its top posts of the day."""
     import re
+    import time
     import urllib.parse
     seen = seen_file.read_text().split() if seen_file.is_file() else []
+    last_file = seen_file.with_suffix(".last")     # when each was last read
+    try:
+        last = json.loads(last_file.read_text())
+    except (OSError, ValueError):
+        last = {}
     known, errors, new = set(seen), [], []
-    for who in reddit_follow():
+    s = settings()
+    for who in s["follow"]:
+        if time.time() - last.get(who, 0) < REDDIT_EVERY:
+            continue
+        kind, _, name = who.partition("/")
         try:
-            posts = _entries(_fetch(REDDIT_RSS.format(who.replace("u/", "user/"))))
+            posts = _entries(_fetch(REDDIT_RSS[kind].format(name, s["top"])))[:s["top"]]
         except (OSError, ValueError) as e:
             errors.append(f"{who}: {e}")
             continue
+        last[who] = time.time()
         for p in posts:
             if not re.fullmatch(r"[a-z0-9]{3,12}", p["id"]) or p["id"] in known:
                 continue
@@ -161,6 +179,7 @@ def _reddit(incoming: Path, seen_file: Path) -> str | None:
             except (OSError, subprocess.SubprocessError) as e:
                 print(f"follow: reddit post {p['id']}: {e}", flush=True)
     seen_file.write_text("\n".join((seen + new)[-SEEN_KEEP:]))
+    last_file.write_text(json.dumps({w: t for w, t in last.items() if w in s["follow"]}))
     return "; ".join(errors)[:200] if errors and not new else None
 
 

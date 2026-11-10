@@ -341,8 +341,9 @@ rooms you follow.
 
 Every 15 minutes the `follow` service reads both, X with your cookies (`X_COOKIES_FILE`, the
 same export styles use: your Following timeline) and Reddit from the public RSS feeds of the
-subreddits and users in `REDDIT_FOLLOW` (`r/name, u/name`; no account, since Reddit's API now
-needs an approved app), and downloads the pictures, videos and
+subreddits and users on the Dashboard's **Reddit** panel (`r/name` or `u/name`, kept in
+`data/following.json`; no account, since Reddit's API now needs an approved app): each once a
+day, its top posts of the day, as many as the panel says (5 to 50). It downloads the pictures, videos and
 GIFs of new posts (text-only posts and reposts are left out). **Every file goes through the
 adults-only checks before it shows**, strict, as for imported comics: a video's 4 frames spread
 over it, and the age estimate for faces in photos and in drawings close to photos. A post with
@@ -354,7 +355,7 @@ to the post.
 
 From Reddit it takes the posts' own pictures (i.redd.it) and redgifs clips; galleries and
 Reddit's own videos can't be read from the RSS feed, so they're left out. Reddit gives readers
-without an account very few requests, so it reads one feed every 7 seconds.
+without an account very few requests, so it makes one request every 11 seconds.
 
 ### Live: Chaturbate
 

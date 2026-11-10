@@ -187,9 +187,6 @@ services:
       HF_HUB_OFFLINE: "1"                     # the checks' models are already in ./models
       AGECHECK_URL: http://dreamfeed-agecheck:8080
       FOLLOW_THREADS: ${FOLLOW_THREADS:?set FOLLOW_THREADS in .env}   # CPU threads for the checks
-      # Subreddits and users to read on Reddit (their public RSS feeds), e.g. "r/name, u/name";
-      # empty: no Reddit.
-      REDDIT_FOLLOW: ${REDDIT_FOLLOW-}
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow

@@ -14,6 +14,8 @@ GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address),
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
 GET  /api/comics/search ?q=TEXT&page=N  comics on multporn matching TEXT (title, link, cover), to import
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
+GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
+POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} change them
 GET  /api/following/posts  ?source=all|x|reddit&offset=N  checked posts from your X and Reddit feeds, newest first
 GET  /follow/media/<source>/<post>/<file>  a post's picture, video or video poster
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
@@ -290,6 +292,38 @@ def live_stream(name: str) -> dict:
     ok = (d.get("room_status") == "public" and d.get("is_age_verified") and u.scheme == "https"
           and (u.hostname or "").endswith(".live.mmcdn.com"))
     return {"status": d.get("room_status") or "offline", "hls": hls if ok else None}
+
+
+FOLLOWING = DATA / "following.json"     # read by the follow service on each round
+MAX_FOLLOW = 50
+REDDIT_NAME = re.compile(r"^(?:https?://(?:www\.|old\.)?reddit\.com)?/?(?:(r|u|user)/)?([A-Za-z0-9_-]{2,30})/?$")
+
+
+def follow_settings() -> dict:
+    d = read_json(FOLLOWING).get("reddit") or {}
+    return {"reddit": {"follow": d.get("follow") or [], "top": d.get("top") or 10}}
+
+
+def save_follow_settings(req: dict) -> dict:
+    r = req.get("reddit")
+    if not isinstance(r, dict) or not isinstance(r.get("follow"), list):
+        raise ValueError('send {"reddit": {"follow": [...], "top": N}}')
+    out = []
+    for item in r["follow"]:
+        m = REDDIT_NAME.match(str(item).strip())
+        if not m:
+            raise ValueError(f"not a subreddit or user: {str(item)[:40]} (r/name or u/name)")
+        name = f"{'u' if m.group(1) in ('u', 'user') else 'r'}/{m.group(2)}"
+        if name.lower() not in {x.lower() for x in out}:
+            out.append(name)
+    if len(out) > MAX_FOLLOW:
+        raise ValueError(f"at most {MAX_FOLLOW}")
+    top = _num(r.get("top", 10), 1, 100, "top")
+    data = {**read_json(FOLLOWING), "reddit": {"follow": out, "top": int(top)}}
+    tmp = FOLLOWING.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1))
+    tmp.replace(FOLLOWING)
+    return follow_settings()
 
 
 def follow_posts(source: str, offset: int) -> dict:
@@ -1348,6 +1382,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/vendor/hls.min.js":
             return self.send(200, (Path(__file__).parent / "vendor" / "hls.min.js").read_bytes(),
                              "text/javascript; charset=utf-8", cache="private, max-age=604800")
+        if path == "/api/following/settings":
+            return self.send(200, follow_settings())
         if path == "/api/following/posts":
             q = self.query()
             try:
@@ -1386,7 +1422,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
                    "/api/styles/video": queue_video, "/api/styles/video-cancel": cancel_video,
-                   "/api/personas/draft": queue_draft}
+                   "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
