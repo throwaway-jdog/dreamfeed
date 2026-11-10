@@ -304,12 +304,16 @@ a sex panel with no position thrusts), then cuts it to a cycle within the clip, 
 seam, played at 12 fps. The clip gets the video checks (stricter ones for imported comics) and
 plays over its panel in the reader, looping; **Remove animation** takes it off again.
 Panels can be queued one after another without leaving the picker (queued ones show as such).
-**Draw around them** outlines what should move (one loop per character, reaching past the panel
-for a character breaking out of it): only that moves, the rest of the clip is the drawing itself,
-and the reader masks the clip to the outline (a PNG beside it), so lettering and bubbles stay put.
-Works on
-comics made here and imported ones. `python -m dreamfeed comic-panels` finds the panels (and makes
-the thumbnails) of comics saved before they were kept.
+Speech bubbles and text never move: `lettering.py` finds them (ogkalu's comic text and bubble
+detector, Apache 2.0, on the CPU; each bubble traced to its shape from its box) and the clip
+shows the drawing there. The outlines say what moves (one loop per character, reaching past the
+panel for a character breaking out of it): only that moves, the rest is the drawing itself.
+When a panel is picked, the characters found in it (BiRefNet, less the lettering, worked out
+when the comic is saved) are outlined to start with; **Undo**, **Clear**, **Draw around them**
+and **Outline the characters** change that. The reader masks the clip to what moves (a PNG
+beside it). Works on comics made here and imported ones. `python -m dreamfeed comic-panels`
+finds the panels (and makes the thumbnails) of comics saved before they were kept;
+`comic-panels --outlines [--cpu]` outlines their characters (`--cpu`: slower, leaves the GPU alone).
 
 ## Backup
 

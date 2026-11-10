@@ -6,7 +6,8 @@ The dashboard's Comics page queues an import as a job (kind "comic_import"):
 2. Each page goes through the adults-only checks (checks.problem, strict). Pages that fail are
    dropped; if more than MAX_DROPPED of them fail, the import stops: it isn't a comic to keep.
 3. The comic is saved like the comics made here (generated/comic-import-.../comic.json), with
-   its panels found for animating (comicanim.add_panels).
+   its panels found for animating (comicanim.add_panels) and the characters in them outlined
+   (comicanim.add_outlines).
 """
 import datetime as dt
 import json
@@ -124,7 +125,7 @@ def _job(conn, job_id: int, night: str, work) -> None:
 
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
     """An import queued from the Comics page: {"kind": "comic_import", "url", "title", "medium"}."""
-    from .comicanim import add_panels
+    from .comicanim import add_outlines, add_panels
     from .generate import _set
     out_dir = cfg.data_dir / "generated"
     folder = out_dir / f"comic-import-{dt.datetime.now():%Y%m%d-%H%M%S}"
@@ -141,6 +142,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
             rel = [str(p.relative_to(out_dir)) for p in kept]
             meta = add_panels({"title": params.get("title") or "Imported comic", "source": params["url"], "imported": True,
                                "cast": [], "medium": medium, "pages": rel, "cover": rel[0], "dropped": dropped}, out_dir)
+            meta = add_outlines(meta, out_dir, progress)
             (folder / "comic.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)

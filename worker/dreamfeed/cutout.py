@@ -14,22 +14,24 @@ MEAN, STD = np.array([0.485, 0.456, 0.406]), np.array([0.229, 0.224, 0.225])
 
 
 class Cutout:
-    def __init__(self):
+    def __init__(self, device: str = "cuda"):
         from transformers import AutoModelForImageSegmentation
+        self.device, self.dtype = device, torch.half if device != "cpu" else torch.float32
         self.model = AutoModelForImageSegmentation.from_pretrained(
-            MODEL, revision=REVISION, trust_remote_code=True).to("cuda").half().eval()
+            MODEL, revision=REVISION, trust_remote_code=True).to(device, self.dtype).eval()
 
     @torch.no_grad()
     def mask(self, img: Image.Image) -> Image.Image:
         """The characters as a greyscale mask (255 = character), the picture's size."""
         x = np.asarray(img.convert("RGB").resize((SIZE, SIZE), Image.BILINEAR), np.float32) / 255
-        x = torch.from_numpy(((x - MEAN) / STD).transpose(2, 0, 1)).unsqueeze(0).to("cuda").half()
+        x = torch.from_numpy(((x - MEAN) / STD).transpose(2, 0, 1)).unsqueeze(0).to(self.device, self.dtype)
         pred = self.model(x)[-1].sigmoid()[0, 0].float().cpu().numpy()
         return Image.fromarray((pred * 255).astype(np.uint8)).resize(img.size, Image.BILINEAR)
 
     def close(self) -> None:
         del self.model
-        torch.cuda.empty_cache()
+        if self.device != "cpu":
+            torch.cuda.empty_cache()
 
 
 def paste(room: Image.Image, shot: Image.Image, mask: Image.Image, feather: int = 2) -> Image.Image:

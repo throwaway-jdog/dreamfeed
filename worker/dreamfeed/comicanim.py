@@ -1,6 +1,8 @@
 """A comic panel animated: a short seamless loop, the way comic artists animate a panel.
 
     python -m dreamfeed comic-panels [--again]   panels and thumbnails for comics saved without them
+    python -m dreamfeed comic-panels --outlines [--again] [--cpu]   the characters' outlines
+                                   (--cpu: slow, but leaves the GPU to whatever else runs)
 
 The reader's "Animate a panel" queues a job (kind "comic_animate") for one panel of one page:
 the panel is cut out of the page, Wan 2.2 animates it for about four seconds (moving as asked,
@@ -10,10 +12,12 @@ it's cut where the motion comes back closest to the start and blended there (or 
 then back) so it loops without a jump. It's kept beside the comic.
 The reader plays it over its panel, looping.
 
-The person can draw loops around what should move (the characters): then only that moves, the
-rest of the clip is the drawing itself (text and speech bubbles stay put), and the reader shows
-the page through everywhere else (the clip's mask). Loops may reach past the panel, for a
-character breaking out of it: the clip then covers both.
+Lettering never moves: the page's speech bubbles and text are found (lettering.py) and the
+clip shows the drawing there. The person can also draw loops around what should move (the
+characters; the reader starts them with the characters it found, add_outlines): then only
+that moves and the rest is the drawing too. The reader shows the page through everywhere the
+clip doesn't move (the clip's mask). Loops may reach past the panel, for a character breaking
+out of it: the clip then covers both.
 
 Panels are found once, when a comic is saved: the page is cut along its gutters (whatever their
 colour). Panels with no gutter between them come out as one; the reader lets the person draw
@@ -26,7 +30,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 THUMB = 360             # a thumbnail's width
 PANEL_SIDE = 1000       # pages are searched for panels at this long side
@@ -144,6 +148,48 @@ def add_panels(meta: dict, out_dir: Path) -> dict:
         img.save(thumb, quality=82)
         thumbs.append(str(thumb.relative_to(out_dir)))
     return meta | {"panels": panels, "thumbs": thumbs}
+
+
+def add_outlines(meta: dict, out_dir: Path, progress=lambda phase, done, total: None, device: str = "cuda") -> dict:
+    """meta with "outlines": {"N": loops} for each page, round the characters in its panels with
+    the lettering left out (lettering.outlines), offered by the reader to start from. A comic is
+    kept without them if it fails."""
+    from .cutout import Cutout
+    from .lettering import Lettering, outlines
+    found = {}
+    try:
+        cut, letters = Cutout(device), Lettering(device)
+        try:
+            for n, page in enumerate(meta.get("pages") or [], 1):
+                progress("outlining the characters", n - 1, len(meta["pages"]))
+                with Image.open(out_dir / page) as im:
+                    img = im.convert("RGB")
+                found[str(n)] = outlines(img, (meta.get("panels") or {}).get(str(n)) or [], letters.mask(img), cut)
+        finally:
+            cut.close()
+            letters.close()
+    except Exception as e:   # only a suggestion
+        print(f"comicanim: no outlines: {e}", flush=True)
+        return meta
+    return meta | {"outlines": found}
+
+
+def _still(folder: Path, page: int, img: Image.Image) -> Image.Image:
+    """The page's lettering (255), kept beside the comic once found (on the CPU)."""
+    path = folder / f"still-{page}.png"
+    try:
+        with Image.open(path) as im:
+            return im.convert("L")
+    except OSError:
+        pass
+    from .lettering import Lettering
+    letters = Lettering("cpu")
+    try:
+        m = letters.mask(img)
+    finally:
+        letters.close()
+    m.save(path)
+    return m
 
 
 def _clip_size(w: int, h: int) -> tuple[int, int]:
@@ -265,6 +311,8 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
     if x1 - x0 < 64 or y1 - y0 < 64:
         raise ValueError("that panel is too small to animate")
     panel = img.crop((x0, y0, x1, y1))
+    progress("finding the lettering", 0, 1)
+    page_still = _still(folder, page, img)
     # Never reused (the reader's cached copy of a clip is kept by its name).
     n = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     still = folder / f"panel-{page}-{n}.png"
@@ -306,10 +354,14 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
         raise RuntimeError(f"Dropped by the safety checks: {safety.explain(*reason)}. Every try is drawn anew, so "
                            "trying again (or describing the motion differently) can pass; otherwise pick another panel.")
     size = (frames.shape[2], frames.shape[1])
-    m = _mask(outline, box, size) if outline else None
-    looped = _loop(frames, np.asarray(m, np.float32) / 255 if m is not None else None)
+    # What moves: what was outlined (or all of it), less the lettering, which stays as drawn.
+    m = _mask(outline, box, size) if outline else Image.new("L", size, 255)
+    still_part = page_still.crop((x0, y0, x1, y1)).resize(size, Image.BILINEAR).filter(
+        ImageFilter.GaussianBlur(max(1, FEATHER * max(size) / 2)))
+    m = ImageChops.multiply(m, ImageOps.invert(still_part))
+    looped = _loop(frames, np.asarray(m, np.float32) / 255)
     entry = {}
-    if outline:   # only what was outlined moves; the rest is the drawing
+    if outline or np.asarray(still_part).max() > 0:   # only that moves; the rest is the drawing
         still = np.asarray(panel.resize(size, Image.LANCZOS), np.float32)
         a = np.asarray(m, np.float32)[None, ..., None] / 255
         looped = (looped.astype(np.float32) * a + still[None] * (1 - a)).round().clip(0, 255).astype(np.uint8)
@@ -364,9 +416,18 @@ def main(args: list[str]) -> None:
             meta = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
-        if "thumbs" in meta and "--again" not in args:
+        if "--outlines" in args:
+            if "outlines" in meta and "--again" not in args:
+                continue
+            found = add_outlines(meta, out_dir, device="cpu" if "--cpu" in args else "cuda").get("outlines")
+            if found is None:
+                continue
+            meta = json.loads(path.read_text()) | {"outlines": found}   # read again: clips may have been added meanwhile
+        elif "thumbs" in meta and "--again" not in args:
             continue
-        path.write_text(json.dumps(add_panels(meta, out_dir), ensure_ascii=False, indent=1))
+        else:
+            meta = add_panels(meta, out_dir)
+        path.write_text(json.dumps(meta, ensure_ascii=False, indent=1))
         done += 1
     print(f"comic-panels: {done} comics")
     sys.exit(0)

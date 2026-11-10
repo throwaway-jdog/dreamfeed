@@ -558,9 +558,11 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <b>Animate this panel</b>
       <label class="field"><span>What moves <small>optional: e.g. "squirting", "tail swishing, steam rising". Without it, small natural movements (or the act's own motion).</small></span>
         <input class="in" id="rd-motion" maxlength="200"></label>
-      <div class="field rd-outline"><span>Only these move <small>optional: draw a loop around each character that should move; text, bubbles and background stay still. A loop can reach past the panel, for a character breaking out of it.</small></span>
+      <div class="field rd-outline"><span>Only these move <small>speech bubbles and text always stay still. Outlined characters move and the background stays still; the characters found are outlined to start with. Undo or clear what's wrong and draw your own. A loop can reach past the panel, for a character breaking out of it.</small></span>
         <div class="mk-row"><button type="button" class="secondary" id="rd-draw" aria-pressed="false">Draw around them</button>
-          <button type="button" class="secondary" id="rd-undo-loop" hidden>Undo</button><span class="hint" id="rd-loops"></span></div></div>
+          <button type="button" class="secondary" id="rd-undo-loop" hidden>Undo</button>
+          <button type="button" class="secondary" id="rd-clear-loops" hidden>Clear</button>
+          <button type="button" class="secondary" id="rd-found" hidden>Outline the characters</button><span class="hint" id="rd-loops"></span></div></div>
       <label class="field"><span>Who's in it <small>if the picture is hard to read, e.g. a close-up</small></span>
         <select class="in" id="rd-cast">
           <option value="">Work it out from the picture</option><option value="woman">A woman</option><option value="women">Two women</option>
@@ -1358,8 +1360,11 @@ function decorate() {   // the loops over their panels, or the panels to pick wh
   $("rd-draw").textContent = rd.drawing ? "Done drawing" : loops.length ? "Draw more" : "Draw around them";
   $("rd-draw").setAttribute("aria-pressed", String(rd.drawing));
   $("rd-undo-loop").hidden = !loops.length;
-  $("rd-loops").textContent = loops.length ? `${loops.length} outline${loops.length > 1 ? "s" : ""}: only ${loops.length > 1 ? "those" : "that"} moves`
-    : "Not drawn: the whole panel moves";
+  $("rd-clear-loops").hidden = loops.length < 2;
+  $("rd-found").hidden = !rd.chosen || !rd.chosen.found || loops.length;
+  const found = rd.chosen && rd.chosen.found && !rd.chosen.edited;
+  $("rd-loops").textContent = loops.length ? `${loops.length} outline${loops.length > 1 ? "s" : ""}${found ? " found round the characters" : ""}: only ${loops.length > 1 ? "those move" : "that moves"}`
+    : "No outline: the whole panel moves (bubbles and text stay still)";
   rd.wraps.forEach((wrap, i) => {
     const n = i + 1;
     wrap.querySelectorAll("video, .pbox, .drag, .outl").forEach(x => x.remove());
@@ -1469,8 +1474,28 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight" || e.key === "PageDown") { e.preventDefault(); goTo(rd.page + 1); }
   if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); goTo(rd.page - 1); }
 });
+function clipTo(loop, box) {   // a loop cut to the box (Sutherland-Hodgman, one edge at a time)
+  const edges = [[0, box[0], 1], [0, box[2], -1], [1, box[1], 1], [1, box[3], -1]];
+  for (const [k, v, dir] of edges) {
+    const out = [], inside = q => (q[k] - v) * dir >= 0;
+    loop.forEach((q, i) => {
+      const p = loop[(i + loop.length - 1) % loop.length];
+      if (inside(q) !== inside(p)) { const t = (v - p[k]) / (q[k] - p[k]); out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
+      if (inside(q)) out.push(q);
+    });
+    loop = out; if (loop.length < 3) return [];
+  }
+  return loop.map(q => q.map(v => Math.round(v * 10000) / 10000));
+}
+const loopArea = l => Math.abs(l.reduce((a, q, i) => { const p = l[(i + 1) % l.length]; return a + q[0] * p[1] - p[0] * q[1]; }, 0)) / 2;
+function suggested(page, box) {   // the characters found in the panel, biggest first
+  const area = (box[2] - box[0]) * (box[3] - box[1]);
+  return ((rd.c.outlines || {})[page] || []).map(l => clipTo(l, box)).filter(l => l.length >= 3 && loopArea(l) >= 0.01 * area)
+    .sort((a, b) => loopArea(b) - loopArea(a)).slice(0, 8);
+}
 function choose(page, box) {
-  rd.chosen = { page, box, outline: [] }; rd.drawing = false; decorate(); refit();
+  const found = suggested(page, box);
+  rd.chosen = { page, box, outline: found, found: found.length }; rd.drawing = false; decorate(); refit();
   $("rd-motion").focus({ preventScroll: true });
 }
 function at(layer, e) { const r = layer.getBoundingClientRect();
@@ -1495,12 +1520,14 @@ function drawLoops(layer) {   // freehand loops around what moves; each closes i
     if (Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.004 || pts.length >= 2000) return;
     pts.push(p); line.setAttribute("points", pts.map(v => v.join(",")).join(" ")); });
   const end = () => { if (!pts) return; const loop = pts; pts = null;
-    if (loop.length >= 3 && rd.chosen.outline.length < 8) rd.chosen.outline.push(loop.map(q => q.map(v => Math.round(v * 10000) / 10000)));
+    if (loop.length >= 3 && rd.chosen.outline.length < 8) { rd.chosen.outline.push(loop.map(q => q.map(v => Math.round(v * 10000) / 10000))); rd.chosen.edited = true; }
     decorate(); };
   layer.addEventListener("pointerup", end); layer.addEventListener("pointercancel", end);
 }
 $("rd-draw").onclick = () => { rd.drawing = !rd.drawing; decorate(); refit(); };
-$("rd-undo-loop").onclick = () => { if (rd.chosen) rd.chosen.outline.pop(); decorate(); };
+$("rd-undo-loop").onclick = () => { if (rd.chosen) { rd.chosen.outline.pop(); rd.chosen.edited = true; } decorate(); };
+$("rd-clear-loops").onclick = () => { if (rd.chosen) { rd.chosen.outline = []; rd.chosen.edited = true; } decorate(); };
+$("rd-found").onclick = () => { if (rd.chosen) { rd.chosen.outline = suggested(rd.chosen.page, rd.chosen.box); rd.chosen.edited = false; } decorate(); };
 function syncReader(d) {   // a refresh of the Comics page: the open comic's new clips and queued panels
   if (!rd.c || $("reader").hidden) return;
   const c = d.comics.find(x => x.id === rd.c.id);

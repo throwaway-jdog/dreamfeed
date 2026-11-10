@@ -13,3 +13,5 @@ wordfreq==3.1.1
 # Cuts characters out of a shot to paste them into the scene's room (cutout.py, BiRefNet).
 einops==0.8.1
 kornia==0.8.1
+# Traces speech bubbles and the outlines of characters in comic panels (lettering.py).
+opencv-python-headless==4.14.0.94

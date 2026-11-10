@@ -301,6 +301,7 @@ def comics() -> dict:
                                   "cast": meta.get("cast") or [], "story": meta.get("story", ""),
                                   "imported": bool(meta.get("imported")),
                                   "panels": meta.get("panels") or {},
+                                  "outlines": meta.get("outlines") or {},
                                   "animations": [{"page": a["page"], "box": a["box"], "name": Path(a["file"]).name,
                                                   "mask": Path(a["mask"]).name if a.get("mask") else None}
                                                  for a in meta.get("animations") or []],
