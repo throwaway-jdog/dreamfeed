@@ -1,14 +1,18 @@
 # dreamfeed
 
-A private, Twitter-style timeline of generated anime and furry posts from **fictional
-personas**. Each persona has a name, a profile picture, a bio, a fixed look and a few
-kinds of post, with captions. Every night they "post": the worker generates their images
-(and some 5-second Wan 2.2 clips), checks them, keeps the best and spreads them over the
-timeline. Likes make a persona post more, and more like what you liked; skips do the opposite.
+A private, phone-first page for who you follow and for comics:
 
-The page is at `https://<your domain>/dreamfeed/` (behind formlogin, phone-first): the
-timeline, a strip of personas at the top, a profile page per persona with **Post now**,
-Liked, and a Dashboard.
+- **Feed:** posts from your X Following timeline and your Reddit front page, every file
+  through the adults-only checks before it shows (see Following).
+- **Live:** the Chaturbate rooms you follow, played in dreamfeed's own player.
+- **Comics:** comics made here from **fictional personas** (each with a name, a fixed look and
+  a trained style), and comics imported from a link or found with multporn's search, with
+  panels animated into loops.
+- **Saved:** the generated posts you liked. (A nightly generated feed of the personas' posts
+  came first; it no longer runs, and only the liked posts were kept.)
+- **Dashboard:** what's running, personas and trained styles.
+
+The page is at `https://<your domain>/dreamfeed/` (behind formlogin).
 
 Models (in `.env`): WAI-Illustrious v17 for anime, FurryVision XL v2 for furry, Wan 2.2
 I2V for clips. Civitai downloads that need an account use `CIVITAI_API_KEY`.
@@ -97,8 +101,8 @@ example captions. Empty `CAPTION_MODEL` turns writing off (example captions only
 2. `docker compose up -d --build`
 3. Add personas on the Dashboard (or `cp personas.example.json data/personas.json`).
 
-Generation runs every night inside `GENERATE_WINDOW`. The Dashboard can queue a run, animate
-the best posts, edit personas and shows recent runs. From the shell:
+Generated posts no longer run every night (the feed is X and Reddit now); a batch can still
+be made from the shell:
 
        docker compose exec worker python -m dreamfeed generate --now --images 12 --keep 6
        docker compose exec worker python -m dreamfeed generate --now --images 8 --keep 3 --persona some_handle
@@ -296,6 +300,11 @@ strict adults-only checks; failing pages are dropped, and if more than a fifth f
 imported. Pages are kept as drawn, to read and animate panels of. (Colouring black-and-white
 comics from their cover was tried and taken out: it wasn't good enough.)
 
+**Find a comic** (the same tab) searches multporn and lists its comics and manga with their
+covers (the covers come through dreamfeed); **Import** queues one like a pasted link. A search
+with words the dashboard never takes is refused, and results with them in the title are left
+out; the pages get the same checks either way.
+
 **Reading.** A comic opens a page at a time, fitted to the screen: swipe (or the arrows, or the
 arrow keys) between pages. **Grid** shows every page small (thumbnails made when the comic is
 saved) to jump to one; the comic's delete button is there too. A comic's card in the list has
@@ -324,14 +333,14 @@ finds the panels (and makes the thumbnails) of comics saved before they were kep
 
 ## Following
 
-The **Following** page (Live on phones) has who you follow elsewhere in one place: the
-Chaturbate rooms you follow, and posts from your X Following timeline and your Reddit front
-page (the subreddits you're subscribed to).
+Who you follow elsewhere, in one place: the **Feed** has posts from your X Following timeline
+and your Reddit front page (the subreddits you're subscribed to), and **Live** the Chaturbate
+rooms you follow.
 
-### Posts from X and Reddit
+### Feed: X and Reddit
 
-Every 15 minutes the `follow` service reads both feeds with your cookies (`X_COOKIES_FILE`,
-the same export styles use, and `REDDIT_COOKIES_FILE`) and downloads the pictures, videos and
+Every 15 minutes the `follow` service reads both feeds, X with your cookies (`X_COOKIES_FILE`,
+the same export styles use) and Reddit through its API, and downloads the pictures, videos and
 GIFs of new posts (text-only posts and reposts are left out). **Every file goes through the
 adults-only checks before it shows**, strict, as for imported comics: a video's 4 frames spread
 over it, and the age estimate for faces in photos and in drawings close to photos. A post with
@@ -341,13 +350,25 @@ done, and wait while a job, a nightly run or training is going. Posts are kept 1
 `data/generated/follow/media/`. All, X or Reddit picks which are shown; Open on X/Reddit goes
 to the post.
 
-### Chaturbate
+Reddit, once: make an **installed app** at reddit.com/prefs/apps with the redirect URI
+`http://localhost:6414/` and put its id in `REDDIT_CLIENT_ID` and your username in
+`REDDIT_USERNAME`. Then get a refresh token as yourself (read access only):
 
-It shows the Chaturbate rooms you follow: who's live now,
-with their thumbnail, title and viewers, and the rest with when they were last live and the
-hours they're usually live (from 3 days of streams on, in your own time). Tapping a live room
-plays it in Chaturbate's own player; Open on Chaturbate goes to the room itself, to chat or tip
-as you. The header shows how many are live.
+       docker compose exec follow gallery-dl -o extractor.oauth.reddit.client-id=$REDDIT_CLIENT_ID oauth:reddit
+
+open the address it prints, allow it, and copy the address your browser lands on (it won't
+load: it's the server's own localhost) into `docker compose exec follow curl -s 'ADDRESS'`. The
+token it prints goes in `REDDIT_REFRESH_TOKEN`; then `docker compose up -d follow`.
+
+### Live: Chaturbate
+
+The rooms you follow: who's live now, with their thumbnail, title and viewers, and the rest
+with when they were last live and the hours they're usually live (from 3 days of streams on, in
+your own time). Tapping a live room plays it in dreamfeed's own player: the room's video
+straight from Chaturbate's video servers (HLS: Safari plays it itself, other browsers through
+hls.js, served from `web/vendor/`), muted until you tap for sound, with ‹ › to go through the
+live rooms. A private or hidden show says so. Open on Chaturbate goes to the room itself, to
+chat or tip as you. The header shows how many are live.
 
 The `follow` service (the worker's image, CPU only) looks every 2 minutes, signed in with your
 cookies (`CHATURBATE_COOKIES_FILE`: export them from your browser as a Netscape cookies.txt and

@@ -187,6 +187,10 @@ services:
       HF_HUB_OFFLINE: "1"                     # the checks' models are already in ./models
       AGECHECK_URL: http://dreamfeed-agecheck:8080
       FOLLOW_THREADS: ${FOLLOW_THREADS:?set FOLLOW_THREADS in .env}   # CPU threads for the checks
+      # Reddit through its API, with your own app (README: Following); empty: no Reddit.
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
+      REDDIT_REFRESH_TOKEN: ${REDDIT_REFRESH_TOKEN-}
+      REDDIT_USERNAME: ${REDDIT_USERNAME-}
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow
@@ -194,8 +198,6 @@ services:
       - ./models:/models:ro
       # X cookies (the same export the worker uses for styles), for your Following timeline.
       - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/x-cookies.txt:ro
-      # Reddit cookies (Netscape cookies.txt), for your front page (the subreddits you're in).
-      - ${REDDIT_COOKIES_FILE:?set REDDIT_COOKIES_FILE in .env}:/config/reddit-cookies.txt:ro
       # Your Chaturbate cookies (Netscape cookies.txt) for the rooms you follow. Read on each
       # look, so a fresh export copied over it (cp, not mv: a file moved in isn't seen until a
       # restart) needs no restart.

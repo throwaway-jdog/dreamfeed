@@ -10,6 +10,10 @@ GET  /img/<id>          full image for the viewer
 GET  /api/dashboard     queue and recent runs
 GET  /api/following     the Chaturbate rooms you follow, live first (kept by the follow service)
 GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
+GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address), or why there isn't one
+GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
+GET  /api/comics/search ?q=TEXT&page=N  comics on multporn matching TEXT (title, link, cover), to import
+GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/posts  ?source=all|x|reddit&offset=N  checked posts from your X and Reddit feeds, newest first
 GET  /follow/media/<source>/<post>/<file>  a post's picture, video or video poster
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
@@ -72,9 +76,12 @@ FOLLOW_MEDIA = FOLLOW / "media"
 FEED_SOURCES = ("x", "reddit")
 LIVE_DAYS = 28         # live times this far back give a room's usual hours
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
-# Chaturbate's own player is the one thing from elsewhere a page may show (the Following page).
-CSP = ("default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; "
-       "frame-src https://chaturbate.com; "
+# The one thing from elsewhere a page may load: a live room's video, straight from Chaturbate's
+# video servers (the Live tab's player; hls.js, served from here, plays it through blob: URLs).
+LIVE_VIDEO = "https://*.live.mmcdn.com"
+LIVE_INFO = "https://chaturbate.com/api/chatvideocontext/{}/"
+CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+       f"media-src 'self' blob: {LIVE_VIDEO}; connect-src 'self' {LIVE_VIDEO}; worker-src 'self' blob:; "
        "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -207,6 +214,84 @@ def following() -> dict:
     return {"rooms": rooms, "status": read_json(FOLLOW / "status.json"), "feeds": read_json(FOLLOW / "feeds.json")}
 
 
+MULTPORN = "https://multporn.net"
+COMIC_PATHS = ("/comics/", "/hentai_manga/")
+SEARCH_AGENT = {"User-Agent": "dreamfeed (comic search)"}
+_covers: dict[str, bytes] = {}      # search covers already fetched (a few hundred at most)
+
+
+def comic_search(q: str, page: int) -> dict:
+    """multporn's search for q: its comics and manga (not videos or games), each {"title", "url",
+    "thumb"}. A search with words the dashboard never takes is refused, and so is a result
+    whose title has them."""
+    import html
+    import urllib.parse
+    import urllib.request
+    q = q.strip()
+    if not 1 <= len(q) <= 100:
+        raise ValueError("type what to look for (up to 100 characters)")
+    bad = safety.request_blocked(q)
+    if bad:
+        raise ValueError(f"not something to look for: {', '.join(bad)}")
+    url = f"{MULTPORN}/search?" + urllib.parse.urlencode({"search_api_views_fulltext": q, "page": page})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=SEARCH_AGENT), timeout=30) as r:
+            page_html = r.read().decode("utf-8", "replace")
+    except OSError as e:
+        raise LookupError(f"multporn didn't answer ({e})")
+    out = []
+    for row in re.split(r'<div class="masonry-item views-row', page_html)[1:]:
+        link = re.search(r'views-field-title.*?<a href="([^"]+)">([^<]+)</a>', row, re.S)
+        img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"', row)
+        if not link or not link.group(1).startswith(COMIC_PATHS):
+            continue
+        title = html.unescape(link.group(2)).strip()
+        if safety.request_blocked(title):
+            continue
+        out.append({"title": title, "url": MULTPORN + link.group(1),
+                    "thumb": "comic-search/thumb?u=" + urllib.parse.quote(html.unescape(img.group(1)), safe="") if img else None})
+    return {"results": out, "more": f"page={page + 1}" in page_html}
+
+
+def comic_cover(u: str) -> bytes | None:
+    import urllib.request
+    if not u.startswith(MULTPORN + "/sites/default/files/") or ".." in u:
+        return None
+    if u not in _covers:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(u, headers=SEARCH_AGENT), timeout=30) as r:
+                data = r.read(4 << 20)
+        except OSError:
+            return None
+        if data[:3] != b"\xff\xd8\xff":     # covers are JPEGs
+            return None
+        if len(_covers) > 400:
+            _covers.clear()
+        _covers[u] = data
+    return _covers[u]
+
+
+def live_stream(name: str) -> dict:
+    """{"status", "hls"}: hls is the room's video while it's a public show, else None."""
+    import urllib.parse
+    import urllib.request
+    if not ROOM.match(name):
+        raise ValueError("bad room")
+    with db() as conn:
+        if not conn.execute("SELECT 1 FROM follows WHERE source = 'chaturbate' AND name = ?", (name,)).fetchone():
+            raise LookupError("you don't follow that room")
+    try:
+        with urllib.request.urlopen(LIVE_INFO.format(name), timeout=20) as r:
+            d = json.load(r)
+    except (OSError, ValueError):
+        return {"status": "unreachable", "hls": None}
+    hls = str(d.get("hls_source") or "")
+    u = urllib.parse.urlparse(hls)
+    ok = (d.get("room_status") == "public" and d.get("is_age_verified") and u.scheme == "https"
+          and (u.hostname or "").endswith(".live.mmcdn.com"))
+    return {"status": d.get("room_status") or "offline", "hls": hls if ok else None}
+
+
 def follow_posts(source: str, offset: int) -> dict:
     if source not in ("all", *FEED_SOURCES):
         raise ValueError("bad source")
@@ -222,7 +307,7 @@ def follow_posts(source: str, offset: int) -> dict:
               "media": [{"kind": m["kind"], "url": "follow/media/" + m["file"],
                          "poster": "follow/media/" + m["poster"] if m.get("poster") else None}
                         for m in json.loads(r["media"])]} for r in rows[:PAGE_SIZE]]
-    return {"posts": posts, "more": len(rows) > PAGE_SIZE}
+    return {"posts": posts, "more": len(rows) > PAGE_SIZE, "feeds": read_json(FOLLOW / "feeds.json")}
 
 
 def follow_media(rel: str) -> Path | None:
@@ -1240,6 +1325,29 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, dashboard())
         if path == "/api/following":
             return self.send(200, following())
+        if path == "/api/live/stream":
+            try:
+                return self.send(200, live_stream(self.query().get("name", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(404, {"error": str(e)})
+        if path == "/api/comics/search":
+            q = self.query()
+            try:
+                return self.send(200, comic_search(q.get("q", ""), max(0, int(q.get("page", "0") or 0))))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
+        if path == "/comic-search/thumb":
+            data = comic_cover(self.query().get("u", ""))
+            if not data:
+                return self.send(404, {"error": "no cover"})
+            return self.send(200, data, "image/jpeg", cache="private, max-age=86400")
+        if path == "/vendor/hls.min.js":
+            return self.send(200, (Path(__file__).parent / "vendor" / "hls.min.js").read_bytes(),
+                             "text/javascript; charset=utf-8", cache="private, max-age=604800")
         if path == "/api/following/posts":
             q = self.query()
             try:

@@ -274,8 +274,11 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #f-source { grid-template-columns: repeat(3, 1fr); }
-.fposts { margin: 0 -16px; border-top: 1px solid var(--rule); }
-.fposts .note { padding: 12px 16px; }
+.fposts #f-source { margin: 10px 14px; }
+.fposts > .note { margin: 0; padding: 0 14px 8px; color: var(--muted); font-size: 13px; }
+.fposts > .note:empty { display: none; }
+#f-posts { border-top: 1px solid var(--rule); }
+#f-posts > .note { padding: 24px 16px; text-align: center; color: var(--muted); }
 .fposts .post .av { background: var(--raise); color: var(--muted); font-size: 13px; }
 .fposts .post .where { color: var(--muted); font-size: 13px; }
 .fposts .post .media { aspect-ratio: auto; max-height: none; margin-bottom: 8px; }
@@ -285,8 +288,15 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .player { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
 .player[hidden] { display: none; }
 .player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
-.player iframe { flex: 1; width: 100%; border: 0; background: #000; }
-.player .hint { margin: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--surface); }
+.pl-stage { flex: 1; min-height: 0; position: relative; display: grid; place-items: center; background: #000; }
+.pl-stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.pl-msg { position: absolute; margin: 0; padding: 0 24px; color: #fff; text-align: center; }
+.pl-sound { position: absolute; top: 12px; right: 12px; min-height: 40px; padding: 0 14px; border-radius: 999px;
+  background: rgb(0 0 0 / .6); color: #fff; font-weight: 700; font-size: 14px; }
+.pl-foot { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--surface);
+  padding: 8px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
+.pl-foot .secondary { width: var(--tap); min-height: var(--tap); padding: 0; font-size: 22px; }
+.pl-foot .hint { margin: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 /* Personas panel + editor */
 .plist { list-style: none; margin: 0; padding: 0; display: grid; }
 .plist li + li { border-top: 1px solid var(--rule); }
@@ -376,6 +386,12 @@ textarea.in { resize: vertical; min-height: 72px; }
 .card-acts { display: flex; gap: 14px; }
 .comic-item .card-del { justify-self: start; font-size: 12px; color: var(--muted); min-height: 32px; padding: 0 2px; }
 .comic-card .badge { color: var(--accent); font-weight: 700; font-size: 12px; }
+.cs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.cs-row .primary { padding: 0 18px; }
+.cs-item { display: grid; gap: 6px; align-content: start; }
+.cs-item img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; border-radius: 10px; background: var(--bg); }
+.cs-item b { font-size: 14px; overflow-wrap: anywhere; }
+.cs-item .secondary { min-height: 36px; }
 .range { display: grid; grid-template-columns: 1fr 5ch; gap: 10px; align-items: center; }
 .range input { width: 100%; accent-color: var(--accent); min-height: var(--tap); }
 .range output { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -415,10 +431,10 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <h1 class="mark">dream<i>feed</i></h1>
     <span class="stat" id="stat"></span>
     <div class="views" role="group" aria-label="View">
-      <button type="button" data-view="feed" aria-pressed="true">Feed</button>
-      <button type="button" data-view="liked" aria-pressed="false">Liked</button>
+      <button type="button" data-view="posts" aria-pressed="true">Feed</button>
+      <button type="button" data-view="liked" aria-pressed="false">Saved</button>
       <button type="button" data-view="comics" aria-pressed="false">Comics</button>
-      <button type="button" data-view="follow" aria-pressed="false"><span class="long">Following</span><span class="short">Live</span><span class="n" id="live-n"></span></button>
+      <button type="button" data-view="follow" aria-pressed="false">Live<span class="n" id="live-n"></span></button>
       <button type="button" data-view="dash" aria-pressed="false"><span class="long">Dashboard</span><span class="short">Dash</span></button>
     </div>
     <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false">
@@ -436,8 +452,10 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 <main>
   <section class="dash" id="dash" hidden aria-label="Dashboard">
     <div class="panel" id="gen-panel">
-      <h2>Generate</h2>
+      <h2>Running now</h2>
       <div id="live"></div>
+      <p class="note">Comics, panel animations and style training. (The generated feed is gone: the feed is X and Reddit.)</p>
+      <div hidden>
       <div class="field">
         <span>How many images</span>
         <div class="seg" id="g-count" role="group" aria-label="How many images">
@@ -467,9 +485,10 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       </div>
       <button class="primary" type="button" id="g-go">Generate</button>
       <p class="note" id="g-est"></p>
+      </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" hidden>
       <h2>Video</h2>
       <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, or make a scene of about 40 seconds from it.</p>
       <div class="field">
@@ -486,7 +505,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 
     <div class="panel">
       <h2>Personas</h2>
-      <p class="note" id="p-note">Who posts in your timeline. Edits apply from their next post.</p>
+      <p class="note" id="p-note">The characters comics are made with.</p>
       <ul class="plist" id="p-list"></ul>
       <div class="field" style="gap:10px;margin-top:14px">
         <label class="field"><span>Build one from a description <small>who they are and what they post, like
@@ -559,6 +578,19 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="ed-err" id="c-err" role="alert"></div>
       <button class="primary" type="submit" id="c-go">Make the comic</button>
     </form>
+    <div class="panel" id="cs-panel">
+      <h2>Find a comic</h2>
+      <p class="note">Search multporn and import what you like. Its pages are checked like every import.</p>
+      <form class="mk-row cs-row" id="cs-form" novalidate><input class="in" id="cs-q" type="search" maxlength="100" placeholder="Title, artist or character" enterkeyhint="search">
+        <button class="primary" type="submit" id="cs-go">Search</button></form>
+      <div class="field"><span>Drawn as</span>
+        <div class="seg two" id="cs-medium" role="group" aria-label="Drawn as">
+          <button type="button" data-m="furry" aria-pressed="true">Furry</button><button type="button" data-m="anime" aria-pressed="false">Anime</button>
+        </div></div>
+      <div class="ed-err" id="cs-err" role="alert"></div>
+      <div class="comic-list" id="cs-list"></div>
+      <button type="button" class="secondary" id="cs-more" hidden>More results</button>
+    </div>
     <form class="panel" id="ci-form" novalidate>
       <h2>Import a comic</h2>
       <p class="note">Its pages are downloaded and checked like everything else, then kept as drawn, ready to read and to animate panels of.</p>
@@ -576,23 +608,29 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <div class="panel" id="c-failed-panel" hidden><h2>Didn't work</h2><p class="hint">In the last day.</p><ul class="plist" id="c-failed"></ul></div>
     <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
   </section>
-  <section class="dash follow" id="follow" hidden aria-label="Following">
+  <section class="timeline fposts" id="posts" hidden aria-label="Feed">
+    <div class="seg" id="f-source" role="group" aria-label="From">
+      <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
+      <button type="button" data-s="reddit" aria-pressed="false">Reddit</button></div>
+    <p class="note" id="f-feeds"></p>
+    <div id="f-posts"></div>
+    <button type="button" class="secondary more" id="f-more" hidden>More</button>
+  </section>
+  <section class="dash follow" id="follow" hidden aria-label="Live">
     <div class="panel"><h2>Live now</h2><p class="note" id="f-status"></p><div class="live-list" id="f-live"></div></div>
-    <div class="panel"><h2>Posts</h2>
-      <div class="seg" id="f-source" role="group" aria-label="From">
-        <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
-        <button type="button" data-s="reddit" aria-pressed="false">Reddit</button></div>
-      <p class="note" id="f-feeds"></p>
-      <div class="fposts" id="f-posts"></div>
-      <button type="button" class="secondary more" id="f-more" hidden>More</button></div>
     <div class="panel" id="f-off-panel" hidden><h2>Not live</h2><ul class="plist" id="f-off"></ul></div>
   </section>
   <div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="Live room">
     <div class="reader-bar"><span id="pl-title"></span>
       <a class="secondary" id="pl-open" target="_blank" rel="noreferrer noopener">Open on Chaturbate</a>
       <button type="button" class="secondary" id="pl-close">Close</button></div>
-    <iframe id="pl-frame" title="Live room" allow="autoplay; fullscreen" allowfullscreen referrerpolicy="no-referrer"></iframe>
-    <p class="hint" id="pl-info"></p>
+    <div class="pl-stage"><video id="pl-video" playsinline autoplay muted controls></video>
+      <p class="pl-msg" id="pl-msg" hidden></p>
+      <button type="button" class="pl-sound" id="pl-sound">Tap for sound</button></div>
+    <div class="pl-foot">
+      <button type="button" class="secondary" id="pl-prev" aria-label="Previous room">&#8249;</button>
+      <p class="hint" id="pl-info"></p>
+      <button type="button" class="secondary" id="pl-next" aria-label="Next room">&#8250;</button></div>
   </div>
   <div class="reader" id="reader" hidden role="dialog" aria-label="Comic">
     <div class="reader-bar"><span id="reader-title"></span>
@@ -907,6 +945,7 @@ async function reset() {
 }
 
 async function loadMore() {
+  if (state.view === "posts") { if (fp.more) loadPosts(false); return; }
   if (["dash", "comics", "follow"].includes(state.view) || state.loading || !state.more) return;
   state.loading = true; $("loading").hidden = false;
   const gen = state.gen;
@@ -1001,7 +1040,7 @@ function renderPeople() {
     const n = document.createElement("span"); n.textContent = p.name;
     b.append(avatarEl("", p), n); b.onclick = () => openProfile(p.handle); row.append(b);
   }
-  row.hidden = ["dash", "comics", "follow"].includes(state.view) || !state.people.length;
+  row.hidden = state.view !== "feed" || !state.people.length;   // a persona's generated posts (Saved has none to pick)
 }
 function openProfile(handle) {
   if (state.view !== "feed") { state.persona = handle; setView("feed"); return; }
@@ -1236,14 +1275,16 @@ function setView(v) {
   if (state.view === v) return;
   state.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
-  const dash = v === "dash", com = v === "comics", fol = v === "follow", page = dash || com || fol;
-  $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("grid").hidden = page; $("sentinel").hidden = page;
+  const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", page = dash || com || fol || posts;
+  $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("posts").hidden = !posts;
+  $("grid").hidden = page; $("sentinel").hidden = page && !posts;
   if (v !== "feed") state.persona = "";
   renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
   if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); }
   else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
-  else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); loadPosts(true); }
+  else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
+  else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
   else reset();
 }
 $("menu-btn").onclick = e => {
@@ -1255,9 +1296,6 @@ document.addEventListener("click", e => { if (!$("sheet").hidden && !$("sheet").
 async function refreshSummary() {
   try {
     const s = await api("api/summary");
-    $("stat").textContent = s.unrated ? `${s.unrated} new` : "";
-    const fb = document.querySelector('[data-view="feed"]');
-    fb.innerHTML = "Feed" + (s.unrated ? `<span class="n">${s.unrated}</span>` : "");
     $("live-n").textContent = s.live || "";
     const r = s.last_run;
     const run = r ? `Last run: ${nightLabel(r.night)}, ${r.status === "done" ? "finished" : r.status}` : "No nightly run yet";
@@ -1279,12 +1317,11 @@ async function refreshFollowing() {
   $("f-status").textContent = st.error ? st.error
     : !st.at ? "Waiting for the first look at Chaturbate (the follow service)."
     : live.length ? "" : d.rooms.length ? "No one you follow is live right now." : "You don't follow anyone on Chaturbate yet.";
+  follow.live = live;
   $("f-live").replaceChildren(...live.map(liveCard));
   $("f-off").replaceChildren(...off.map(offRow));
   $("f-off-panel").hidden = !off.length;
-  const feeds = d.feeds || {}, NAME = { x: "X", reddit: "Reddit" };
-  $("f-feeds").textContent = !feeds.at ? "X and Reddit are read every 15 minutes; their posts show here once they pass the checks."
-    : ["x", "reddit"].map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
+
   if (state.view === "follow") follow.timer = setTimeout(refreshFollowing, 60000);
 }
 function liveCard(r) {
@@ -1344,6 +1381,9 @@ async function loadPosts(reset) {
   try {
     const d = await api(`api/following/posts?source=${fp.source}&offset=${fp.offset}`);
     if (gen !== fp.gen) return;
+    const feeds = d.feeds || {};
+    $("f-feeds").textContent = !feeds.at ? "X and Reddit are read every 15 minutes; posts show here once they pass the checks."
+      : ["x", "reddit"].map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
     $("f-posts").append(...d.posts.map(postCard));
     fp.offset += d.posts.length; fp.more = d.more; $("f-more").hidden = !d.more;
     if (!fp.offset) $("f-posts").append(el("p", "note", "No posts yet."));
@@ -1372,17 +1412,66 @@ function postCard(p) {
   a.append(av, body);
   return a;
 }
+/* The Live player: a room's own video (HLS) straight from Chaturbate's video servers, played
+   here; hls.js where the browser can't play HLS itself (Android, desktop), Safari natively.
+   It starts muted (browsers only autoplay that way); ‹ › go through the live rooms. */
+const pl = { hls: null, rooms: [], i: 0, muted: true, gen: 0, lib: null };
+function hlsLib() {
+  if (!pl.lib) pl.lib = new Promise((ok, no) => {
+    const sc = document.createElement("script"); sc.src = "vendor/hls.min.js";
+    sc.onload = () => ok(window.Hls); sc.onerror = () => no(new Error("the player didn't load")); document.head.append(sc);
+  });
+  return pl.lib;
+}
 function openRoom(r) {
-  const i = r.info || {};
+  pl.rooms = (follow.live || []).slice(); pl.i = Math.max(0, pl.rooms.findIndex(x => x.name === r.name));
+  if (!pl.rooms.length) pl.rooms = [r];
+  $("player").hidden = false; playRoom();
+}
+function plMsg(t) { $("pl-msg").textContent = t || ""; $("pl-msg").hidden = !t; }
+function stopVideo() {
+  if (pl.hls) { pl.hls.destroy(); pl.hls = null; }
+  const v = $("pl-video"); v.pause(); v.removeAttribute("src"); v.load();
+}
+async function playRoom() {
+  const r = pl.rooms[pl.i], i = r.info || {}, gen = ++pl.gen, v = $("pl-video");
+  stopVideo();
   $("pl-title").textContent = r.name;
   $("pl-info").textContent = [i.title, (i.tags || []).map(t => "#" + t).join(" ")].filter(Boolean).join("  ");
   $("pl-open").href = `https://chaturbate.com/${encodeURIComponent(r.name)}/`;
-  $("pl-frame").src = `https://chaturbate.com/embed/${encodeURIComponent(r.name)}/?bgcolor=black`;
-  $("player").hidden = false;
+  $("pl-prev").disabled = $("pl-next").disabled = pl.rooms.length < 2;
+  plMsg("Loading…");
+  let d;
+  try { d = await api(`api/live/stream?name=${encodeURIComponent(r.name)}`); } catch (err) { if (gen === pl.gen) plMsg(err.message); return; }
+  if (gen !== pl.gen) return;
+  if (!d.hls) {
+    return plMsg({ private: "In a private show right now.", hidden: "The show is hidden right now.", away: "Away for a moment.",
+                   unreachable: "Chaturbate didn't answer. Try again in a moment." }[d.status] || "Not live right now.");
+  }
+  v.muted = pl.muted; $("pl-sound").hidden = !pl.muted;
+  const Hls = await hlsLib().catch(() => null);
+  if (gen !== pl.gen) return;
+  if (Hls && Hls.isSupported()) {
+    pl.hls = new Hls({ lowLatencyMode: true, liveSyncDurationCount: 3 });
+    pl.hls.on(Hls.Events.ERROR, (_, e) => { if (e.fatal && gen === pl.gen) plMsg("The stream stopped. Tap › and ‹ to try again."); });
+    pl.hls.loadSource(d.hls); pl.hls.attachMedia(v);
+  } else if (v.canPlayType("application/vnd.apple.mpegurl")) v.src = d.hls;
+  else return plMsg("This browser can't play live video.");
+  v.onplaying = () => { if (gen === pl.gen) plMsg(""); };
+  v.play().catch(() => {});
 }
-function closeRoom() { $("player").hidden = true; $("pl-frame").src = "about:blank"; }
+$("pl-sound").onclick = () => { pl.muted = false; const v = $("pl-video"); v.muted = false; v.play().catch(() => {}); $("pl-sound").hidden = true; };
+$("pl-video").onvolumechange = () => { pl.muted = $("pl-video").muted; $("pl-sound").hidden = !pl.muted; };
+$("pl-prev").onclick = () => { pl.i = (pl.i - 1 + pl.rooms.length) % pl.rooms.length; playRoom(); };
+$("pl-next").onclick = () => { pl.i = (pl.i + 1) % pl.rooms.length; playRoom(); };
+function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }
 $("pl-close").onclick = closeRoom;
-document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("player").hidden) closeRoom(); });
+document.addEventListener("keydown", e => {
+  if ($("player").hidden) return;
+  if (e.key === "Escape") closeRoom();
+  else if (e.key === "ArrowRight") $("pl-next").click();
+  else if (e.key === "ArrowLeft") $("pl-prev").click();
+});
 
 /* ---------- comics ---------- */
 const comicState = { personas: [], pages: 1, timer: null, medium: "furry" };
@@ -1416,10 +1505,35 @@ $("c-form").onsubmit = async e => {
   } catch (err) { $("c-err").textContent = err.message; }
   $("c-go").disabled = false;
 };
-document.querySelectorAll("#ci-medium button").forEach(btn => btn.onclick = () => {
+document.querySelectorAll("#ci-medium button, #cs-medium button").forEach(btn => btn.onclick = () => {
   comicState.medium = btn.dataset.m;
-  document.querySelectorAll("#ci-medium button").forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+  document.querySelectorAll("#ci-medium button, #cs-medium button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === btn.dataset.m)));
 });
+const cs = { q: "", page: 0 };
+$("cs-form").onsubmit = e => { e.preventDefault(); cs.q = $("cs-q").value.trim(); cs.page = 0; $("cs-list").replaceChildren(); searchComics(); };
+$("cs-more").onclick = () => { cs.page++; searchComics(); };
+async function searchComics() {
+  $("cs-err").textContent = ""; $("cs-go").disabled = $("cs-more").disabled = true;
+  try {
+    const d = await api(`api/comics/search?q=${encodeURIComponent(cs.q)}&page=${cs.page}`);
+    $("cs-list").append(...d.results.map(r => {
+      const it = el("div", "cs-item"), img = el("img"), go = el("button", "secondary", "Import");
+      img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
+      go.type = "button";
+      go.onclick = async () => {
+        go.disabled = true;
+        try { await api("api/comics/import", { url: r.url, title: r.title, medium: comicState.medium });
+              go.textContent = "Importing…"; toast("The comic is being imported. It shows up below when it's in."); refreshComics(); }
+        catch (err) { go.disabled = false; toast(err.message); }
+      };
+      it.append(img, el("b", null, r.title), go);
+      return it;
+    }));
+    if (!$("cs-list").children.length) $("cs-err").textContent = "Nothing found.";
+    $("cs-more").hidden = !d.more;
+  } catch (err) { $("cs-err").textContent = err.message; }
+  $("cs-go").disabled = $("cs-more").disabled = false;
+}
 $("ci-form").onsubmit = async e => {
   e.preventDefault(); $("ci-err").textContent = ""; $("ci-go").disabled = true;
   try {
@@ -2044,7 +2158,7 @@ async function loadEditable() {
   try {
     const d = await api("api/personas/edit");
     ed.list = d.personas; ed.styles = d.styles; ed.voices = d.voices || {};
-    $("p-note").textContent = d.error ? `The personas file has a problem: ${d.error}` : "Who posts in your timeline. Edits apply from their next post.";
+    $("p-note").textContent = d.error ? `The personas file has a problem: ${d.error}` : "The characters comics are made with.";
     renderPersonaList();
   } catch (e) { if (e.message !== "signed out") toast(e.message); }
 }
@@ -2249,12 +2363,14 @@ $("e-pic").onclick = async () => {
 new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { rootMargin: "800px" }).observe($("sentinel"));
 refreshSummary();
 loadPeople().then(() => { for (const it of state.items) if (it.persona) fillAvatar(it.el.querySelector(".av"), personaOf(it.persona.handle) || it.persona); });
-let startView = "feed";
-try { startView = localStorage.getItem("dreamfeed-view") || "feed"; } catch {}
+let startView = "posts";
+try { startView = localStorage.getItem("dreamfeed-view") || "posts"; } catch {}
 if (location.hash === "#dashboard") startView = "dash";
 if (location.hash === "#comics") startView = "comics";
 if (location.hash === "#following") startView = "follow";
-if (["dash", "liked", "comics", "follow"].includes(startView)) setView(startView); else reset();
+if (location.hash === "#live") startView = "follow";
+state.view = "";   // so setView runs for the first view
+setView(["dash", "liked", "comics", "follow", "posts"].includes(startView) ? startView : "posts");
 </script>
 </body>
 </html>

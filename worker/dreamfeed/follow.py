@@ -39,7 +39,7 @@ ROOMS = SITE + "/api/ts/roomlist/room-list/"
 THUMB_HOSTS = ("thumb.live.mmcdn.com",)
 NAME = re.compile(r"^[a-z0-9_]{1,64}$")
 COOKIES = Path("/config/chaturbate-cookies.txt")
-AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+AGENT = "dreamfeed (personal follow list)"
 
 
 class SignedOut(RuntimeError):

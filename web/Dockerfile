@@ -1,6 +1,7 @@
 FROM python:3.12-alpine
 WORKDIR /app
 COPY app.py index.html /app/
+COPY vendor /app/vendor
 # Shared sign-in library (the formlogin build context, see docker-compose.yml).
 COPY --from=formlogin formlogin /app/formlogin
 # The worker's persona and safety rules, so the persona editor checks edits exactly as the

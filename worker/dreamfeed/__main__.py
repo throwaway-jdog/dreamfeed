@@ -1,7 +1,8 @@
 """
 python -m dreamfeed run       Scheduler (container default). Every SCAN_SECONDS: runs requests
-                              from the dashboard, and inside GENERATE_WINDOW tonight's persona
-                              posts if they haven't finished. Each job runs in a child process, so the
+                              from the dashboard (comics, panel animations, styles). The nightly
+                              persona posts no longer run on their own (the feed is X and Reddit
+                              now); `generate --now` still makes some. Each job runs in a child process, so the
                               GPU is only held while there is work (the miner's gpu-yield
                               pauses mining whenever any process holds it).
 python -m dreamfeed generate  Tonight's run, if inside GENERATE_WINDOW.
@@ -57,15 +58,13 @@ def training(cfg: Config) -> bool:
 def main() -> None:
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("run", [])
     if cmd == "run":
-        from .generate import due_night, next_job, recover
+        from .generate import next_job, recover
         cfg = Config()
         cfg.generation()   # fail at start, not at 1am, if generation settings are missing
         recover(cfg)
-        print("dreamfeed: waiting for the nightly window and dashboard requests", flush=True)
+        print("dreamfeed: waiting for dashboard requests", flush=True)
         while True:
             if not training(cfg):
-                if due_night(cfg):
-                    child("generate")
                 job = next_job(cfg)
                 if job:
                     child("job", str(job))

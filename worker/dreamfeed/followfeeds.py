@@ -2,8 +2,9 @@
 follow feeds` (the follow service runs it every FEEDS_EVERY seconds, as a child that exits
 when done, so the checking models' memory is given back).
 
-1. gallery-dl reads each feed with your cookies (X: the Following timeline, x.com/home;
-   Reddit: your front page, the subreddits you're subscribed to) and downloads the pictures,
+1. gallery-dl reads each feed (X: the Following timeline, x.com/home, with your cookies;
+   Reddit: your front page, the subreddits you're subscribed to, through Reddit's API with your
+   own app: REDDIT_CLIENT_ID, REDDIT_REFRESH_TOKEN, REDDIT_USERNAME) and downloads the pictures,
    videos and GIFs of posts it hasn't seen (its archive remembers them).
 2. Every file goes through the adults-only checks (checks.problem, strict), a video's
    VIDEO_FRAMES frames spread over it, and a face in a drawing gets the age estimate too. A
@@ -15,10 +16,10 @@ These are real people: nothing here goes to training, styles, comics or generati
 """
 import datetime as dt
 import json
+import os
 import shutil
 import subprocess
 import tempfile
-import urllib.request
 from pathlib import Path
 
 from PIL import Image
@@ -31,32 +32,26 @@ CHECK_SIDE = 1536          # pictures are checked at most this big
 MAX_SIZE = "200M"
 IMAGES = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEOS = {".mp4", ".webm", ".mov", ".m4v", ".gif"}
-AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 FEEDS = {
     "x": {"url": "https://x.com/home", "cookies": Path("/config/x-cookies.txt"), "name": "X"},
-    "reddit": {"url": "https://www.reddit.com/", "cookies": Path("/config/reddit-cookies.txt"), "name": "Reddit"},
+    # Through Reddit's API (oauth.reddit.com) as you, with your own app; no cookies.
+    "reddit": {"url": "https://www.reddit.com/", "cookies": None, "name": "Reddit"},
 }
+REDDIT = ("REDDIT_CLIENT_ID", "REDDIT_REFRESH_TOKEN", "REDDIT_USERNAME")
+
+
+def _reddit() -> dict:
+    return {k: os.environ.get(k, "").strip() for k in REDDIT}
 
 
 def _signed_in(source: str) -> str | None:
-    """Why this feed can't be read, or None. Signed out, Reddit's front page is everyone's
-    popular posts, not your subscriptions, so it's asked who you are first."""
+    """Why this feed can't be read, or None."""
+    if source == "reddit":
+        missing = [k for k, v in _reddit().items() if not v]
+        return f"Reddit isn't set up yet ({', '.join(missing)} in .env)" if missing else None
     cookies = FEEDS[source]["cookies"]
     if not cookies.is_file() or not any(line.strip() and not line.startswith("# ") for line in cookies.open()):
         return f"no {FEEDS[source]['name']} cookies yet"
-    if source == "reddit":
-        import http.cookiejar
-        jar = http.cookiejar.MozillaCookieJar(str(cookies))
-        jar.load(ignore_discard=True, ignore_expires=True)
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        try:
-            with opener.open(urllib.request.Request("https://www.reddit.com/api/me.json",
-                                                    headers={"User-Agent": AGENT}), timeout=30) as r:
-                me = json.load(r)
-        except (OSError, ValueError) as e:
-            return f"Reddit didn't answer ({e})"
-        if not (me.get("data") or {}).get("name"):
-            return "Reddit isn't signed in: export your cookies again"
     return None
 
 
@@ -70,12 +65,20 @@ def download(source: str, incoming: Path, archive: Path) -> str | None:
         "twitter": {"text-tweets": False, "retweets": False, "quoted": False, "filename": "{tweet_id}_{num}.{extension}"},
         "reddit": {"comments": 0, "videos": True, "whitelist": ["imgur", "redgifs"], "filename": "{id}_{num}.{extension}"},
     }, "downloader": {"part-directory": str(incoming / ".part"), "filesize-max": MAX_SIZE}}
+    cmd = ["gallery-dl", "--config-ignore", "--config"]
+    auth = []
+    if source == "reddit":
+        r = _reddit()
+        # Reddit's API rules: a user agent naming the app and whose it is.
+        conf["extractor"]["reddit"].update({"client-id": r["REDDIT_CLIENT_ID"], "refresh-token": r["REDDIT_REFRESH_TOKEN"],
+                                           "user-agent": f"linux:dreamfeed:1.0 (by /u/{r['REDDIT_USERNAME']})"})
+    else:
+        auth = ["--cookies", str(FEEDS[source]["cookies"])]
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(conf, f)
     try:
-        r = subprocess.run(["gallery-dl", "--config-ignore", "--config", f.name, "--cookies", str(FEEDS[source]["cookies"]),
-                            "--range", f"1-{MAX_FILES}", "--abort", str(STOP_AFTER_SEEN), "--write-metadata",
-                            FEEDS[source]["url"]], capture_output=True, text=True, timeout=1800)
+        r = subprocess.run([*cmd, f.name, *auth, "--range", f"1-{MAX_FILES}", "--abort", str(STOP_AFTER_SEEN),
+                            "--write-metadata", FEEDS[source]["url"]], capture_output=True, text=True, timeout=1800)
     finally:
         Path(f.name).unlink(missing_ok=True)
         shutil.rmtree(incoming / ".part", ignore_errors=True)
