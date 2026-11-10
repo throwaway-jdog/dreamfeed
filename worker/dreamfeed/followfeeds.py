@@ -36,8 +36,13 @@ CHECK_SIDE = 1536          # pictures are checked at most this big
 MAX_SIZE = "200M"
 IMAGES = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEOS = {".mp4", ".webm", ".mov", ".m4v", ".gif"}
+X_HOME = "https://x.com/home"     # your Following timeline; + "/for-you": X's For you
 FEEDS = {
-    "x": {"url": "https://x.com/home", "cookies": Path("/config/x-cookies.txt"), "name": "X"},
+    "x": {"url": X_HOME, "cookies": Path("/config/x-cookies.txt"), "name": "X"},
+    # X's own For you timeline: mostly people you don't follow, kept apart from your Following
+    # posts (the Feed's For you), and fewer at a time (they all go through the checks).
+    "foryou": {"url": X_HOME + "/for-you", "cookies": Path("/config/x-cookies.txt"), "name": "X For you",
+               "as": "x", "via": "foryou", "max": 60},
     "reddit": {"name": "Reddit"},
     "e621": {"name": "e621"},
 }
@@ -50,6 +55,7 @@ REDDIT_EVERY = 24 * 3600   # each one is read once a day: its top posts of that 
 REDDIT_GAP = 11            # seconds between Reddit requests (unsigned readers get about one per 10 s)
 REDDIT_IMAGES = ("i.redd.it", "preview.redd.it")
 REDDIT_API = "https://oauth.reddit.com"
+FRONT_PAGE = 50           # posts of your front page looked at each round (only new ones are fetched)
 API_GAP = 1                # seconds between API requests (it allows about 100 a minute)
 MAX_GALLERY = 20           # pictures kept from one gallery
 VIDEO_MAX_BYTES = 200 << 20
@@ -105,7 +111,7 @@ def download(source: str, incoming: Path, archive: Path) -> str | None:
         json.dump(conf, f)
     try:
         r = subprocess.run(["gallery-dl", "--config-ignore", "--config", f.name, "--cookies", str(FEEDS[source]["cookies"]),
-                            "--range", f"1-{MAX_FILES}", "--abort", str(STOP_AFTER_SEEN), "--write-metadata",
+                            "--range", f"1-{FEEDS[source].get('max', MAX_FILES)}", "--abort", str(STOP_AFTER_SEEN), "--write-metadata",
                             FEEDS[source]["url"]], capture_output=True, text=True, timeout=1800)
     finally:
         Path(f.name).unlink(missing_ok=True)
@@ -187,7 +193,7 @@ def subscriptions(token: str) -> list[str]:
     return sorted(set(out), key=str.lower)
 
 
-LOGIN_SCOPES = "identity read mysubreddits"
+LOGIN_SCOPES = "identity read mysubreddits save"     # save: the Feed's Save button
 LOGIN_REDIRECT = "http://localhost:6414/"
 
 
@@ -270,8 +276,10 @@ def _entries(feed: bytes) -> list[dict]:
 
 
 def _reddit(incoming: Path, seen_file: Path) -> str | None:
-    """Each subreddit and user due (not read in the last REDDIT_EVERY): its top posts of the day,
-    through the API with your app if it's set (galleries and Reddit videos too), else RSS."""
+    """Signed in: your front page (Best, as Reddit sorts it for you), its newest FRONT_PAGE each
+    round. Then each subreddit and user due (not read in the last REDDIT_EVERY): its top posts
+    of the day, through the API with your app if it's set (galleries and Reddit videos too),
+    else RSS."""
     import re
     import time
     seen = seen_file.read_text().split() if seen_file.is_file() else []
@@ -292,6 +300,29 @@ def _reddit(incoming: Path, seen_file: Path) -> str | None:
             follow += [w for w in subs if w.lower() not in {f.lower() for f in follow}]
         except (OSError, ValueError) as e:
             errors.append(f"your subscriptions: {e}")
+    def take(posts: list[dict], limit: int, via: str | None = None) -> None:
+        for p in posts[:limit]:
+            if not re.fullmatch(r"[a-z0-9]{3,12}", p["id"]) or p["id"] in known:
+                continue
+            if _place_blocked(p.get("subreddit") or ""):      # left out before anything's downloaded
+                continue
+            if via:
+                p["via"] = via
+            known.add(p["id"]); new.append(p["id"])
+            urls = p.pop("media")[:MAX_GALLERY]
+            meta = json.dumps(p)
+            for n, url in enumerate(urls, 1):
+                try:
+                    _reddit_file(url, f"{p['id']}_{n:02d}", incoming, meta, gap=API_GAP if creds else None)
+                except (OSError, subprocess.SubprocessError) as e:
+                    print(f"follow: reddit post {p['id']}: {e}", flush=True)
+
+    if token:                                     # your front page, every round
+        try:
+            take(_api_posts(_fetch(f"{REDDIT_API}/best?limit={FRONT_PAGE}&raw_json=1",
+                                   {"Authorization": f"bearer {token}"}, gap=API_GAP)), FRONT_PAGE, via="foryou")
+        except (OSError, ValueError) as e:
+            errors.append(f"your front page: {e}")
     for who in follow:
         if time.time() - last.get(who, 0) < REDDIT_EVERY:
             continue
@@ -308,17 +339,7 @@ def _reddit(incoming: Path, seen_file: Path) -> str | None:
             errors.append(f"{who}: {e}")
             continue
         last[who] = time.time()
-        for p in posts[:s["top"]]:
-            if not re.fullmatch(r"[a-z0-9]{3,12}", p["id"]) or p["id"] in known:
-                continue
-            known.add(p["id"]); new.append(p["id"])
-            urls = p.pop("media")[:MAX_GALLERY]
-            meta = json.dumps(p)
-            for n, url in enumerate(urls, 1):
-                try:
-                    _reddit_file(url, f"{p['id']}_{n:02d}", incoming, meta, gap=API_GAP if creds else None)
-                except (OSError, subprocess.SubprocessError) as e:
-                    print(f"follow: reddit post {p['id']}: {e}", flush=True)
+        take(posts, s["top"])
     seen_file.write_text("\n".join((seen + new)[-SEEN_KEEP:]))
     last_file.write_text(json.dumps({w: t for w, t in last.items() if w in follow}))
     return "; ".join(errors)[:200] if errors and not new else None
@@ -413,7 +434,17 @@ def _post(source: str, md: dict) -> dict:
     p = md.get("_parent") or md        # Reddit and e621: details written by _reddit and _e621
     link = p.get("link") or ("https://www.reddit.com" + p["permalink"] if p.get("permalink") else None)
     return {"post_id": str(p["id"]), "author": p.get("author") or "", "place": p.get("subreddit") or p.get("place"),
-            "text": p.get("title") or "", "posted_at": str(p.get("date") or ""), "link": link}
+            "text": p.get("title") or "", "posted_at": str(p.get("date") or ""), "link": link, "via": p.get("via")}
+
+
+def _place_blocked(subreddit: str) -> bool:
+    """A subreddit whose name has words dreamfeed never takes (young, feral and the like): its
+    posts aren't fetched at all (the checks would drop them anyway)."""
+    from . import safety
+    from .e621 import NEVER
+    words = subreddit.replace("_", " ").lower()
+    return bool(safety.request_blocked(words) or safety.story_blocked(words)
+                or any(w in words for w in NEVER if len(w) > 3))
 
 
 def _frames(path: Path) -> list[Image.Image]:
@@ -454,10 +485,12 @@ def _problem(vision, cfg, frames) -> tuple[str, str] | None:
     return None
 
 
-def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, discovered: bool = False) -> tuple[int, int]:
+def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, discovered: bool = False,
+              via: str | None = None) -> tuple[int, int]:
     """The downloaded files, checked and kept or deleted, post by post: (kept, dropped). If a
     job or training starts meanwhile it stops, and the rest wait in incoming for next time.
-    discovered: a preview of someone you don't follow (shown on their profile, not the Feed)."""
+    discovered: not from your own feeds (via: foryou, X's For you; preview, a profile's preview),
+    shown in the Feed's For you and on profiles, never with your Following posts."""
     from .follow import busy
     for meta in incoming.glob("*.json"):       # details whose file is gone
         if not meta.with_suffix("").exists():
@@ -513,17 +546,18 @@ def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, disco
                 item["poster"] = str(poster.relative_to(media))
             items.append(item)
         with conn:
+            v = post.get("via") or via            # Reddit's front page is marked post by post
             conn.execute("INSERT OR IGNORE INTO follow_posts(source, post_id, author, place, text, link, posted_at, media,"
-                         " mentions, discovered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         " mentions, discovered, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                          (source, pid, post["author"], post["place"], post["text"][:2000], post["link"], post["posted_at"],
-                          json.dumps(items), json.dumps(post.get("mentions") or []), int(discovered)))
+                          json.dumps(items), json.dumps(post.get("mentions") or []), int(discovered or bool(v)), v))
         kept += 1
     return kept, dropped
 
 
 def expire(conn, media: Path) -> None:
     with conn:
-        old = conn.execute("SELECT id, source, post_id FROM follow_posts WHERE added_at < datetime('now', ?)",
+        old = conn.execute("SELECT id, source, post_id FROM follow_posts WHERE saved = 0 AND added_at < datetime('now', ?)",
                            (f"-{KEEP_DAYS} days",)).fetchall()
         for pid, source, post_id in old:
             shutil.rmtree(media / source / post_id, ignore_errors=True)
@@ -555,7 +589,9 @@ def main() -> None:
                 continue
             if vision is None and any(incoming.iterdir()):
                 vision = Vision(cfg.models_dir)
-            kept, dropped = check_new(conn, source, incoming, media, vision, cfg) if vision else (0, 0)
+            feed = FEEDS[source]
+            kept, dropped = check_new(conn, feed.get("as", source), incoming, media, vision, cfg,
+                                      discovered=bool(feed.get("via")), via=feed.get("via")) if vision else (0, 0)
             status[source] = {"kept": kept, "dropped": dropped}
             print(f"follow: {source}: {kept} new posts, {dropped} dropped by the checks", flush=True)
         expire(conn, media)
@@ -612,7 +648,7 @@ def preview(job_id: int) -> None:
             errors = [line for line in r.stderr.splitlines() if "][error]" in line]
             raise RuntimeError(errors[-1].split("][error]", 1)[1].strip()[:200] if errors else "no pictures or videos there")
         vision = Vision(cfg.models_dir)
-        kept, dropped = check_new(conn, "x", incoming, root / "media", vision, cfg, discovered=True)
+        kept, dropped = check_new(conn, "x", incoming, root / "media", vision, cfg, discovered=True, via="preview")
         with conn:
             conn.execute("UPDATE previews SET status = 'done', kept = ?, dropped = ? WHERE id = ?", (kept, dropped, job_id))
         print(f"follow: preview of x/{handle}: {kept} posts, {dropped} dropped by the checks", flush=True)
@@ -624,3 +660,34 @@ def preview(job_id: int) -> None:
         if vision is not None:
             vision.close()
         shutil.rmtree(incoming, ignore_errors=True)
+
+
+def reddit_saves(conn) -> None:
+    """Saves and unsaves tapped in the Feed, sent to Reddit as you (the follow service, within
+    seconds). Needs the save permission: sign in again (`follow reddit-login`) if it's missing."""
+    rows = conn.execute("SELECT a.id, a.action, p.post_id FROM save_actions a JOIN follow_posts p ON p.id = a.post"
+                        " WHERE a.status = 'queued' AND p.source = 'reddit' ORDER BY a.id").fetchall()
+    if not rows:
+        return
+    import urllib.error
+    import urllib.request
+    creds = _api_creds()
+    error = None if creds and _signed_in_as_you() else "sign in to Reddit first (README: Following)"
+    token = None
+    for job, action, pid in rows:
+        err = error
+        if not err:
+            try:
+                token = token or _api_token(creds)
+                req = urllib.request.Request(f"{REDDIT_API}/api/{action}", data=f"id=t3_{pid}".encode(), method="POST",
+                                             headers={"User-Agent": _agent(), "Authorization": f"bearer {token}"})
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    r.read()
+            except urllib.error.HTTPError as e:
+                err = ("dreamfeed can't save on Reddit yet: sign in again (`follow reddit-login`) to give it that permission"
+                       if e.code == 403 else f"Reddit said {e.code}")
+            except (OSError, ValueError) as e:
+                err = str(e)[:200]
+        with conn:
+            conn.execute("UPDATE save_actions SET status = ?, error = ? WHERE id = ?", ("failed" if err else "done", err, job))
+        print(f"follow: {action} reddit post {pid}: {err or 'done'}", flush=True)

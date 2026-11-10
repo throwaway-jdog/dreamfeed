@@ -95,6 +95,22 @@ CREATE TABLE IF NOT EXISTS previews (         -- an X account's recent media, fe
     dropped     INTEGER,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS save_actions (     -- save or unsave a Reddit post on Reddit, tapped in dreamfeed
+    id          INTEGER PRIMARY KEY,
+    post        INTEGER NOT NULL,            -- follow_posts.id
+    action      TEXT NOT NULL,               -- save | unsave
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | done | failed
+    error       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS cb_actions (       -- follow or unfollow a room on Chaturbate, tapped in dreamfeed
+    id          INTEGER PRIMARY KEY,
+    room        TEXT NOT NULL,
+    action      TEXT NOT NULL,               -- follow | unfollow
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | done | failed
+    error       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS follow_posts (  -- posts from X and Reddit feeds that passed the checks
     id          INTEGER PRIMARY KEY,
     source      TEXT NOT NULL,               -- x | reddit
@@ -124,6 +140,12 @@ def connect(path: Path) -> sqlite3.Connection:
     if "mentions" not in cols:    # added with Discover
         conn.execute("ALTER TABLE follow_posts ADD COLUMN mentions TEXT")                       # JSON: X handles it names
         conn.execute("ALTER TABLE follow_posts ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0")   # 1: a preview, not your feed
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(follow_posts)")}
+    if "via" not in cols:         # added with X's For you: foryou | preview (discovered ones)
+        conn.execute("ALTER TABLE follow_posts ADD COLUMN via TEXT")
+        conn.execute("UPDATE follow_posts SET via = 'preview' WHERE discovered = 1")
+    if "saved" not in cols:       # saved posts are kept past KEEP_DAYS
+        conn.execute("ALTER TABLE follow_posts ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(follows)")}
     if "bio_at" not in cols:      # when the room's bio was last read for its links
         conn.execute("ALTER TABLE follows ADD COLUMN bio_at TEXT")

@@ -273,8 +273,14 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row img, .off-row .ph { width: 56px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: var(--bg); filter: grayscale(1); opacity: .6; }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#f-source { grid-template-columns: repeat(5, 1fr); }
-@media (max-width: 420px) { #f-source button { font-size: 13px; padding: 0 4px; } }
+#f-source { grid-template-columns: repeat(4, 1fr); }
+#f-source.no-e621 { grid-template-columns: repeat(3, 1fr); }
+#f-source.no-e621 [data-s="e621"] { display: none; }
+.fposts #f-mode { margin: 10px 14px 0; }
+.fposts .post .acts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.fposts .post .save { background: none; border: 0; padding: 0; min-height: 32px; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.fposts .post .save[aria-pressed="true"] { color: var(--accent); }
+.fposts .post .acts small { color: var(--muted); font-size: 12px; }
 .fposts #f-source { margin: 10px 14px; }
 .fposts > .note { margin: 0; padding: 0 14px 8px; color: var(--muted); font-size: 13px; }
 .fposts > .note:empty { display: none; }
@@ -356,12 +362,14 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .mv-tile .tb { position: absolute; top: 6px; display: flex; gap: 6px; right: 6px; }
 .mv-tile .tb button { min-height: 34px; padding: 0 10px; border-radius: 999px; background: rgb(0 0 0 / .6); color: #fff; border: 0; font-size: 13px; font-weight: 600; }
 .post .name.who { cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
-.dx { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--rule);
-  width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
-.dx img, .dx .ph { width: 56px; height: 56px; object-fit: cover; border-radius: 50%; background: var(--raise); display: block; }
-.dx div { display: grid; min-width: 0; }
-.dx b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dx small { color: var(--muted); font-size: 13px; }
+.dx-wrap { border-bottom: 1px solid var(--rule); padding: 8px 0 12px; }
+.dx-wrap h3 { margin: 0; padding: 0 14px 6px; font-size: 14px; color: var(--muted); font-weight: 600; }
+.dx-strip { display: flex; gap: 10px; overflow-x: auto; padding: 0 14px; scrollbar-width: thin; }
+.dx { flex: none; width: 128px; display: grid; gap: 4px; justify-items: center; text-align: center; padding: 10px 6px; border: 1px solid var(--rule);
+  border-radius: 12px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.dx img, .dx .ph { width: 64px; height: 64px; object-fit: cover; border-radius: 50%; background: var(--raise); display: block; }
+.dx b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.dx small { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .player { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
 .player[hidden] { display: none; }
 .player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
@@ -721,10 +729,13 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
   </section>
   <section class="timeline fposts" id="posts" hidden aria-label="Feed">
+    <div class="seg three" id="f-mode" role="group" aria-label="Feed">
+      <button type="button" data-m="following" aria-pressed="true">Following</button><button type="button" data-m="foryou" aria-pressed="false">For you</button>
+      <button type="button" data-m="saved" aria-pressed="false">Saved</button></div>
     <div class="seg" id="f-source" role="group" aria-label="From">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
-      <button type="button" data-s="e621" aria-pressed="false">e621</button><button type="button" data-s="discover" aria-pressed="false">Discover</button></div>
+      <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
     <p class="note" id="f-feeds"></p>
     <div id="f-posts"></div>
     <button type="button" class="secondary more" id="f-more" hidden>More</button>
@@ -744,6 +755,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   </section>
   <div class="profile" id="profile" hidden role="dialog" aria-modal="true" aria-label="Room">
     <div class="reader-bar"><span id="pf-title"></span>
+      <button type="button" class="secondary" id="pf-follow" hidden>Follow</button>
       <button type="button" class="secondary" id="pf-live" hidden>Watch live</button>
       <a class="secondary" id="pf-open" target="_blank" rel="noreferrer noopener">Chaturbate</a>
       <button type="button" class="secondary" id="pf-close">Close</button></div>
@@ -1495,6 +1507,15 @@ function liveCard(r, list) {
   const item = el("div", "live-item"), acts = el("div", "acts"), pfb = el("button", "secondary vids",
     r.videos ? `Profile · ${r.videos} video${r.videos === 1 ? "" : "s"}` : "Profile");
   pfb.type = "button"; pfb.onclick = () => openProfile(r); acts.append(pfb);
+  if (r.discovered && !r.followed) {
+    const fb = el("button", "secondary vids", "Follow"); fb.type = "button";
+    fb.onclick = async () => {
+      fb.disabled = true; fb.textContent = "Following…";
+      try { await api("api/live/follow", { name: r.name, follow: true }); r.followed = true; setTimeout(refreshFollowing, 8000); fb.textContent = "Followed"; }
+      catch (err) { toast(err.message); fb.disabled = false; fb.textContent = "Follow"; }
+    };
+    acts.append(fb);
+  }
   item.append(b, acts);
   return item;
 }
@@ -1623,7 +1644,16 @@ function usualHours(times) {
   const at = h => new Date(2000, 0, 1, h % 24).toLocaleTimeString([], { hour: "numeric" });
   return `usually live ${at(best.h)}–${at(best.h + best.n)}`;
 }
-const fp = { source: "all", offset: 0, more: false, loading: false, gen: 0 };
+const fp = { source: "all", mode: "following", offset: 0, more: false, loading: false, gen: 0 };
+document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
+  fp.mode = b.dataset.m;
+  document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  $("f-source").classList.toggle("no-e621", fp.mode === "foryou");     // For you is X and Reddit only
+  if (fp.mode === "foryou" && fp.source === "e621") {
+    fp.source = "all"; document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === "all")));
+  }
+  loadPosts(true);
+});
 document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
   fp.source = b.dataset.s;
   document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
@@ -1631,43 +1661,53 @@ document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
 });
 $("f-more").onclick = () => loadPosts(false);
 async function loadPosts(reset) {
-  if (fp.source === "discover") return reset && loadPeople();
-  if (reset) { fp.offset = 0; fp.gen++; $("f-posts").replaceChildren(); }
+  if (reset) {
+    fp.offset = 0; fp.gen++; $("f-posts").replaceChildren();
+    if (fp.mode === "foryou" && fp.source !== "reddit") { const strip = el("div", "dx-wrap"); $("f-posts").append(strip); loadPeople(strip, fp.gen); }
+  }
   else if (fp.loading) return;
   const gen = fp.gen; fp.loading = true; $("f-more").hidden = true;
   try {
-    const d = await api(`api/following/posts?source=${fp.source}&offset=${fp.offset}`);
+    const d = await api(`api/following/posts?mode=${fp.mode}&source=${fp.source}&offset=${fp.offset}`);
     if (gen !== fp.gen) return;
     const feeds = d.feeds || {};
     $("f-feeds").textContent = !feeds.at ? "X and Reddit are read every 15 minutes; posts show here once they pass the checks."
-      : ["x", "reddit", "e621"].map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
+      : (fp.mode === "foryou" ? ["foryou", "reddit"] : ["x", "reddit", "e621"]).map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
     $("f-posts").append(...d.posts.map(postCard));
     fp.offset += d.posts.length; fp.more = d.more; $("f-more").hidden = !d.more;
-    if (!fp.offset) $("f-posts").append(el("p", "note", "No posts yet."));
+    if (!fp.offset) $("f-posts").append(el("p", "note", {
+      foryou: "Nothing yet: X's For you and your Reddit front page are read with the feeds every 15 minutes, through the same checks.",
+      saved: "Nothing saved yet. Save keeps a post here (past the 14 days); a Reddit post is saved on Reddit too." }[fp.mode] || "No posts yet."));
   } catch (err) { toast(err.message); }
   finally { if (gen === fp.gen) fp.loading = false; }
 }
-// Discover (Feed): X accounts linked from the rooms you follow, or mentioned by people you follow.
-async function loadPeople() {
-  const gen = ++fp.gen; fp.more = false; $("f-more").hidden = true;
-  $("f-posts").replaceChildren(el("p", "note", "Looking…"));
-  $("f-feeds").textContent = "People you don't follow on X: linked from the Chaturbate rooms you follow, or mentioned by people you follow. Tap one for their profile; Preview fetches their recent media through the checks.";
+// For you (Feed): X accounts you don't follow, from your rooms' bios, your follows' mentions
+// and X's For you, above X's For you posts.
+async function loadPeople(box, gen) {
   let d;
-  try { d = await api("api/discover/x"); } catch (err) { if (gen === fp.gen) $("f-posts").replaceChildren(el("p", "note", err.message)); return; }
+  try { d = await api("api/discover/x"); } catch { return box.remove(); }
   if (gen !== fp.gen) return;
-  $("f-posts").replaceChildren(...d.people.map(p => {
-    const b = el("button", "dx"), info = el("div"); b.type = "button";
+  if (!d.people.length) return box.remove();
+  const strip = el("div", "dx-strip");
+  strip.append(...d.people.map(p => {
+    const b = el("button", "dx"); b.type = "button";
     if (p.thumb) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = p.thumb; b.append(img); } else b.append(el("span", "ph"));
-    const why = [p.rooms.length ? `on ${p.rooms.join(", ")}'s Chaturbate` : "",
-                 p.mentions ? `mentioned ${p.mentions}× by ${p.by.join(", ")}` : ""].filter(Boolean).join(" · ");
-    const pv = p.preview || {};
-    const state = pv.status === "done" ? `${pv.kept} previewed` : pv.status === "queued" || pv.status === "running" ? "preview coming" : "";
-    info.append(el("b", null, "@" + p.handle), el("small", null, [why, state].filter(Boolean).join(" · ")));
-    b.append(info);
+    const why = p.rooms.length ? `on ${p.rooms[0]}'s Chaturbate` : p.foryou >= p.mentions ? `${p.foryou} in your For you`
+      : `mentioned by ${p.by.join(", ")}`;
+    b.append(el("b", null, "@" + p.handle), el("small", null, why));
     b.onclick = () => openPerson(p.rooms.length ? { room: p.rooms[0] } : { x: p.handle });
     return b;
   }));
-  if (!d.people.length) $("f-posts").append(el("p", "note", "No one yet. Suggestions come from the rooms' bios (read once a day) and from mentions in new X posts."));
+  box.replaceChildren(el("h3", null, "People you might like"), strip);
+}
+async function refreshSync(p, show, tries = 0) {
+  try {
+    const d = await api(`api/following/posts?mode=saved&source=reddit&offset=0`);
+    const hit = d.posts.find(x => x.id === p.id);
+    if (hit) p.sync = hit.sync; else if (!p.saved) p.sync = null;
+  } catch { return; }
+  show();
+  if (p.sync && p.sync.status === "queued" && tries < 5) setTimeout(() => refreshSync(p, show, tries + 1), 4000);
 }
 function postCard(p) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
@@ -1689,10 +1729,29 @@ function postCard(p) {
     } else { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = m.url; box.append(img); }
     body.append(box);
   }
+  const acts = el("div", "acts");
   if (p.link) {
     const out = el("a", "out", { reddit: "Open on Reddit", e621: "Open on e621" }[p.source] || "Open on X");
-    out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; body.append(out);
+    out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; acts.append(out);
   }
+  if (p.id != null) {
+    const sv = el("button", "save"), note = el("small"); sv.type = "button";
+    const show = () => {
+      sv.textContent = p.saved ? "★ Saved" : "☆ Save"; sv.setAttribute("aria-pressed", String(p.saved));
+      const y = p.sync || {};
+      note.textContent = p.source !== "reddit" || !y.status ? (p.saved && p.source === "x" ? "kept in dreamfeed" : "")
+        : y.status === "queued" ? "saving on Reddit…" : y.status === "failed" ? y.error || "Reddit didn't take it"
+        : p.saved ? "saved on Reddit too" : "";
+    };
+    sv.onclick = async () => {
+      try { const d = await api("api/following/save", { id: p.id, save: !p.saved }); p.saved = d.saved; }
+      catch (err) { return toast(err.message); }
+      if (p.source === "reddit") { p.sync = { status: "queued" }; setTimeout(() => refreshSync(p, show), 4000); }
+      show();
+    };
+    show(); acts.append(sv, note);
+  }
+  body.append(acts);
   a.append(av, body);
   return a;
 }
@@ -1780,7 +1839,7 @@ const pf = { room: null, key: null, data: null, videos: [], gen: 0, timer: null,
 function openProfile(r) { pf.card = r; openPerson({ room: r.name }); }
 async function openPerson(key) {
   const gen = ++pf.gen;
-  clearTimeout(pf.timer); clearTimeout(pf.ptimer);
+  clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); pf.toldFail = false;
   pf.key = key; pf.videos = []; pf.data = null; pf.room = key.room ? { name: key.room } : null;
   if (!key.room) pf.card = null;
   $("pf-title").textContent = key.room || (key.x ? "@" + key.x : "u/" + key.reddit);
@@ -1803,6 +1862,13 @@ async function loadPerson(gen) {
   $("pf-open").hidden = !room;
   if (room) { $("pf-open").href = `https://chaturbate.com/${encodeURIComponent(room)}/`; $("pf-open").textContent = "Chaturbate"; }
   $("pf-live").hidden = !(room && live);
+  const act = d.action, pending = act && act.status === "queued", fb = $("pf-follow");
+  fb.hidden = !room;
+  fb.disabled = !!pending;
+  fb.textContent = pending ? (act.action === "follow" ? "Following…" : "Unfollowing…") : d.followed ? "Following ✓" : "Follow";
+  if (act && act.status === "failed" && !pf.toldFail) { pf.toldFail = true; toast(`Chaturbate didn't take it: ${act.error || "?"}`); }
+  if (pending) pf.ftimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 3000);
+  else if (act && act.status === "done" && pf.waitingFollow) { pf.waitingFollow = false; refreshFollowing(); }
   const b = d.bio || {}, times = d.times || card.times || [];
   const when = !room ? "" : live ? "Live now" : d.last_live ? `Last live ${relTime(new Date(d.last_live * 1000).toISOString())} ago`
     : b.last_broadcast ? `Last live ${b.last_broadcast}` : "";
@@ -1819,6 +1885,12 @@ async function loadPerson(gen) {
   renderProfile(gen);
 }
 $("pf-about").onclick = () => $("pf-about").classList.toggle("open");
+$("pf-follow").onclick = async () => {
+  const d = pf.data; if (!d || !d.room) return;
+  if (d.followed && !confirm(`Unfollow ${d.room} on Chaturbate?`)) return;
+  try { await api("api/live/follow", { name: d.room, follow: !d.followed }); } catch (err) { return toast(err.message); }
+  pf.toldFail = false; pf.waitingFollow = true; loadPerson(pf.gen);
+};
 function renderLinks(d) {
   const chips = [];
   const chip = (label, href, note, onRemove) => {
@@ -1943,7 +2015,7 @@ async function deleteVideo(f) {
     reloadProfile(pf.gen); refreshFollowing();
   });
 }
-function closeProfile() { pf.gen++; clearTimeout(pf.timer); clearTimeout(pf.ptimer); $("profile").hidden = true; }
+function closeProfile() { pf.gen++; clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); $("profile").hidden = true; }
 $("pf-close").onclick = closeProfile;
 $("pf-live").onclick = () => openRoom(pf.card && pf.card.name === pf.room.name ? pf.card : { ...pf.room, info: (pf.data || {}).info || {} }, null);
 function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }

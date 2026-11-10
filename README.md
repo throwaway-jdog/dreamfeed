@@ -359,8 +359,23 @@ over it, and the age estimate for faces in photos and in drawings close to photo
 any file that fails is deleted, all of it. The checks run on the CPU (`FOLLOW_THREADS`, about 3
 seconds a picture, up to about 5 GB of RAM: `FOLLOW_MEM_LIMIT`) in a child that exits when
 done, and wait while a job, a nightly run or training is going. Posts are kept 14 days in
-`data/generated/follow/media/`. All, X or Reddit picks which are shown; Open on X/Reddit goes
-to the post.
+`data/generated/follow/media/`. Open on X/Reddit goes to the post.
+
+The Feed has three parts, each with All, X, Reddit (and e621) to pick from:
+- **Following:** your X Following timeline, your subreddits' top posts of the day, e621.
+- **For you:** the sites' own picks. X's For you timeline (up to 60 files a round) and, signed
+  in to Reddit, your front page as Reddit sorts it (Best: its newest 50 each round, only new
+  ones fetched). Same checks; never mixed into Following. Above it, people you might like:
+  X accounts you don't follow, from your rooms' bios, mentions by people you follow and
+  X's For you.
+- **Saved:** what you tapped Save on, kept past the 14 days. A Reddit post is saved on Reddit
+  too, as you (that needs the `save` permission: if you signed in before it was added, run the
+  sign-in below again and replace `REDDIT_REFRESH_TOKEN`; the post says so until then). An X
+  post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client,
+  so use Open on X for that.
+
+A Reddit post from a subreddit whose name has words dreamfeed never takes (young, feral and
+the like) isn't fetched at all.
 
 From Reddit it takes pictures, galleries (up to 20 pictures), Reddit's own videos (with sound)
 and redgifs clips, through Reddit's API with your own app: a "personal use script" at
@@ -447,8 +462,12 @@ tags of the rooms you follow, Top the most watched, Search a tag or a few words,
 anyone or for women, men, couples or trans performers. Only rooms Chaturbate lists as age
 verified, 18 or over and with no password are shown, and rooms whose tags or title have words
 dreamfeed never takes (the same rules as everywhere: teen, petite, schoolgirl and the like)
-are left out; searches for those words are refused. They play in the same player; follow them
-on Chaturbate (and they're here within the hour).
+are left out; searches for those words are refused. They play in the same player.
+
+**Follow and unfollow from here.** Follow on a Discover card or a profile (Following ✓ to
+unfollow) follows the room on Chaturbate itself, as you: the follow service sends it the way
+the site's own button does (your cookies' session, within seconds of the tap, one at a time),
+checks Chaturbate's answer and updates the list here at once. Only when you tap.
 
 **Discover, in the Feed:** X accounts you don't follow (you follow whoever your Following
 timeline shows): those linked from the rooms you follow, and those people you follow mention

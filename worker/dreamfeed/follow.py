@@ -14,7 +14,9 @@ cut (cbhighlights.py, one at a time, started within TICK seconds of being asked 
 trash emptied. It also reads a few rooms' bios each round (each once a day) for the X and
 Reddit accounts they link for free (cbprofile.py: one profile across sites), and fetches the
 previews asked for in Discover (followfeeds.preview), never alongside the feeds: both need the
-checks' models.
+checks' models. Follows and unfollows tapped in dreamfeed are sent to Chaturbate from here
+(signed in as you, one at a time, within TICK seconds), and the list here changes with them;
+so are Reddit saves (followfeeds.reddit_saves).
 
 These are real people: nothing here goes to training, styles, comics or generation. A room
 Chaturbate doesn't list as age verified is left out.
@@ -197,6 +199,13 @@ def main(argv: list[str]) -> None:
     next_look = 0.0
     while True:
         cutting = _highlights(conn, cutting)
+        try:
+            _cb_actions(conn)
+        except SignedOut as e:
+            print(f"follow: {e}", flush=True)
+        if conn.execute("SELECT 1 FROM save_actions WHERE status = 'queued' LIMIT 1").fetchone():
+            from .followfeeds import reddit_saves
+            reddit_saves(conn)
         if feeds is not None and feeds.poll() is not None:
             if feeds.returncode:
                 print(f"follow: reading the feeds failed (exit {feeds.returncode}), trying again next time", flush=True)
@@ -241,6 +250,41 @@ def main(argv: list[str]) -> None:
             import subprocess
             last_feeds = time.time()
             feeds = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "feeds"])
+
+
+def _cb_actions(conn) -> None:
+    """Follows and unfollows asked for in dreamfeed, sent to Chaturbate as the site's own
+    buttons send them (your session, its CSRF token), each checked against its answer."""
+    rows = conn.execute("SELECT id, room, action FROM cb_actions WHERE status = 'queued' ORDER BY id").fetchall()
+    if not rows:
+        return
+    opener = _opener()
+    jar = next(h.cookiejar for h in opener.handlers if hasattr(h, "cookiejar"))
+    token = next((c.value for c in jar if c.name == "csrftoken"), None)
+    for job, room, action in rows:
+        error = None
+        try:
+            if not token:
+                raise SignedOut("Chaturbate isn't signed in: export your cookies again")
+            req = urllib.request.Request(f"{SITE}/follow/{action}/{room}/", data=b"", method="POST", headers={
+                "User-Agent": AGENT, "Accept": "application/json", "X-CSRFToken": token,
+                "X-Requested-With": "XMLHttpRequest", "Referer": f"{SITE}/{room}/"})
+            with opener.open(req, timeout=30) as r:
+                answer = json.loads(r.read() or b"{}")
+            if answer.get("following") is not (action == "follow"):
+                raise ValueError(f"Chaturbate said {answer}"[:200])
+        except (OSError, ValueError, SignedOut) as e:
+            error = str(e)[:300]
+        with conn:
+            conn.execute("UPDATE cb_actions SET status = ?, error = ? WHERE id = ?", ("failed" if error else "done", error, job))
+            if not error and action == "follow":
+                conn.execute("INSERT INTO follows(source, name, seen_at) VALUES ('chaturbate', ?, ?)"
+                             " ON CONFLICT(source, name) DO NOTHING", (room, _now()))
+            elif not error:
+                conn.execute("DELETE FROM follows WHERE source = 'chaturbate' AND name = ?", (room,))
+                conn.execute("DELETE FROM live_times WHERE source = 'chaturbate' AND name = ?", (room,))
+        print(f"follow: {action} {room} on Chaturbate: {error or 'done'}", flush=True)
+        time.sleep(1)
 
 
 def _bios(conn) -> None:
