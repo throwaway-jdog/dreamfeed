@@ -187,6 +187,11 @@ services:
       HF_HUB_OFFLINE: "1"                     # the checks' models are already in ./models
       AGECHECK_URL: http://dreamfeed-agecheck:8080
       FOLLOW_THREADS: ${FOLLOW_THREADS:?set FOLLOW_THREADS in .env}   # CPU threads for the checks
+      # Your own Reddit app ("personal use script"), for galleries and Reddit's videos; empty:
+      # Reddit's public RSS feeds instead. REDDIT_USERNAME names you in its user agent.
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET-}
+      REDDIT_USERNAME: ${REDDIT_USERNAME-}
       TZ: ${TZ:?set TZ in .env}
     volumes:
       - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow

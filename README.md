@@ -353,9 +353,12 @@ done, and wait while a job, a nightly run or training is going. Posts are kept 1
 `data/generated/follow/media/`. All, X or Reddit picks which are shown; Open on X/Reddit goes
 to the post.
 
-From Reddit it takes the posts' own pictures (i.redd.it) and redgifs clips; galleries and
-Reddit's own videos can't be read from the RSS feed, so they're left out. Reddit gives readers
-without an account very few requests, so it makes one request every 11 seconds.
+From Reddit it takes pictures, galleries (up to 20 pictures), Reddit's own videos (with sound)
+and redgifs clips, through Reddit's API with your own app: a "personal use script" at
+reddit.com/prefs/apps, its id and secret in `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`
+(and your username in `REDDIT_USERNAME`, for its user agent). It reads as the app itself, with
+no account. Without the app it falls back to the subreddits' public RSS feeds: pictures and
+redgifs only (galleries and Reddit's videos aren't in them), and one request every 11 seconds.
 
 ### Live: Chaturbate
 

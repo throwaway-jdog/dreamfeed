@@ -3,11 +3,11 @@ follow feeds` (the follow service runs it every FEEDS_EVERY seconds, as a child 
 when done, so the checking models' memory is given back).
 
 1. New posts are downloaded: X with gallery-dl and your cookies (the Following timeline,
-   x.com/home); Reddit from the public RSS feeds of the subreddits and users on the
-   Dashboard (data/following.json; no account: Reddit's API needs an approved app), once a
-   day each, the top `top` posts of the last day, their pictures (i.redd.it) and redgifs
-   (gallery-dl); galleries and Reddit's own videos aren't in the RSS feed's link, so they're
-   left out. What's been read is remembered (gallery-dl's archive; reddit.seen).
+   x.com/home); Reddit for the subreddits and users on the Dashboard (data/following.json),
+   once a day each, the top `top` posts of the last day: through Reddit's API with your own
+   app (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET; app-only, no account), pictures, galleries,
+   Reddit's own videos and redgifs (gallery-dl); without the app, from their public RSS feeds,
+   pictures and redgifs only. What's been read is remembered (gallery-dl's archive; reddit.seen).
 2. Every file goes through the adults-only checks (checks.problem, strict), a video's
    VIDEO_FRAMES frames spread over it, and a face in a drawing gets the age estimate too. A
    post with any file that fails is deleted, all of it.
@@ -44,7 +44,11 @@ REDDIT_RSS = {"r": "https://www.reddit.com/r/{}/top/.rss?t=day&limit={}",
               "u": "https://www.reddit.com/user/{}/submitted/.rss?sort=top&t=day&limit={}"}
 REDDIT_EVERY = 24 * 3600   # each one is read once a day: its top posts of that day
 REDDIT_GAP = 11            # seconds between Reddit requests (unsigned readers get about one per 10 s)
-REDDIT_IMAGES = ("i.redd.it",)
+REDDIT_IMAGES = ("i.redd.it", "preview.redd.it")
+REDDIT_API = "https://oauth.reddit.com"
+API_GAP = 1                # seconds between API requests (it allows about 100 a minute)
+MAX_GALLERY = 20           # pictures kept from one gallery
+VIDEO_MAX_BYTES = 200 << 20
 REDDIT_LINKED = ("redgifs.com", "www.redgifs.com", "v3.redgifs.com")
 SEEN_KEEP = 5000
 ATOM = {"a": "http://www.w3.org/2005/Atom"}
@@ -101,21 +105,76 @@ def download(source: str, incoming: Path, archive: Path) -> str | None:
     return None
 
 
-def _fetch(url: str) -> bytes:
-    """Reddit, politely: one request at a time, REDDIT_GAP apart, once more after a 429."""
+def _fetch(url: str, headers: dict | None = None, gap: float | None = None) -> bytes:
+    """Reddit, politely: one request at a time, gap apart (REDDIT_GAP without the API), once
+    more after a 429."""
     import time
     import urllib.error
     import urllib.request
     for attempt in range(2):
-        time.sleep(REDDIT_GAP)
+        time.sleep(REDDIT_GAP if gap is None else gap)
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": REDDIT_AGENT}), timeout=60) as r:
+            req = urllib.request.Request(url, headers={"User-Agent": _agent(), **(headers or {})})
+            with urllib.request.urlopen(req, timeout=60) as r:
                 return r.read(200 << 20)
         except urllib.error.HTTPError as e:
             if e.code != 429 or attempt:
                 raise
             time.sleep(min(60, float(e.headers.get("x-ratelimit-reset") or 30)))
     raise OSError("rate limited")
+
+
+def _agent() -> str:
+    user = os.environ.get("REDDIT_USERNAME", "").strip()
+    return f"linux:dreamfeed:1.0 (by /u/{user})" if user else REDDIT_AGENT
+
+
+def _api_creds() -> tuple[str, str] | None:
+    """Your own Reddit app (a "personal use script"): REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET."""
+    cid, secret = (os.environ.get(k, "").strip() for k in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"))
+    return (cid, secret) if cid and secret else None
+
+
+def _api_token(creds: tuple[str, str]) -> str:
+    """An app-only token (the app reading public posts as itself; no account), good for an hour."""
+    import base64
+    import urllib.request
+    req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", data=b"grant_type=client_credentials",
+                                 headers={"User-Agent": _agent(),
+                                          "Authorization": "Basic " + base64.b64encode(":".join(creds).encode()).decode()})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        d = json.load(r)
+    if not d.get("access_token"):
+        raise OSError(f"Reddit refused the app: {d.get('error') or d}")
+    return d["access_token"]
+
+
+def _api_posts(listing: bytes) -> list[dict]:
+    """An API listing's posts, like _entries' but "media" is every picture and video of the post:
+    a gallery's pictures in order, Reddit's own video (its HLS stream, with sound), a redgifs
+    link or the post's picture. A crosspost's media are the original's."""
+    import datetime as dt
+    out = []
+    for child in json.loads(listing).get("data", {}).get("children", []):
+        p = child.get("data") or {}
+        src = (p.get("crosspost_parent_list") or [p])[0]
+        media = []
+        if src.get("is_gallery"):
+            meta = src.get("media_metadata") or {}
+            for item in (src.get("gallery_data") or {}).get("items", []):
+                m = meta.get(item.get("media_id")) or {}
+                big = m.get("s") or {}
+                if m.get("status") == "valid":
+                    media.append(big.get("mp4") or big.get("u") or big.get("gif") or "")
+        elif (src.get("secure_media") or {}).get("reddit_video"):
+            media.append(src["secure_media"]["reddit_video"].get("hls_url") or "")
+        elif src.get("url"):
+            media.append(src["url"])
+        when = dt.datetime.fromtimestamp(p.get("created_utc") or 0, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        out.append({"id": str(p.get("id") or ""), "title": p.get("title") or "", "author": p.get("author") or "",
+                    "subreddit": p.get("subreddit"), "date": when, "permalink": p.get("permalink") or "",
+                    "media": [u for u in media if u]})
+    return out
 
 
 def _entries(feed: bytes) -> list[dict]:
@@ -133,15 +192,15 @@ def _entries(feed: bytes) -> list[dict]:
         out.append({"id": e.findtext("a:id", "", ATOM).removeprefix("t3_"), "title": e.findtext("a:title", "", ATOM),
                     "author": e.findtext("a:author/a:name", "", ATOM).removeprefix("/u/"),
                     "subreddit": sub.group(1) if sub else None, "date": when,
-                    "permalink": link.removeprefix("https://www.reddit.com"), "media": media.group(1) if media else None})
+                    "permalink": link.removeprefix("https://www.reddit.com"), "media": [media.group(1)] if media else []})
     return out
 
 
 def _reddit(incoming: Path, seen_file: Path) -> str | None:
-    """Each subreddit and user due (not read in the last REDDIT_EVERY): its top posts of the day."""
+    """Each subreddit and user due (not read in the last REDDIT_EVERY): its top posts of the day,
+    through the API with your app if it's set (galleries and Reddit videos too), else RSS."""
     import re
     import time
-    import urllib.parse
     seen = seen_file.read_text().split() if seen_file.is_file() else []
     last_file = seen_file.with_suffix(".last")     # when each was last read
     try:
@@ -150,37 +209,58 @@ def _reddit(incoming: Path, seen_file: Path) -> str | None:
         last = {}
     known, errors, new = set(seen), [], []
     s = settings()
+    creds, token = _api_creds(), None
     for who in s["follow"]:
         if time.time() - last.get(who, 0) < REDDIT_EVERY:
             continue
         kind, _, name = who.partition("/")
         try:
-            posts = _entries(_fetch(REDDIT_RSS[kind].format(name, s["top"])))[:s["top"]]
+            if creds:
+                token = token or _api_token(creds)
+                path = (f"/r/{name}/top?t=day" if kind == "r" else f"/user/{name}/submitted?sort=top&t=day")
+                posts = _api_posts(_fetch(f"{REDDIT_API}{path}&limit={s['top']}&raw_json=1",
+                                          {"Authorization": f"bearer {token}"}, gap=API_GAP))
+            else:
+                posts = _entries(_fetch(REDDIT_RSS[kind].format(name, s["top"])))
         except (OSError, ValueError) as e:
             errors.append(f"{who}: {e}")
             continue
         last[who] = time.time()
-        for p in posts:
+        for p in posts[:s["top"]]:
             if not re.fullmatch(r"[a-z0-9]{3,12}", p["id"]) or p["id"] in known:
                 continue
             known.add(p["id"]); new.append(p["id"])
-            url = p.pop("media") or ""
-            host = urllib.parse.urlparse(url).hostname or ""
+            urls = p.pop("media")[:MAX_GALLERY]
             meta = json.dumps(p)
-            try:
-                if host in REDDIT_IMAGES:
-                    ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
-                    if ext in IMAGES | VIDEOS:
-                        dest = incoming / f"{p['id']}_1{ext}"
-                        dest.write_bytes(_fetch(url))
-                        dest.with_name(dest.name + ".json").write_text(meta)
-                elif host in REDDIT_LINKED:
-                    _redgifs(url, p["id"], incoming, meta)
-            except (OSError, subprocess.SubprocessError) as e:
-                print(f"follow: reddit post {p['id']}: {e}", flush=True)
+            for n, url in enumerate(urls, 1):
+                try:
+                    _reddit_file(url, f"{p['id']}_{n:02d}", incoming, meta, gap=API_GAP if creds else None)
+                except (OSError, subprocess.SubprocessError) as e:
+                    print(f"follow: reddit post {p['id']}: {e}", flush=True)
     seen_file.write_text("\n".join((seen + new)[-SEEN_KEEP:]))
     last_file.write_text(json.dumps({w: t for w, t in last.items() if w in s["follow"]}))
     return "; ".join(errors)[:200] if errors and not new else None
+
+
+def _reddit_file(url: str, stem: str, incoming: Path, meta: str, gap: float | None) -> None:
+    """One picture or video of a post into incoming as STEM.ext, with the post's details."""
+    import urllib.parse
+    u = urllib.parse.urlparse(url)
+    host, ext = u.hostname or "", Path(u.path).suffix.lower()
+    if "format=mp4" in u.query:                   # a gallery's animated item: a .gif address serving MP4
+        ext = ".mp4"
+    if host in REDDIT_IMAGES and ext in IMAGES | VIDEOS:
+        dest = incoming / f"{stem}{ext}"
+        dest.write_bytes(_fetch(url, gap=gap))
+    elif host == "v.redd.it" and u.path.endswith(".m3u8"):
+        dest = incoming / f"{stem}.mp4"           # Reddit's own video, picture and sound together
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-user_agent", _agent(), "-i", url, "-c", "copy",
+                        "-fs", str(VIDEO_MAX_BYTES), "-movflags", "+faststart", str(dest)], check=True, timeout=600)
+    elif host in REDDIT_LINKED:
+        return _redgifs(url, stem, incoming, meta)
+    else:
+        return
+    dest.with_name(dest.name + ".json").write_text(meta)
 
 
 def _redgifs(url: str, post_id: str, incoming: Path, meta: str) -> None:
