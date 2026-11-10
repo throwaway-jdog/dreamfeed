@@ -236,8 +236,12 @@ def dashboard() -> dict:
                 run = dict(r)
                 run["stats"] = json.loads(run["stats"]) if run["stats"] else {}
                 run["progress"] = json.loads(run["progress"]) if run["progress"] else None
-                job = conn.execute("SELECT message FROM jobs WHERE night = ? ORDER BY id DESC LIMIT 1", (r["night"],)).fetchone()
+                job = conn.execute("SELECT id, params, status, message FROM jobs WHERE night = ? ORDER BY id DESC LIMIT 1",
+                                   (r["night"],)).fetchone()
                 run["message"] = job["message"] if job else None   # why a job's run failed, what it made
+                if job and job["status"] == "failed" and json.loads(job["params"]).get("kind") in RETRYABLE \
+                        and not _retried(conn, job["id"], job["params"]):
+                    run["retry"] = job["id"]
                 out["runs"].append(run)
             out["jobs"] = [dict(r) | {"params": json.loads(r["params"])} for r in conn.execute(
                 "SELECT id, params, status, night, message, created_at FROM jobs"
@@ -306,6 +310,8 @@ def comics() -> dict:
         for r in conn.execute("SELECT id, params, message, finished_at FROM jobs WHERE status = 'failed'"
                               " AND params LIKE '%\"kind\": \"comic%' AND finished_at >= datetime('now', '-1 day')"
                               " ORDER BY id DESC LIMIT 10"):
+            if _retried(conn, r["id"], r["params"]):   # tried again since: that one shows instead
+                continue
             params = json.loads(r["params"])
             what = {"comic": "Making a comic", "comic_import": "Importing a comic",
                     "comic_animate": f"Animating a panel on page {params.get('page')}"}.get(params.get("kind"))
@@ -586,6 +592,29 @@ def request_animation(req: dict) -> dict:
                 raise ValueError("count must be between 1 and 50")
             params = {"kind": "animate", "count": count}
         jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(params),)).lastrowid
+    return {"job": jid}
+
+
+RETRYABLE = ("comic_animate", "comic_import", "comic", "animate", "scene")   # job kinds Try again can repeat
+
+
+def _retried(conn, job: int, params: str) -> bool:
+    """Whether the same request was queued again after job."""
+    return bool(conn.execute("SELECT 1 FROM jobs WHERE id > ? AND params = ? LIMIT 1", (job, params)).fetchone())
+
+
+def retry_job(req: dict) -> dict:
+    """{"job"}: a failed request queued again exactly as it was asked (a panel's outline too)."""
+    with db() as conn:
+        row = conn.execute("SELECT params, status FROM jobs WHERE id = ?", (int(req.get("job", 0)),)).fetchone()
+        if not row:
+            raise LookupError("no such request")
+        if row["status"] != "failed" or json.loads(row["params"]).get("kind") not in RETRYABLE:
+            raise ValueError("only a failed animation, scene or comic can be tried again")
+        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
+                        (row["params"],)).fetchone()[0]:
+            raise ValueError("it's already waiting to be tried again")
+        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (row["params"],)).lastrowid
     return {"job": jid}
 
 
@@ -1146,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
-        actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel,
+        actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel, "/api/retry": retry_job,
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
                    "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
                    "/api/comics/import": queue_comic_import, "/api/comics/rename": rename_comic,

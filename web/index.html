@@ -1278,6 +1278,7 @@ async function refreshComics() {
     const li = el("li"); li.style.padding = "10px 0";
     li.append(el("b", null, `${f.what}${f.title ? " · " + f.title : ""}`), el("div", "hint", f.message || "No reason given."),
               el("div", "hint", f.finished ? relTime(f.finished) : ""));
+    li.append(retryButton(f.job, () => refreshComics()));
     failed.append(li);
   }
   $("c-failed-panel").hidden = !(d.failed || []).length;
@@ -1596,6 +1597,14 @@ $("a-go").onclick = async () => {
   catch (e) { toast(e.message); }
   $("a-go").disabled = false; refreshDash();
 };
+function retryButton(job, after) {   // a failed request queued again exactly as asked
+  const b = el("button", "linkish retry", "Try again"); b.type = "button";
+  b.onclick = async () => {
+    b.disabled = true;
+    try { await api("api/retry", { job }); toast("Queued again."); after(); } catch (e) { toast(e.message); b.disabled = false; }
+  };
+  return b;
+}
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
 function renderLive(d) {
@@ -1652,6 +1661,7 @@ function renderRuns(d) {
     if (r.finished_at) parts.push("finished " + clock(r.finished_at));
     if (r.message && r.status !== "running") parts.push(r.message);   // a job's own message: why it failed, what it made
     li.append(el("span", "what", parts.join(" · ") || (r.status === "running" ? "in progress" : "")));
+    if (r.retry) li.append(retryButton(r.retry, () => refreshDash()));
     list.append(li);
   }
 }
