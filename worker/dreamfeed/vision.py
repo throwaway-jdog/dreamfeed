@@ -99,6 +99,6 @@ class Vision:
             general={self.tag_names[i]: float(scores[i]) for i in self.general_idx},
             rating=self.tag_names[self.rating_idx[np.argmax(scores[self.rating_idx])]],
             medium_probs={m: float(np.mean([d[m] for d in mediums])) for m in mediums[0]},
-            youth_prob=0,
+            youth_prob=max(self._zero_shot(e, "age")["youth"] for e in embs),
             embedding=F.normalize(torch.stack(embs).mean(0), dim=-1).cpu().numpy().astype(np.float16),
         )

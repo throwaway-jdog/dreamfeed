@@ -267,13 +267,12 @@ def _persona(p: dict, where: str, seen: set) -> Persona:
     text = " ".join([persona.look, persona.avatar, *persona.outfits, *persona.partners, *persona.girlfriends,
                      *(t for g in persona.must_show for t in g), *persona.settings, *persona.characters,
                      *(k.prompt for k in posts)])
-    # bad = safety.blocked(text)
-    # if bad:
-    #     raise Invalid(f"{where}: uses blocked tags: {', '.join(bad)}")
+    bad = safety.blocked(text)
+    if bad:
+        raise Invalid(f"{where}: uses blocked tags: {', '.join(bad)}")
     # Strict is automatic for feminine-man, androgynous, trans and tomboy looks; the file can
     # turn it on for anyone but never off.
-    # persona.strict = bool(p.get("strict")) or safety.needs_strict(text)
-    persona.strict = False
+    persona.strict = bool(p.get("strict")) or safety.needs_strict(text)
     lo = p.get("lora")
     if lo:
         if not isinstance(lo, dict) or not str(lo.get("file", "")).endswith(".safetensors"):
