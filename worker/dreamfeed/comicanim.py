@@ -3,6 +3,7 @@
     python -m dreamfeed comic-panels [--again]   panels and thumbnails for comics saved without them
     python -m dreamfeed comic-panels --outlines [--again] [--cpu]   the characters' outlines
                                    (--cpu: slow, but leaves the GPU to whatever else runs)
+    python -m dreamfeed comic-panels --smooth [--cpu]   clips made before smoothing, smoothed
 
 The reader's "Animate a panel" queues a job (kind "comic_animate") for one panel of one page:
 the panel is cut out of the page, Wan 2.2 animates it for about four seconds (moving as asked,
@@ -407,6 +408,33 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
     _job(conn, job_id, f"comicanim-{job_id}", work)
 
 
+def _smooth_old(path: Path, out_dir: Path, device: str) -> int:
+    """A comic's clips made before smoothing, smoothed (as new files: names are never reused);
+    how many."""
+    from .scene import _frames
+    from .smooth import fps_of, smoothed
+    meta = json.loads(path.read_text())
+    done = 0
+    for a in meta.get("animations") or []:
+        old = out_dir / a["file"]
+        if not old.is_file() or fps_of(old) > LOOP_FPS + 0.5:
+            continue
+        frames = smoothed(_frames(old), loop=True, device=device)
+        if frames is None:
+            continue
+        new = old.with_name(old.stem + "-smooth.mp4")
+        _write(frames, new, LOOP_FPS * 2)
+        fresh = json.loads(path.read_text())   # read again: clips may have been added meanwhile
+        for b in fresh.get("animations") or []:
+            if b["file"] == a["file"]:
+                b["file"] = str(new.relative_to(out_dir))
+        path.write_text(json.dumps(fresh, ensure_ascii=False, indent=1))
+        old.unlink(missing_ok=True)
+        done += 1
+    print(f"comic-panels: {path.parent.name}: {done} clips smoothed", flush=True)
+    return done
+
+
 def main(args: list[str]) -> None:
     """comic-panels: panels and thumbnails for the comics saved before they were kept."""
     import sqlite3
@@ -421,6 +449,9 @@ def main(args: list[str]) -> None:
             meta = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
+        if "--smooth" in args:
+            done += _smooth_old(path, out_dir, "cpu" if "--cpu" in args else "cuda")
+            continue
         if "--outlines" in args:
             if "outlines" in meta and "--again" not in args:
                 continue
@@ -434,5 +465,5 @@ def main(args: list[str]) -> None:
             meta = add_panels(meta, out_dir)
         path.write_text(json.dumps(meta, ensure_ascii=False, indent=1))
         done += 1
-    print(f"comic-panels: {done} comics")
+    print(f"comic-panels: {done} {'clips' if '--smooth' in args else 'comics'}")
     sys.exit(0)

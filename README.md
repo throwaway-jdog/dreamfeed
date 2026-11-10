@@ -318,7 +318,8 @@ when the comic is saved) are outlined to start with; **Undo**, **Clear**, **Draw
 and **Outline the characters** change that. The reader masks the clip to what moves (a PNG
 beside it). Works on comics made here and imported ones. `python -m dreamfeed comic-panels`
 finds the panels (and makes the thumbnails) of comics saved before they were kept;
-`comic-panels --outlines [--cpu]` outlines their characters (`--cpu`: slower, leaves the GPU alone).
+`comic-panels --outlines [--cpu]` outlines their characters (`--cpu`: slower, leaves the GPU alone);
+`comic-panels --smooth [--cpu]` smooths clips made before smoothing (as new files).
 
 ## Backup
 
