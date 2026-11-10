@@ -3,6 +3,7 @@ timm==1.0.30
 pillow==12.3.0
 # Downloads artists' images for style training. Sites change; bump when downloads fail.
 gallery-dl==1.32.19
+yt-dlp==2026.10.21     # Reddit's own videos (v.redd.it), through gallery-dl (the Following page)
 # Writes a fresh caption for every post (CAPTION_MODEL).
 transformers==4.57.1
 bitsandbytes==0.50.2   # 4-bit text models (STORY_MODEL)

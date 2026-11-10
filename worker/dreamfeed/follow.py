@@ -1,5 +1,8 @@
 """Who you follow on other sites, in one place: `python -m dreamfeed follow` (the follow service).
 
+Posts from X and Reddit: see followfeeds.py (`follow feeds`, run from here every FEEDS_EVERY
+seconds, but not while a job, a nightly run or training is going: its checks need a few GB).
+
 Every POLL seconds it asks Chaturbate which of the rooms you follow are live (signed in with
 your cookies, the CHATURBATE_COOKIES_FILE mount) and keeps, in feed.db:
 - follows: each room you follow, live or not, with what it's showing while live;
@@ -25,6 +28,8 @@ from pathlib import Path
 from .db import connect
 
 POLL = 120                   # seconds between looks
+FEEDS_EVERY = 900            # seconds between reading the X and Reddit feeds
+TRAINING_STALE = 8 * 3600    # as the worker's: a training lock older than this is left over
 EVERYONE = 3600              # seconds between listing every room followed (offline ones too)
 GAP = 600                    # live again within this many seconds: the same session
 PAGE = 90                    # rooms per request (the site's own page size)
@@ -137,7 +142,21 @@ def chaturbate(conn, thumbs: Path, everyone: bool) -> str:
     return f"{len(verified)} live" + (f", {hidden} not age verified (hidden)" if hidden else "")
 
 
+def busy(conn, data: Path) -> bool:
+    """A job, a nightly run or training is going (the feeds' checks wait for it)."""
+    try:
+        if time.time() - (data / "lora" / ".training").stat().st_mtime < TRAINING_STALE:
+            return True
+    except OSError:
+        pass
+    return bool(conn.execute("SELECT (SELECT count(*) FROM jobs WHERE status = 'running')"
+                             " + (SELECT count(*) FROM runs WHERE status = 'running')").fetchone()[0])
+
+
 def main(argv: list[str]) -> None:
+    if argv == ["feeds"]:
+        from .followfeeds import main as feeds
+        return feeds()
     data = os.environ.get("DATA_DIR", "").strip()
     if not data:
         sys.exit("follow: DATA_DIR is not set")
@@ -146,7 +165,8 @@ def main(argv: list[str]) -> None:
     folder = Path(data) / "generated" / "follow"
     folder.mkdir(parents=True, exist_ok=True)
     status = folder / "status.json"
-    last_everyone = 0.0
+    last_everyone = last_feeds = 0.0
+    feeds = None           # the feeds' child while it runs (the live rooms keep being looked at)
     print("follow: watching the rooms you follow on Chaturbate", flush=True)
     while True:
         everyone = time.time() - last_everyone >= EVERYONE
@@ -164,4 +184,15 @@ def main(argv: list[str]) -> None:
         tmp = status.with_suffix(".tmp")
         tmp.write_text(json.dumps(st))
         tmp.replace(status)
+        if feeds is not None and feeds.poll() is None and time.time() - last_feeds > 3600:
+            feeds.kill()
+            print("follow: reading the feeds took over an hour; stopped", flush=True)
+        if feeds is not None and feeds.poll() is not None:
+            if feeds.returncode:
+                print(f"follow: reading the feeds failed (exit {feeds.returncode}), trying again next time", flush=True)
+            feeds = None
+        if feeds is None and time.time() - last_feeds >= FEEDS_EVERY and not busy(conn, Path(data)):
+            import subprocess
+            last_feeds = time.time()
+            feeds = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "feeds"])
         time.sleep(POLL)

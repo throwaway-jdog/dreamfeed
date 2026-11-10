@@ -67,6 +67,20 @@ CREATE TABLE IF NOT EXISTS live_times (    -- each time a followed room was live
     end_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS live_times_name ON live_times(source, name, end_at);
+CREATE TABLE IF NOT EXISTS follow_posts (  -- posts from X and Reddit feeds that passed the checks
+    id          INTEGER PRIMARY KEY,
+    source      TEXT NOT NULL,               -- x | reddit
+    post_id     TEXT NOT NULL,               -- the post's id there
+    author      TEXT NOT NULL,
+    place       TEXT,                        -- the subreddit
+    text        TEXT,
+    link        TEXT,
+    posted_at   TEXT,                        -- UTC
+    media       TEXT NOT NULL,               -- JSON: [{"file", "kind", "poster"}], in data/generated/follow/media
+    added_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (source, post_id)
+);
+CREATE INDEX IF NOT EXISTS follow_posts_time ON follow_posts(posted_at);
 """
 
 

@@ -10,6 +10,8 @@ GET  /img/<id>          full image for the viewer
 GET  /api/dashboard     queue and recent runs
 GET  /api/following     the Chaturbate rooms you follow, live first (kept by the follow service)
 GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
+GET  /api/following/posts  ?source=all|x|reddit&offset=N  checked posts from your X and Reddit feeds, newest first
+GET  /follow/media/<source>/<post>/<file>  a post's picture, video or video poster
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
 POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
@@ -66,6 +68,8 @@ PAGE_SIZE = 30
 MEDIUMS = ("anime", "furry")
 HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 FOLLOW = GENERATED / "follow"
+FOLLOW_MEDIA = FOLLOW / "media"
+FEED_SOURCES = ("x", "reddit")
 LIVE_DAYS = 28         # live times this far back give a room's usual hours
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
 # Chaturbate's own player is the one thing from elsewhere a page may show (the Following page).
@@ -200,7 +204,31 @@ def following() -> dict:
     except sqlite3.OperationalError:    # the follow service hasn't started yet
         pass
     rooms.sort(key=lambda r: (not r["live"], -(r["info"].get("viewers") or 0) if r["live"] else -(r["last_live"] or 0)))
-    return {"rooms": rooms, "status": read_json(FOLLOW / "status.json")}
+    return {"rooms": rooms, "status": read_json(FOLLOW / "status.json"), "feeds": read_json(FOLLOW / "feeds.json")}
+
+
+def follow_posts(source: str, offset: int) -> dict:
+    if source not in ("all", *FEED_SOURCES):
+        raise ValueError("bad source")
+    where, args = ("", []) if source == "all" else ("WHERE source = ?", [source])
+    try:
+        with db() as conn:
+            rows = conn.execute(f"SELECT * FROM follow_posts {where} ORDER BY posted_at DESC, id DESC LIMIT ? OFFSET ?",
+                                [*args, PAGE_SIZE + 1, offset]).fetchall()
+    except sqlite3.OperationalError:    # the follow service hasn't started yet
+        rows = []
+    posts = [{"id": r["id"], "source": r["source"], "author": r["author"], "place": r["place"], "text": r["text"],
+              "link": r["link"], "posted_at": r["posted_at"],
+              "media": [{"kind": m["kind"], "url": "follow/media/" + m["file"],
+                         "poster": "follow/media/" + m["poster"] if m.get("poster") else None}
+                        for m in json.loads(r["media"])]} for r in rows[:PAGE_SIZE]]
+    return {"posts": posts, "more": len(rows) > PAGE_SIZE}
+
+
+def follow_media(rel: str) -> Path | None:
+    from urllib.parse import unquote
+    path = (FOLLOW_MEDIA / unquote(rel)).resolve()
+    return path if path.is_relative_to(FOLLOW_MEDIA.resolve()) and path.is_file() else None
 
 
 def _unix(utc: str) -> int:
@@ -1113,7 +1141,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_file(self, file: Path) -> None:
         """Images whole; videos also in byte ranges, which phones need to play them."""
-        ctype = {".png": "image/png", ".mp4": "video/mp4"}.get(file.suffix, "image/jpeg")
+        ctype = {".png": "image/png", ".mp4": "video/mp4", ".webp": "image/webp", ".webm": "video/webm",
+                 ".gif": "image/gif", ".mov": "video/mp4", ".m4v": "video/mp4"}.get(file.suffix.lower(), "image/jpeg")
         size = file.stat().st_size
         start, end = 0, size - 1
         rng = self.headers.get("Range", "")
@@ -1211,6 +1240,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, dashboard())
         if path == "/api/following":
             return self.send(200, following())
+        if path == "/api/following/posts":
+            q = self.query()
+            try:
+                return self.send(200, follow_posts(q.get("source", "all"), max(0, int(q.get("offset", "0")))))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+        if path.startswith("/follow/media/"):
+            file = follow_media(path[len("/follow/media/"):])
+            if not file:
+                return self.send(404, {"error": "not found"})
+            return self.send_file(file)
         if path.startswith("/follow/thumb/"):
             parts = path.split("/")
             file = follow_thumb(parts[3], parts[4]) if len(parts) == 5 else None

@@ -324,7 +324,26 @@ finds the panels (and makes the thumbnails) of comics saved before they were kep
 
 ## Following
 
-The **Following** page (Live on phones) shows the Chaturbate rooms you follow: who's live now,
+The **Following** page (Live on phones) has who you follow elsewhere in one place: the
+Chaturbate rooms you follow, and posts from your X Following timeline and your Reddit front
+page (the subreddits you're subscribed to).
+
+### Posts from X and Reddit
+
+Every 15 minutes the `follow` service reads both feeds with your cookies (`X_COOKIES_FILE`,
+the same export styles use, and `REDDIT_COOKIES_FILE`) and downloads the pictures, videos and
+GIFs of new posts (text-only posts and reposts are left out). **Every file goes through the
+adults-only checks before it shows**, strict, as for imported comics: a video's 4 frames spread
+over it, and the age estimate for faces in photos and in drawings close to photos. A post with
+any file that fails is deleted, all of it. The checks run on the CPU (`FOLLOW_THREADS`, about 3
+seconds a picture, up to about 5 GB of RAM: `FOLLOW_MEM_LIMIT`) in a child that exits when
+done, and wait while a job, a nightly run or training is going. Posts are kept 14 days in
+`data/generated/follow/media/`. All, X or Reddit picks which are shown; Open on X/Reddit goes
+to the post.
+
+### Chaturbate
+
+It shows the Chaturbate rooms you follow: who's live now,
 with their thumbnail, title and viewers, and the rest with when they were last live and the
 hours they're usually live (from 3 days of streams on, in your own time). Tapping a live room
 plays it in Chaturbate's own player; Open on Chaturbate goes to the room itself, to chat or tip

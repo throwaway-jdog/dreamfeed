@@ -4,7 +4,7 @@
 #   agecheck Age estimates for real people in images (CPU).
 #   comfyui  Image generation engine. Internal only; the worker drives it over its API.
 #   trainer  Style-LoRA training, on demand.
-#   follow   Which of the Chaturbate rooms you follow are live (CPU).
+#   follow   Who you follow on Chaturbate, X and Reddit: live rooms and checked posts (CPU).
 #   web      The timeline and dashboard (including the persona editor), behind formlogin,
 #            served through Caddy at /dreamfeed/.
 # The miner's gpu-yield already stops mining while comfyui or the worker use the GPU.
@@ -168,24 +168,39 @@ services:
       options: { max-size: 10m, max-file: "3" }
 
   # Who you follow on other sites (the Following page): which Chaturbate rooms you follow are
-  # live, every 2 minutes. The worker's image, CPU only; it never touches the GPU.
+  # live, every 2 minutes, and new posts from your X and Reddit feeds, every 15 minutes, each
+  # checked first (the adults-only checks, on the CPU, not while a job or training runs). The
+  # worker's image; it never touches the GPU.
   follow:
     image: dreamfeed-worker:local     # built by the worker service
     container_name: dreamfeed-follow
     restart: unless-stopped
     user: "${PUID}:${PGID}"
     command: ["python", "-m", "dreamfeed", "follow"]
-    mem_limit: 512m
-    memswap_limit: 512m
+    # RAM cap with no swap: the checks' models need about 5 GB while the feeds are read.
+    mem_limit: ${FOLLOW_MEM_LIMIT:?set FOLLOW_MEM_LIMIT in .env}
+    memswap_limit: ${FOLLOW_MEM_LIMIT}
     environment:
       DATA_DIR: /data
+      MODELS_DIR: /models
+      HF_HOME: /models/hf
+      HF_HUB_OFFLINE: "1"                     # the checks' models are already in ./models
+      AGECHECK_URL: http://dreamfeed-agecheck:8080
+      FOLLOW_THREADS: ${FOLLOW_THREADS:?set FOLLOW_THREADS in .env}   # CPU threads for the checks
       TZ: ${TZ:?set TZ in .env}
     volumes:
-      - ./data:/data                          # feed.db, thumbnails in data/generated/follow
+      - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow
+      - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora:ro   # only to see when training runs
+      - ./models:/models:ro
+      # X cookies (the same export the worker uses for styles), for your Following timeline.
+      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/x-cookies.txt:ro
+      # Reddit cookies (Netscape cookies.txt), for your front page (the subreddits you're in).
+      - ${REDDIT_COOKIES_FILE:?set REDDIT_COOKIES_FILE in .env}:/config/reddit-cookies.txt:ro
       # Your Chaturbate cookies (Netscape cookies.txt) for the rooms you follow. Read on each
       # look, so a fresh export copied over it (cp, not mv: a file moved in isn't seen until a
       # restart) needs no restart.
       - ${CHATURBATE_COOKIES_FILE:?set CHATURBATE_COOKIES_FILE in .env}:/config/chaturbate-cookies.txt:ro
+    depends_on: [agecheck]
     logging:
       options: { max-size: 10m, max-file: "3" }
 

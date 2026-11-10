@@ -273,6 +273,15 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row img, .off-row .ph { width: 56px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: var(--bg); filter: grayscale(1); opacity: .6; }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#f-source { grid-template-columns: repeat(3, 1fr); }
+.fposts { margin: 0 -16px; border-top: 1px solid var(--rule); }
+.fposts .note { padding: 12px 16px; }
+.fposts .post .av { background: var(--raise); color: var(--muted); font-size: 13px; }
+.fposts .post .where { color: var(--muted); font-size: 13px; }
+.fposts .post .media { aspect-ratio: auto; max-height: none; margin-bottom: 8px; }
+.fposts .post .media img, .fposts .post .media video { height: auto; max-height: 80vh; object-fit: contain; background: #000; }
+.fposts .post .out { color: var(--muted); font-size: 13px; display: inline-flex; min-height: 32px; align-items: center; margin-bottom: 4px; }
+.fposts .more { margin: 12px 16px; }
 .player { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
 .player[hidden] { display: none; }
 .player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
@@ -569,6 +578,13 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   </section>
   <section class="dash follow" id="follow" hidden aria-label="Following">
     <div class="panel"><h2>Live now</h2><p class="note" id="f-status"></p><div class="live-list" id="f-live"></div></div>
+    <div class="panel"><h2>Posts</h2>
+      <div class="seg" id="f-source" role="group" aria-label="From">
+        <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
+        <button type="button" data-s="reddit" aria-pressed="false">Reddit</button></div>
+      <p class="note" id="f-feeds"></p>
+      <div class="fposts" id="f-posts"></div>
+      <button type="button" class="secondary more" id="f-more" hidden>More</button></div>
     <div class="panel" id="f-off-panel" hidden><h2>Not live</h2><ul class="plist" id="f-off"></ul></div>
   </section>
   <div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="Live room">
@@ -1227,7 +1243,7 @@ function setView(v) {
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
   if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); }
   else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
-  else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
+  else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); loadPosts(true); }
   else reset();
 }
 $("menu-btn").onclick = e => {
@@ -1266,6 +1282,9 @@ async function refreshFollowing() {
   $("f-live").replaceChildren(...live.map(liveCard));
   $("f-off").replaceChildren(...off.map(offRow));
   $("f-off-panel").hidden = !off.length;
+  const feeds = d.feeds || {}, NAME = { x: "X", reddit: "Reddit" };
+  $("f-feeds").textContent = !feeds.at ? "X and Reddit are read every 15 minutes; their posts show here once they pass the checks."
+    : ["x", "reddit"].map(k => feeds[k] && feeds[k].error).filter(Boolean).join(" · ");
   if (state.view === "follow") follow.timer = setTimeout(refreshFollowing, 60000);
 }
 function liveCard(r) {
@@ -1310,6 +1329,48 @@ function usualHours(times) {
   if (!best) return "live at different times";
   const at = h => new Date(2000, 0, 1, h % 24).toLocaleTimeString([], { hour: "numeric" });
   return `usually live ${at(best.h)}–${at(best.h + best.n)}`;
+}
+const fp = { source: "all", offset: 0, more: false, loading: false, gen: 0 };
+document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
+  fp.source = b.dataset.s;
+  document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  loadPosts(true);
+});
+$("f-more").onclick = () => loadPosts(false);
+async function loadPosts(reset) {
+  if (reset) { fp.offset = 0; fp.gen++; $("f-posts").replaceChildren(); }
+  else if (fp.loading) return;
+  const gen = fp.gen; fp.loading = true; $("f-more").hidden = true;
+  try {
+    const d = await api(`api/following/posts?source=${fp.source}&offset=${fp.offset}`);
+    if (gen !== fp.gen) return;
+    $("f-posts").append(...d.posts.map(postCard));
+    fp.offset += d.posts.length; fp.more = d.more; $("f-more").hidden = !d.more;
+    if (!fp.offset) $("f-posts").append(el("p", "note", "No posts yet."));
+  } catch (err) { toast(err.message); }
+  finally { if (gen === fp.gen) fp.loading = false; }
+}
+function postCard(p) {
+  const a = el("article", "post"), body = el("div"), head = el("div", "head");
+  const av = el("span", "av sm", (p.author || "?").slice(0, 1).toUpperCase());
+  head.append(el("span", "name", p.author), el("span", "where", p.source === "reddit" ? `r/${p.place}` : "X"),
+              el("span", "time", "· " + relTime(p.posted_at)));
+  body.append(head);
+  if (p.text) body.append(el("p", "text", p.text));
+  for (const m of p.media) {
+    const box = el("div", "media");
+    if (m.kind === "video") {
+      const v = el("video"); v.controls = v.loop = v.muted = v.playsInline = true; v.preload = "none";
+      if (m.poster) v.poster = m.poster; v.src = m.url; box.append(v);
+    } else { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = m.url; box.append(img); }
+    body.append(box);
+  }
+  if (p.link) {
+    const out = el("a", "out", p.source === "reddit" ? "Open on Reddit" : "Open on X");
+    out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; body.append(out);
+  }
+  a.append(av, body);
+  return a;
 }
 function openRoom(r) {
   const i = r.info || {};
