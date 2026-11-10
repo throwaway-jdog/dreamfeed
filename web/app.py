@@ -8,6 +8,8 @@ GET  /api/summary       counts and the last run, for the header
 GET  /thumb/<id>        small JPEG for the grid
 GET  /img/<id>          full image for the viewer
 GET  /api/dashboard     queue and recent runs
+GET  /api/following     the Chaturbate rooms you follow, live first (kept by the follow service)
+GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
 POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
@@ -63,7 +65,12 @@ PORT = 8000
 PAGE_SIZE = 30
 MEDIUMS = ("anime", "furry")
 HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
+FOLLOW = GENERATED / "follow"
+LIVE_DAYS = 28         # live times this far back give a room's usual hours
+ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
+# Chaturbate's own player is the one thing from elsewhere a page may show (the Following page).
 CSP = ("default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "frame-src https://chaturbate.com; "
        "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -154,7 +161,7 @@ def avatar_path(handle: str) -> Path | None:
 
 
 def summary() -> dict:
-    out = {"unrated": 0, "liked": 0, "last_run": None}
+    out = {"unrated": 0, "liked": 0, "last_run": None, "live": 0}
     try:
         with db() as conn:
             out["unrated"] = conn.execute(
@@ -166,9 +173,47 @@ def summary() -> dict:
                                " ORDER BY started_at DESC LIMIT 1").fetchone()
             if run:
                 out["last_run"] = dict(run)
-    except sqlite3.OperationalError:
+            out["live"] = conn.execute("SELECT count(*) FROM follows WHERE live = 1").fetchone()[0]
+    except sqlite3.OperationalError:    # (follows: the follow service hasn't started yet)
         pass
     return out
+
+
+def following() -> dict:
+    """The rooms you follow, live ones first (most watched first), each with its live times of
+    the last LIVE_DAYS days as [start, end] Unix seconds (the page works out the usual hours in
+    your own time)."""
+    rooms, times = [], {}
+    try:
+        with db() as conn:
+            for r in conn.execute("SELECT source, name, start_at, end_at FROM live_times"
+                                  " WHERE end_at >= datetime('now', ?)", (f"-{LIVE_DAYS} days",)):
+                times.setdefault((r["source"], r["name"]), []).append([_unix(r["start_at"]), _unix(r["end_at"])])
+            for r in conn.execute("SELECT * FROM follows ORDER BY name"):
+                thumb = FOLLOW / r["source"] / f"{r['name']}.jpg"
+                rooms.append({"source": r["source"], "name": r["name"], "live": bool(r["live"]),
+                              "info": json.loads(r["info"]) if r["info"] else {},
+                              "last_live": _unix(r["last_live"]) if r["last_live"] else None,
+                              "thumb": f"follow/thumb/{r['source']}/{r['name']}.jpg?t={int(thumb.stat().st_mtime)}"
+                                       if thumb.is_file() else None,
+                              "times": times.get((r["source"], r["name"]), [])})
+    except sqlite3.OperationalError:    # the follow service hasn't started yet
+        pass
+    rooms.sort(key=lambda r: (not r["live"], -(r["info"].get("viewers") or 0) if r["live"] else -(r["last_live"] or 0)))
+    return {"rooms": rooms, "status": read_json(FOLLOW / "status.json")}
+
+
+def _unix(utc: str) -> int:
+    import calendar
+    return calendar.timegm(time.strptime(utc, "%Y-%m-%d %H:%M:%S"))
+
+
+def follow_thumb(source: str, file: str) -> Path | None:
+    name = file.removesuffix(".jpg")
+    if source != "chaturbate" or not file.endswith(".jpg") or not ROOM.match(name):
+        return None
+    path = FOLLOW / source / file
+    return path if path.is_file() else None
 
 
 def image_path(gid: int, thumb: bool) -> Path | None:
@@ -1164,6 +1209,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, summary())
         if path == "/api/dashboard":
             return self.send(200, dashboard())
+        if path == "/api/following":
+            return self.send(200, following())
+        if path.startswith("/follow/thumb/"):
+            parts = path.split("/")
+            file = follow_thumb(parts[3], parts[4]) if len(parts) == 5 else None
+            if not file:
+                return self.send(404, {"error": "no thumbnail"})
+            return self.send_file(file)   # its address changes with each new one (?t=)
         for prefix, thumb in (("/thumb/", True), ("/img/", False)):
             if path.startswith(prefix) and path[len(prefix):].isdigit():
                 file = image_path(int(path[len(prefix):]), thumb)

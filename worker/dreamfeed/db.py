@@ -51,6 +51,22 @@ CREATE TABLE IF NOT EXISTS feedback (
     liked_file    TEXT,                      -- copy in data/liked, kept when the feed expires
     at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS follows (       -- people you follow on other sites (the follow service)
+    source      TEXT NOT NULL,               -- chaturbate
+    name        TEXT NOT NULL,               -- their name there
+    live        INTEGER NOT NULL DEFAULT 0,
+    info        TEXT,                        -- JSON: what they're showing, from the last time live
+    last_live   TEXT,                        -- UTC
+    seen_at     TEXT,                        -- UTC, last listed as followed
+    PRIMARY KEY (source, name)
+);
+CREATE TABLE IF NOT EXISTS live_times (    -- each time a followed room was live, for its usual hours
+    source      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    start_at    TEXT NOT NULL,               -- UTC
+    end_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_times_name ON live_times(source, name, end_at);
 """
 
 

@@ -4,6 +4,7 @@
 #   agecheck Age estimates for real people in images (CPU).
 #   comfyui  Image generation engine. Internal only; the worker drives it over its API.
 #   trainer  Style-LoRA training, on demand.
+#   follow   Which of the Chaturbate rooms you follow are live (CPU).
 #   web      The timeline and dashboard (including the persona editor), behind formlogin,
 #            served through Caddy at /dreamfeed/.
 # The miner's gpu-yield already stops mining while comfyui or the worker use the GPU.
@@ -163,6 +164,28 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    logging:
+      options: { max-size: 10m, max-file: "3" }
+
+  # Who you follow on other sites (the Following page): which Chaturbate rooms you follow are
+  # live, every 2 minutes. The worker's image, CPU only; it never touches the GPU.
+  follow:
+    image: dreamfeed-worker:local     # built by the worker service
+    container_name: dreamfeed-follow
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    command: ["python", "-m", "dreamfeed", "follow"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      DATA_DIR: /data
+      TZ: ${TZ:?set TZ in .env}
+    volumes:
+      - ./data:/data                          # feed.db, thumbnails in data/generated/follow
+      # Your Chaturbate cookies (Netscape cookies.txt) for the rooms you follow. Read on each
+      # look, so a fresh export copied over it (cp, not mv: a file moved in isn't seen until a
+      # restart) needs no restart.
+      - ${CHATURBATE_COOKIES_FILE:?set CHATURBATE_COOKIES_FILE in .env}:/config/chaturbate-cookies.txt:ro
     logging:
       options: { max-size: 10m, max-file: "3" }
 

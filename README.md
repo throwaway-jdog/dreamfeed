@@ -270,7 +270,8 @@ dreamfeed/
              lora/NAME/                            (style training images, captions, the artist's
                                                     post texts (voice.json), progress; mounted
                                                     from LORA_DATA_DIR, which can be a slower disk)
-             generated/                            (tonight's output and the feed)
+             generated/                            (tonight's output and the feed; follow/:
+                                                    the Following page's thumbnails)
              liked/                                (images you liked, copied out)
   state/     login.json, session.key
   logs/
@@ -320,6 +321,24 @@ beside it). Works on comics made here and imported ones. `python -m dreamfeed co
 finds the panels (and makes the thumbnails) of comics saved before they were kept;
 `comic-panels --outlines [--cpu]` outlines their characters (`--cpu`: slower, leaves the GPU alone);
 `comic-panels --smooth [--cpu]` smooths clips made before smoothing (as new files).
+
+## Following
+
+The **Following** page (Live on phones) shows the Chaturbate rooms you follow: who's live now,
+with their thumbnail, title and viewers, and the rest with when they were last live and the
+hours they're usually live (from 3 days of streams on, in your own time). Tapping a live room
+plays it in Chaturbate's own player; Open on Chaturbate goes to the room itself, to chat or tip
+as you. The header shows how many are live.
+
+The `follow` service (the worker's image, CPU only) looks every 2 minutes, signed in with your
+cookies (`CHATURBATE_COOKIES_FILE`: export them from your browser as a Netscape cookies.txt and
+copy them over that file; it's read on each look). Follows and unfollows there show up here
+within the hour. If the cookies run out, the page says so.
+
+These are real people, so nothing from here goes into training, styles, comics or generation,
+and nothing of a stream is kept: only who you follow, when they were live and each one's last
+thumbnail (`data/generated/follow/`). A room Chaturbate doesn't list as age verified is left
+out.
 
 ## Backup
 

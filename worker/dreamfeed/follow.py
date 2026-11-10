@@ -1,0 +1,167 @@
+"""Who you follow on other sites, in one place: `python -m dreamfeed follow` (the follow service).
+
+Every POLL seconds it asks Chaturbate which of the rooms you follow are live (signed in with
+your cookies, the CHATURBATE_COOKIES_FILE mount) and keeps, in feed.db:
+- follows: each room you follow, live or not, with what it's showing while live;
+- live_times: when each one was live, for the "usually live" hours on the Following page.
+A live room's thumbnail is saved in data/generated/follow/ (left out of the backup). The
+Following page plays a room in Chaturbate's own player; nothing of the stream is kept.
+
+These are real people: nothing here goes to training, styles, comics or generation. A room
+Chaturbate doesn't list as age verified is left out.
+"""
+import datetime as dt
+import http.cookiejar
+import json
+import os
+import re
+import signal
+import sys
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+from .db import connect
+
+POLL = 120                   # seconds between looks
+EVERYONE = 3600              # seconds between listing every room followed (offline ones too)
+GAP = 600                    # live again within this many seconds: the same session
+PAGE = 90                    # rooms per request (the site's own page size)
+MAX_ROOMS = 2000
+SITE = "https://chaturbate.com"
+ROOMS = SITE + "/api/ts/roomlist/room-list/"
+THUMB_HOSTS = ("thumb.live.mmcdn.com",)
+NAME = re.compile(r"^[a-z0-9_]{1,64}$")
+COOKIES = Path("/config/chaturbate-cookies.txt")
+AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+
+
+class SignedOut(RuntimeError):
+    pass
+
+
+def _now() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _opener():
+    if not COOKIES.is_file():
+        raise SignedOut("no Chaturbate cookies: set CHATURBATE_COOKIES_FILE in .env")
+    jar = http.cookiejar.MozillaCookieJar(str(COOKIES))
+    jar.load(ignore_discard=True, ignore_expires=True)    # read each time: a fresh export needs no restart
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+def _get(opener, url: str, json_=True):
+    req = urllib.request.Request(url, headers={"User-Agent": AGENT, "Accept": "application/json" if json_ else "*/*",
+                                               "Referer": SITE + "/"})
+    with opener.open(req, timeout=30) as r:
+        data = r.read()
+    return json.loads(data) if json_ else data
+
+
+def followed(opener, offline: bool) -> list[dict]:
+    """The rooms you follow that are live (offline=False) or not live (offline=True)."""
+    rooms = []
+    while len(rooms) < MAX_ROOMS:
+        q = {"follow": "true", "limit": PAGE, "offset": len(rooms)}
+        if offline:
+            q["offline"] = "true"
+        page = _get(opener, ROOMS + "?" + urllib.parse.urlencode(q)).get("rooms") or []
+        # Signed out, the site ignores follow=true and lists everyone's rooms instead.
+        if any(not r.get("is_following") for r in page):
+            raise SignedOut("Chaturbate isn't signed in: export your cookies again")
+        rooms += page
+        if len(page) < PAGE:
+            break
+    return [r for r in rooms if NAME.match(str(r.get("username", "")))]
+
+
+def _info(r: dict) -> dict:
+    return {"title": re.sub(r"<[^>]+>", "", r.get("subject") or r.get("room_subject") or "")[:300],
+            "tags": [str(t)[:40] for t in (r.get("tags") or [])][:12], "viewers": int(r.get("num_users") or 0),
+            "age": r.get("display_age"), "gender": r.get("gender"), "show": r.get("current_show"),
+            "since": r.get("start_dt_utc")}
+
+
+def _thumb(opener, r: dict, folder: Path) -> None:
+    url = str(r.get("img") or "")
+    if urllib.parse.urlparse(url).hostname not in THUMB_HOSTS:
+        return
+    try:
+        data = _get(opener, url, json_=False)
+    except OSError:
+        return
+    if data[:3] == b"\xff\xd8\xff":    # a JPEG
+        folder.mkdir(parents=True, exist_ok=True)
+        tmp = folder / f".{r['username']}.jpg"
+        tmp.write_bytes(data)
+        tmp.replace(folder / f"{r['username']}.jpg")
+
+
+def chaturbate(conn, thumbs: Path, everyone: bool) -> str:
+    opener = _opener()
+    live = followed(opener, offline=False)
+    verified = [r for r in live if r.get("is_age_verified") and not (isinstance(r.get("display_age"), int) and r["display_age"] < 18)]
+    names = {r["username"] for r in verified}
+    now = _now()
+    with conn:
+        if everyone:
+            others = followed(opener, offline=True)
+            listed = names | {r["username"] for r in others}
+            for n in listed:
+                conn.execute("INSERT INTO follows(source, name, seen_at) VALUES ('chaturbate', ?, ?)"
+                             " ON CONFLICT(source, name) DO UPDATE SET seen_at = excluded.seen_at", (n, now))
+            # Unfollowed there: gone here too (their live times go with them).
+            gone = [n for (n,) in conn.execute("SELECT name FROM follows WHERE source = 'chaturbate'") if n not in listed]
+            for n in gone:
+                conn.execute("DELETE FROM follows WHERE source = 'chaturbate' AND name = ?", (n,))
+                conn.execute("DELETE FROM live_times WHERE source = 'chaturbate' AND name = ?", (n,))
+        conn.execute("UPDATE follows SET live = 0 WHERE source = 'chaturbate'")
+        for r in verified:
+            conn.execute("INSERT INTO follows(source, name, live, info, last_live, seen_at) VALUES ('chaturbate', ?, 1, ?, ?, ?)"
+                         " ON CONFLICT(source, name) DO UPDATE SET live = 1, info = excluded.info, last_live = excluded.last_live",
+                         (r["username"], json.dumps(_info(r)), now, now))
+            row = conn.execute("SELECT rowid FROM live_times WHERE source = 'chaturbate' AND name = ?"
+                               " AND end_at >= datetime(?, ?) ORDER BY end_at DESC LIMIT 1",
+                               (r["username"], now, f"-{GAP} seconds")).fetchone()
+            if row:
+                conn.execute("UPDATE live_times SET end_at = ? WHERE rowid = ?", (now, row[0]))
+            else:
+                conn.execute("INSERT INTO live_times(source, name, start_at, end_at) VALUES ('chaturbate', ?, ?, ?)",
+                             (r["username"], now, now))
+    for r in verified:
+        _thumb(opener, r, thumbs / "chaturbate")
+    hidden = len(live) - len(verified)
+    return f"{len(verified)} live" + (f", {hidden} not age verified (hidden)" if hidden else "")
+
+
+def main(argv: list[str]) -> None:
+    data = os.environ.get("DATA_DIR", "").strip()
+    if not data:
+        sys.exit("follow: DATA_DIR is not set")
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # PID 1 in its container
+    conn = connect(Path(data) / "feed.db")
+    folder = Path(data) / "generated" / "follow"
+    folder.mkdir(parents=True, exist_ok=True)
+    status = folder / "status.json"
+    last_everyone = 0.0
+    print("follow: watching the rooms you follow on Chaturbate", flush=True)
+    while True:
+        everyone = time.time() - last_everyone >= EVERYONE
+        st = {"at": _now(), "chaturbate": None, "error": None}
+        try:
+            st["chaturbate"] = chaturbate(conn, folder, everyone)
+            if everyone:
+                last_everyone = time.time()
+        except SignedOut as e:
+            st["error"] = str(e)
+        except (OSError, ValueError) as e:     # network, a site hiccup, a bad answer: next time
+            st["error"] = f"Chaturbate didn't answer ({e})"[:300]
+        if st["error"]:
+            print(f"follow: {st['error']}", flush=True)
+        tmp = status.with_suffix(".tmp")
+        tmp.write_text(json.dumps(st))
+        tmp.replace(status)
+        time.sleep(POLL)

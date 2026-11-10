@@ -25,6 +25,7 @@ python -m dreamfeed bootstrap PERSONA [--count N] [--keep N]
 python -m dreamfeed speech NAME
                               A trained style's character voice, from its speech bubbles.
 python -m dreamfeed report    Per-persona posts, likes and drops, and recent runs.
+python -m dreamfeed follow    Who you follow on Chaturbate, live or not (the follow service).
 """
 import argparse
 import datetime as dt
@@ -109,6 +110,9 @@ def main() -> None:
     elif cmd == "scene-render":
         from .scene import render_preview
         render_preview(rest)
+    elif cmd == "follow":
+        from .follow import main as follow
+        follow(rest)
     elif cmd == "report":
         from .report import main as report
         report(rest)
