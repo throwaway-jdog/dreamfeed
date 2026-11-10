@@ -178,7 +178,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .viewer .heart { position: absolute; z-index: 3; color: #fff; opacity: 0; pointer-events: none; transform: scale(.6); transition: opacity .25s, transform .25s; }
 .viewer .heart svg { width: 96px; height: 96px; }
 .viewer .heart.show { opacity: .95; transform: scale(1); }
-.toast { position: fixed; z-index: 20; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+.toast { position: fixed; z-index: 40; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
   background: var(--raise); color: var(--fg); border: 1px solid var(--rule); padding: 10px 16px; border-radius: 999px;
   font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); max-width: calc(100vw - 32px); }
 .toast-act { margin-left: 10px; background: none; border: 0; padding: 4px 2px; color: var(--accent, var(--fg));
@@ -302,6 +302,13 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .pf-vid .len { position: absolute; right: 6px; bottom: 6px; background: rgb(0 0 0 / .7); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
 .pf-vid b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-vid small { color: var(--muted); font-size: 12px; }
+.pf-item { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.pf-vid .hl { position: absolute; left: 6px; top: 6px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+  padding: 2px 7px; border-radius: 999px; letter-spacing: .04em; }
+.pf-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pf-acts .secondary { width: auto; min-height: 36px; padding: 0 12px; font-size: 13px; }
+.pf-acts small { color: var(--muted); font-size: 12px; flex-basis: 100%; }
+.pf-acts small.err { color: var(--accent); }
 .player { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
 .player[hidden] { display: none; }
 .player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
@@ -1558,7 +1565,7 @@ function vidSize(b) { return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.m
 function vidDate(f) { return new Date(f.mtime * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); }
 
 /* A room's profile: when they're on, and your own videos of them. */
-const pf = { room: null, videos: [], gen: 0 };
+const pf = { room: null, videos: [], gen: 0, timer: null };
 async function openProfile(r) {
   const gen = ++pf.gen;
   pf.room = r; pf.videos = [];
@@ -1573,19 +1580,71 @@ async function openProfile(r) {
   let d;
   try { d = await api(`api/live/videos?name=${encodeURIComponent(r.name)}`); } catch (err) { if (gen === pf.gen) $("pf-info").textContent = `${about} · ${err.message}`; return; }
   if (gen !== pf.gen) return;
-  pf.videos = d.videos;
-  $("pf-info").textContent = `${about} · ${d.videos.length} video${d.videos.length === 1 ? "" : "s"}`;
-  $("pf-grid").replaceChildren(...d.videos.map((f, i) => {
-    const b = el("button", "pf-vid"), shot = el("span", "shot"); b.type = "button";
+  pf.videos = d.videos; pf.about = about;
+  renderProfile(gen);
+}
+function renderProfile(gen) {
+  clearTimeout(pf.timer);
+  $("pf-info").textContent = `${pf.about} · ${pf.videos.length} video${pf.videos.length === 1 ? "" : "s"}`;
+  $("pf-grid").replaceChildren(...pf.videos.map((f, i) => {
+    const item = el("div", "pf-item"), b = el("button", "pf-vid"), shot = el("span", "shot"); b.type = "button";
     if (f.poster) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = f.poster; shot.append(img); }
     else shot.append(el("span", "ph"));
+    if (f.highlight) shot.append(el("span", "hl", "HIGHLIGHTS"));
     if (f.duration) shot.append(el("span", "len", vidLength(f.duration)));
-    b.append(shot, el("b", null, f.title), el("small", null, `${vidDate(f)} · ${vidSize(f.size)}`));
+    const about = f.highlight && f.duration && f.of ? `${vidLength(f.duration)} of ${vidLength(f.of)}` : vidDate(f);
+    b.append(shot, el("b", null, f.title), el("small", null, `${about} · ${vidSize(f.size)}`));
     b.onclick = () => { pl.mode = "file"; pl.rooms = pf.videos.slice(); pl.i = i; $("player").hidden = false; playFile(); };
-    return b;
+    item.append(b, videoActions(f));
+    return item;
   }));
+  const working = pf.videos.some(f => f.job && ["queued", "running"].includes(f.job.status));
+  if (working) pf.timer = setTimeout(() => reloadProfile(gen), 5000);
 }
-function closeProfile() { pf.gen++; $("profile").hidden = true; }
+async function reloadProfile(gen) {
+  if (gen !== pf.gen || $("profile").hidden) return;
+  try { const d = await api(`api/live/videos?name=${encodeURIComponent(pf.room.name)}`); if (gen !== pf.gen) return; pf.videos = d.videos; }
+  catch { /* next time */ }
+  renderProfile(gen);
+}
+// Under each video: Highlights (cut it down to the action: how much to keep) and Delete.
+const KEEP = [["Short", 0.1], ["Medium", 0.25], ["Long", 0.5]];
+const HL_PHASE = { motion: "looking for motion", sound: "listening", cutting: "cutting" };
+function videoActions(f) {
+  const acts = el("div", "pf-acts"), job = f.job || {};
+  const btn = (label, fn) => { const b = el("button", "secondary", label); b.type = "button"; b.onclick = fn; return b; };
+  const del = btn("Delete", () => deleteVideo(f));
+  if (f.highlight) { acts.append(del); return acts; }
+  if (job.status === "queued") acts.append(el("small", null, "Highlights: waiting their turn…"));
+  else if (job.status === "running") acts.append(el("small", null, `Highlights: ${HL_PHASE[job.phase] || "starting"}${job.pct != null ? ` ${job.pct}%` : ""}…`));
+  else {
+    if (job.status === "failed") acts.append(el("small", "err", `Highlights failed: ${job.error || "?"}`));
+    const hl = btn(f.has_highlight ? "Redo highlights" : "Highlights", () => {
+      acts.replaceChildren(el("small", null, "Keep about:"),
+        ...KEEP.map(([label, keep]) => btn(`${label} (${Math.round(keep * 100)}%)`, () => requestHighlights(f, keep))),
+        btn("Cancel", () => acts.replaceWith(videoActions(f))));
+    });
+    acts.append(hl);
+  }
+  acts.append(del);
+  return acts;
+}
+async function requestHighlights(f, keep) {
+  try { await api("api/live/highlights", { name: pf.room.name, path: f.path, keep }); }
+  catch (err) { toast(err.message); }
+  reloadProfile(pf.gen);
+}
+async function deleteVideo(f) {
+  if (!confirm(`Delete "${f.title}"${f.highlight ? " (highlights)" : ""}? It stays in the trash for a week.`)) return;
+  let d;
+  try { d = await api("api/live/delete", { name: pf.room.name, path: f.path }); } catch (err) { return toast(err.message); }
+  pf.videos = pf.videos.filter(v => v !== f); renderProfile(pf.gen); refreshFollowing();
+  toast("Deleted.", "Undo", async () => {
+    try { await api("api/live/restore", { undo: d.undo }); } catch (err) { return toast(err.message); }
+    reloadProfile(pf.gen); refreshFollowing();
+  });
+}
+function closeProfile() { pf.gen++; clearTimeout(pf.timer); $("profile").hidden = true; }
 $("pf-close").onclick = closeProfile;
 $("pf-live").onclick = () => openRoom(pf.room);
 function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }

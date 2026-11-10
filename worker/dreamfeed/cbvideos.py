@@ -2,7 +2,10 @@
 mounted read-only; CB_VIDEOS_DIR in .env): each room's under a folder named after it
 (<folder>/<room>/..., subfolders too), or loose in the folder with a name starting with the
 room's ("<room>_2026-11-10.mp4"; the longest room name that fits wins). The Live tab lists
-them on the room's profile and plays them; dreamfeed never writes there.
+them on the room's profile and plays them. dreamfeed writes there only when you ask it to:
+- highlights (cbhighlights.py) go in the room's folder, under highlights/ (made if needed);
+- a video you delete is moved to .trash/ there first (Undo puts it back) and is gone for good
+  after TRASH_DAYS (the follow service empties it).
 
 The follow service makes each one a poster (a frame from 10% in) and reads its length, kept in
 data/generated/follow/videos/ (left out of the backup) and redone when a file changes.
@@ -19,6 +22,9 @@ from pathlib import Path
 EXTS = (".mp4", ".m4v", ".mov", ".webm", ".mkv")
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
 MAX_POSTERS = 30          # made per round of the follow service (the rest next time)
+HIGHLIGHTS = ".highlights.mp4"
+TRASH = ".trash"
+TRASH_DAYS = 7
 
 
 def root() -> Path | None:
@@ -136,3 +142,76 @@ def make_posters(data: Path, rooms) -> str:
     tmp.replace(index_file)
     total = len(want)
     return f"{total} video{'s' if total != 1 else ''}" if total else ""
+
+
+def is_highlight(rel: str) -> bool:
+    return rel.lower().endswith(HIGHLIGHTS)
+
+
+def room_folder(room: str) -> Path:
+    """The room's folder (an existing one in any case, else <room>, made when written to)."""
+    base = root()
+    for entry in base.iterdir():
+        if entry.is_dir() and entry.name.lower() == room:
+            return entry
+    return base / room
+
+
+def highlight_of(rel: str, room: str) -> str:
+    """Where the highlights of the video at rel go (relative to the folder)."""
+    stem = Path(rel).stem
+    tag = hashlib.sha1(rel.encode()).hexdigest()[:6]
+    return (room_folder(room) / "highlights" / f"{stem} [{tag}]{HIGHLIGHTS}").relative_to(root()).as_posix()
+
+
+def trash(path: Path) -> str:
+    """Moves a video (and nothing else) to the trash; returns the token that puts it back."""
+    import time
+    base = root()
+    rel = path.relative_to(base).as_posix()
+    token = time.strftime("%Y%m%d-%H%M%S") + "-" + hashlib.sha1(rel.encode()).hexdigest()[:8]
+    dest = base / TRASH / token / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    path.rename(dest)
+    return token
+
+
+def restore(token: str) -> str:
+    """Puts a deleted video back where it was; returns its path."""
+    if not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}", token):
+        raise ValueError("bad token")
+    base = root()
+    folder = base / TRASH / token
+    files = [p for p in folder.rglob("*") if p.is_file()] if folder.is_dir() else []
+    if len(files) != 1:
+        raise LookupError("that video is gone from the trash")
+    rel = files[0].relative_to(folder)
+    dest = base / rel
+    if dest.exists():
+        raise LookupError("a video is already there")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    files[0].rename(dest)
+    for d in sorted((p for p in folder.rglob("*") if p.is_dir()), reverse=True):
+        d.rmdir()
+    folder.rmdir()
+    return rel.as_posix()
+
+
+def empty_trash() -> int:
+    """Deletes what's been in the trash over TRASH_DAYS; returns how many videos."""
+    import shutil
+    import time
+    base = root()
+    folder = base / TRASH if base else None
+    if not folder or not folder.is_dir():
+        return 0
+    gone = 0
+    for d in folder.iterdir():
+        try:
+            at = time.mktime(time.strptime(d.name[:15], "%Y%m%d-%H%M%S"))
+        except ValueError:
+            continue
+        if d.is_dir() and time.time() - at > TRASH_DAYS * 86400:
+            gone += sum(1 for p in d.rglob("*") if p.is_file())
+            shutil.rmtree(d)
+    return gone

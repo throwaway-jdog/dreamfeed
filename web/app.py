@@ -35,6 +35,9 @@ POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
 POST /api/comics/update {"id": N} look for new pages of an imported comic now
+POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of a room's videos down to its action
+POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
+POST /api/live/restore  {"undo": token} put it back
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
                         {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
 (POSTs are JSON only.)
@@ -325,23 +328,87 @@ def _followed() -> list[str]:
 
 
 def live_videos(name: str) -> dict:
-    """A followed room's videos from your own folder, each with its poster and length (made by
-    the follow service; until then none)."""
+    """A followed room's videos from your own folder, newest first, each with its poster and
+    length (made by the follow service; until then none). Highlights come just before the video
+    they're cut from, and each video has its latest highlights request (job)."""
     if not ROOM.match(name):
         raise ValueError("bad room")
     rooms = _followed()
     if name not in rooms:
         raise LookupError("you don't follow that room")
     index = read_json(cbvideos.posters(DATA) / "index.json") or {}
-    out = []
+    with db() as conn:
+        jobs = {}
+        for r in conn.execute("SELECT path, status, progress, error FROM highlights WHERE room = ? ORDER BY id", (name,)):
+            jobs[r["path"]] = {"status": r["status"], "error": r["error"],
+                               **(json.loads(r["progress"]) if r["progress"] else {})}
+    items = {}
     for v in cbvideos.scan(rooms).get(name, []):
-        k = cbvideos.key(v)
-        made = index.get(k) or {}
-        out.append({"title": Path(v["path"]).stem.replace("_", " "), "size": v["size"], "mtime": v["mtime"],
-                    "url": f"cb-videos/{name}/" + urllib.parse.quote(v["path"]),
-                    "duration": made.get("duration") or None,
-                    "poster": f"cb-videos/poster/{k}.jpg" if made.get("poster") else None})
-    return {"videos": out, "folder": cbvideos.root() is not None}
+        made = index.get(cbvideos.key(v)) or {}
+        high = cbvideos.is_highlight(v["path"])
+        title = Path(v["path"]).stem
+        if high:
+            title = re.sub(r" \[[0-9a-f]{6}\]\.highlights$", "", title, flags=re.I)
+        items[v["path"]] = {"path": v["path"], "title": title.replace("_", " "), "size": v["size"], "mtime": v["mtime"],
+                            "url": f"cb-videos/{name}/" + urllib.parse.quote(v["path"]),
+                            "duration": made.get("duration") or None, "highlight": high,
+                            "poster": f"cb-videos/poster/{cbvideos.key(v)}.jpg" if made.get("poster") else None}
+    groups = []
+    paired = set()
+    for v in items.values():
+        if v["highlight"]:
+            continue
+        group = [v]
+        h = items.get(cbvideos.highlight_of(v["path"], name))
+        if h:
+            h["of"] = v["duration"]
+            group.insert(0, h)
+            paired.add(h["path"])
+        v["has_highlight"] = bool(h)
+        v["job"] = jobs.get(v["path"])
+        groups.append((v["mtime"], group))
+    groups += [(v["mtime"], [v]) for v in items.values() if v["highlight"] and v["path"] not in paired]
+    groups.sort(key=lambda g: -g[0])
+    return {"videos": [v for _, g in groups for v in g], "folder": cbvideos.root() is not None}
+
+
+def _room_video(req: dict) -> tuple[str, str, Path]:
+    name, rel = str(req.get("name", "")), str(req.get("path", ""))
+    if not ROOM.match(name):
+        raise ValueError("bad room")
+    file = cbvideos.file(name, rel, _followed())
+    if not file:
+        raise LookupError("that video isn't there")
+    return name, rel, file
+
+
+def queue_highlights(req: dict) -> dict:
+    """{"name", "path", "keep": 0.1-0.5}: cut the video's highlights (the follow service)."""
+    name, rel, _ = _room_video(req)
+    keep = float(req.get("keep", 0.25))
+    if not 0.05 <= keep <= 0.5:
+        raise ValueError("keep is 0.05 to 0.5")
+    if cbvideos.is_highlight(rel):
+        raise ValueError("that's already highlights")
+    with db() as conn:
+        if conn.execute("SELECT 1 FROM highlights WHERE path = ? AND status IN ('queued', 'running')", (rel,)).fetchone():
+            raise ValueError("already being cut")
+        conn.execute("INSERT INTO highlights(room, path, keep) VALUES (?, ?, ?)", (name, rel, keep))
+    return {"ok": True}
+
+
+def delete_room_video(req: dict) -> dict:
+    """{"name", "path"}: into the trash (gone after a week); returns the token for Undo."""
+    name, rel, file = _room_video(req)
+    with db() as conn:
+        conn.execute("DELETE FROM highlights WHERE path = ? AND status = 'queued'", (rel,))
+        if conn.execute("SELECT 1 FROM highlights WHERE path = ? AND status = 'running'", (rel,)).fetchone():
+            raise ValueError("its highlights are being cut: wait for them")
+    return {"undo": cbvideos.trash(file)}
+
+
+def restore_room_video(req: dict) -> dict:
+    return {"path": cbvideos.restore(str(req.get("undo", "")))}
 
 
 FOLLOWING = DATA / "following.json"     # read by the follow service on each round
@@ -1544,7 +1611,9 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
                    "/api/styles/video": queue_video, "/api/styles/video-cancel": cancel_video,
-                   "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings}
+                   "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings,
+                   "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
+                   "/api/live/restore": restore_room_video}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

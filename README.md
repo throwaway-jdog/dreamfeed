@@ -405,8 +405,8 @@ thumbnail (`data/generated/follow/`). A room Chaturbate doesn't list as age veri
 out.
 
 **Your own videos of them.** Videos you have of the rooms you follow go in the folder
-`CB_VIDEOS_DIR` (mounted read-only into the web and follow services; dreamfeed never writes
-there): a folder per room, named after it (`<room>/...`, subfolders too), or loose files whose
+`CB_VIDEOS_DIR` (mounted into the web and follow services; dreamfeed writes there only for
+highlights and deletes, below): a folder per room, named after it (`<room>/...`, subfolders too), or loose files whose
 names start with the room's (`<room>_2026-11-10.mp4`; the longest room name that fits wins).
 MP4, M4V, MOV, WebM and MKV are listed; MP4 plays in every browser. A room with videos says how
 many: tap that (or the room, in Not live) for its profile, with the videos newest first, each
@@ -415,6 +415,22 @@ The follow service makes the posters (ffmpeg, a frame from 10% in) on each look,
 time, in `data/generated/follow/videos/`, and drops them when the videos go. Only rooms you
 follow are shown; nothing from the folder goes to training, styles, comics or generation, and
 it isn't in dreamfeed's backup (back it up where it lives).
+
+Under each video:
+- **Highlights** cuts it down to where something's happening. Pick how much to keep: Short
+  (about 10%), Medium (25%) or Long (50%). The follow service looks through it twice, at two
+  looks a second: for motion (how much each small grey frame differs from the last) and for
+  sound (how loud). Motion counts three times as much as sound, since chatting is loud but
+  still. Each moment is ranked against the rest of the same video and smoothed over about
+  5 seconds, and the best share is kept, in stretches with a second either side. Gaps under
+  3 seconds are filled and stretches under 4 seconds dropped. It's then encoded as one MP4 in
+  the room's folder, `<room>/highlights/<name> [tag].highlights.mp4`, next to the original
+  (which isn't changed). It's CPU only, at low priority, one at a time; the profile shows how
+  far along it is, and the highlights show up just before their video. A 1-hour 1080p video
+  takes some minutes (it's decoded in full twice, and the kept part encoded once).
+- **Delete** moves the video to `.trash/` in that folder, with an Undo. The follow service
+  deletes what's been there over a week. Highlights are videos of their own, so deleting one
+  leaves the other.
 
 ## Backup
 

@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS live_times (    -- each time a followed room was live
     end_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS live_times_name ON live_times(source, name, end_at);
+CREATE TABLE IF NOT EXISTS highlights (       -- highlight cuts of your own room videos (cbhighlights)
+    id          INTEGER PRIMARY KEY,
+    room        TEXT NOT NULL,
+    path        TEXT NOT NULL,               -- the video, relative to CB_VIDEOS
+    keep        REAL NOT NULL,               -- about how much of it to keep (0.1 to 0.5)
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | failed
+    progress    TEXT,                        -- JSON {"phase", "pct"}
+    error       TEXT,
+    result      TEXT,                        -- the highlights' path, when done
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS follow_posts (  -- posts from X and Reddit feeds that passed the checks
     id          INTEGER PRIMARY KEY,
     source      TEXT NOT NULL,               -- x | reddit

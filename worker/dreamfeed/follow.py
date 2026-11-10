@@ -9,7 +9,9 @@ your cookies, the CHATURBATE_COOKIES_FILE mount) and keeps, in feed.db:
 - live_times: when each one was live, for the "usually live" hours on the Following page.
 A live room's thumbnail is saved in data/generated/follow/ (left out of the backup). The
 Live tab plays a room in dreamfeed's own player; nothing of the stream is kept. Your own videos
-of the rooms (CB_VIDEOS, see cbvideos.py) get their posters made here too.
+of the rooms (CB_VIDEOS, see cbvideos.py) get their posters made here too, their highlights
+cut (cbhighlights.py, one at a time, started within TICK seconds of being asked for) and the
+trash emptied.
 
 These are real people: nothing here goes to training, styles, comics or generation. A room
 Chaturbate doesn't list as age verified is left out.
@@ -30,6 +32,8 @@ from . import cbvideos
 from .db import connect
 
 POLL = 120                   # seconds between looks
+TICK = 5                     # seconds between checks for highlight requests
+HIGHLIGHT_LIMIT = 6 * 3600   # a cut taking longer than this is stopped
 FEEDS_EVERY = 900            # seconds between reading the X and Reddit feeds
 TRAINING_STALE = 8 * 3600    # as the worker's: a training lock older than this is left over
 EVERYONE = 3600              # seconds between listing every room followed (offline ones too)
@@ -159,6 +163,9 @@ def main(argv: list[str]) -> None:
     if argv == ["feeds"]:
         from .followfeeds import main as feeds
         return feeds()
+    if argv[:1] == ["highlight"] and len(argv) == 2:
+        from .cbhighlights import run
+        return run(int(argv[1]))
     if argv[:1] == ["reddit-login"]:
         from .followfeeds import login
         return login(argv[1:])
@@ -172,8 +179,17 @@ def main(argv: list[str]) -> None:
     status = folder / "status.json"
     last_everyone = last_feeds = 0.0
     feeds = None           # the feeds' child while it runs (the live rooms keep being looked at)
+    cutting = None         # the highlights' child: (process, job, started)
+    with conn:             # cut off by a restart: again from the start
+        conn.execute("UPDATE highlights SET status = 'queued', progress = NULL WHERE status = 'running'")
     print("follow: watching the rooms you follow on Chaturbate", flush=True)
+    next_look = 0.0
     while True:
+        cutting = _highlights(conn, cutting)
+        if time.time() < next_look:
+            time.sleep(TICK)
+            continue
+        next_look = time.time() + POLL
         everyone = time.time() - last_everyone >= EVERYONE
         st = {"at": _now(), "chaturbate": None, "error": None}
         try:
@@ -187,6 +203,10 @@ def main(argv: list[str]) -> None:
         try:
             names = [n for (n,) in conn.execute("SELECT name FROM follows WHERE source = 'chaturbate'")]
             st["videos"] = cbvideos.make_posters(Path(data), names)
+            if everyone:
+                gone = cbvideos.empty_trash()
+                if gone:
+                    print(f"follow: emptied the videos' trash ({gone} over {cbvideos.TRASH_DAYS} days old)", flush=True)
         except OSError as e:
             print(f"follow: couldn't read the videos folder ({e})", flush=True)
         if st["error"]:
@@ -205,4 +225,25 @@ def main(argv: list[str]) -> None:
             import subprocess
             last_feeds = time.time()
             feeds = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "feeds"])
-        time.sleep(POLL)
+
+
+def _highlights(conn, cutting):
+    """Starts the next highlights request when none is being cut; notices when one ends."""
+    import subprocess
+    if cutting:
+        proc, job, started = cutting
+        if proc.poll() is None:
+            if time.time() - started < HIGHLIGHT_LIMIT:
+                return cutting
+            os.killpg(proc.pid, signal.SIGKILL)     # its ffmpeg too
+            proc.wait()
+        with conn:     # it died without saying why
+            conn.execute("UPDATE highlights SET status = 'failed', progress = NULL,"
+                         " error = coalesce(error, 'stopped (took too long or crashed)') WHERE id = ? AND status = 'running'", (job,))
+    row = conn.execute("SELECT id FROM highlights WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+    if not row:
+        return None
+    with conn:
+        conn.execute("UPDATE highlights SET status = 'running' WHERE id = ?", (row[0],))
+    proc = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "highlight", str(row[0])], start_new_session=True)
+    return proc, row[0], time.time()
