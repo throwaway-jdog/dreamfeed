@@ -13,6 +13,10 @@ GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
 GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address), or why there isn't one
 GET  /api/live/videos    ?name=ROOM  your own videos of a room you follow (CB_VIDEOS), newest first
 GET  /cb-videos/<room>/<path>   one of them;  /cb-videos/poster/<key>.jpg  its poster
+GET  /api/discover/cb   ?mode=foryou|top|search&q=WORDS&gender=f|m|c|t&offset=N  live rooms you don't follow
+GET  /api/discover/x    X accounts you might like: linked from your rooms, mentioned by your follows
+GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
+GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
 GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, link, cover), to import
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
@@ -38,6 +42,8 @@ POST /api/comics/update {"id": N} look for new pages of an imported comic now
 POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of a room's videos down to its action
 POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
 POST /api/live/restore  {"undo": token} put it back
+POST /api/profile/link  {"room", "source": "x"|"reddit", "handle", "remove": bool} link or unlink an account
+POST /api/discover/preview {"handle": H} fetch an X account's recent media (checked) for its profile
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
                         {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
 (POSTs are JSON only.)
@@ -57,7 +63,7 @@ from pathlib import Path
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, cbvideos, e621, personas as people, safety   # the worker's own rules (see Dockerfile)
+from dreamfeed import acts, cbprofile, cbvideos, e621, personas as people, safety   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -305,11 +311,8 @@ def live_stream(name: str) -> dict:
     """{"status", "hls"}: hls is the room's video while it's a public show, else None."""
     import urllib.parse
     import urllib.request
-    if not ROOM.match(name):
+    if not ROOM.match(name):     # any room (Discover too); only public, age-verified shows play
         raise ValueError("bad room")
-    with db() as conn:
-        if not conn.execute("SELECT 1 FROM follows WHERE source = 'chaturbate' AND name = ?", (name,)).fetchone():
-            raise LookupError("you don't follow that room")
     try:
         with urllib.request.urlopen(LIVE_INFO.format(name), timeout=20) as r:
             d = json.load(r)
@@ -473,19 +476,267 @@ def save_follow_settings(req: dict) -> dict:
 def follow_posts(source: str, offset: int) -> dict:
     if source not in ("all", *FEED_SOURCES):
         raise ValueError("bad source")
-    where, args = ("", []) if source == "all" else ("WHERE source = ?", [source])
+    where, args = ("WHERE discovered = 0", []) if source == "all" else ("WHERE discovered = 0 AND source = ?", [source])
     try:
         with db() as conn:
             rows = conn.execute(f"SELECT * FROM follow_posts {where} ORDER BY posted_at DESC, id DESC LIMIT ? OFFSET ?",
                                 [*args, PAGE_SIZE + 1, offset]).fetchall()
     except sqlite3.OperationalError:    # the follow service hasn't started yet
         rows = []
-    posts = [{"id": r["id"], "source": r["source"], "author": r["author"], "place": r["place"], "text": r["text"],
-              "link": r["link"], "posted_at": r["posted_at"],
-              "media": [{"kind": m["kind"], "url": "follow/media/" + m["file"],
-                         "poster": "follow/media/" + m["poster"] if m.get("poster") else None}
-                        for m in json.loads(r["media"])]} for r in rows[:PAGE_SIZE]]
+    posts = [_post_json(r) for r in rows[:PAGE_SIZE]]
     return {"posts": posts, "more": len(rows) > PAGE_SIZE, "feeds": read_json(FOLLOW / "feeds.json")}
+
+
+def _post_json(r) -> dict:
+    return {"id": r["id"], "source": r["source"], "author": r["author"], "place": r["place"], "text": r["text"],
+            "link": r["link"], "posted_at": r["posted_at"], "discovered": bool(r["discovered"]),
+            "media": [{"kind": m["kind"], "url": "follow/media/" + m["file"],
+                       "poster": "follow/media/" + m["poster"] if m.get("poster") else None}
+                      for m in json.loads(r["media"])]}
+
+
+# ---- Discover and profiles (one profile across sites) ----
+CB_LIST = "https://chaturbate.com/api/ts/roomlist/room-list/"
+CB_AGENT = {"User-Agent": "dreamfeed (personal follow list)", "Accept": "application/json"}
+GENDERS = ("f", "m", "c", "t")
+DISCOVER_PAGE = 60
+COMMON_TAGS = {"new", "18", "lovense", "lush", "ohmibod", "domi", "interactive", "interactivetoy", "private", "pvt",
+               "goal", "tip", "tips", "c2c", "hd", "lovensetoy"}
+X_HANDLE = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
+REDDIT_USER = re.compile(r"^(?:u/|/u/)?([A-Za-z0-9_-]{3,20})$")
+_cache: dict[str, tuple[float, object]] = {}      # Chaturbate answers and bios, briefly
+_thumbs: dict[str, str] = {}                      # room -> its thumbnail's address (from a listing)
+
+
+def _cached(key: str, ttl: float, fetch):
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    value = fetch()
+    if len(_cache) > 500:
+        _cache.clear()
+    _cache[key] = (time.time(), value)
+    return value
+
+
+def _cb_list(params: dict) -> list[dict]:
+    import urllib.request
+    url = CB_LIST + "?" + urllib.parse.urlencode(params)
+
+    def fetch():
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=CB_AGENT), timeout=30) as r:
+                return json.load(r).get("rooms") or []
+        except (OSError, ValueError) as e:
+            raise LookupError(f"Chaturbate didn't answer ({e})")
+    return _cached(url, 120, fetch)
+
+
+def _room_ok(r: dict) -> bool:
+    """Shown in Discover: age verified, 18 or over, no password, and nothing dreamfeed never
+    takes in its tags or title."""
+    age = r.get("display_age")
+    words = " ".join([str(t) for t in r.get("tags") or []] + [re.sub(r"<[^>]+>", " ", str(r.get("room_subject") or r.get("subject") or ""))])
+    return (bool(r.get("is_age_verified")) and not (isinstance(age, int) and age < 18) and not r.get("has_password")
+            and ROOM.match(str(r.get("username", ""))) is not None
+            and not safety.request_blocked(words.replace("_", " ")) and not safety.story_blocked(words.replace("_", " ")))
+
+
+def _room_card(r: dict, followed: set) -> dict:
+    name = r["username"]
+    img = str(r.get("img") or "")
+    if urllib.parse.urlparse(img).hostname == "thumb.live.mmcdn.com":
+        if len(_thumbs) > 3000:
+            _thumbs.clear()
+        _thumbs[name] = img
+    return {"name": name, "live": True, "followed": name in followed, "discovered": True,
+            "info": {"title": re.sub(r"<[^>]+>", "", str(r.get("room_subject") or r.get("subject") or ""))[:300],
+                     "tags": [str(t)[:40] for t in (r.get("tags") or [])][:12], "viewers": int(r.get("num_users") or 0),
+                     "age": r.get("display_age"), "gender": r.get("gender"), "show": r.get("current_show"),
+                     "since": r.get("start_dt_utc")},
+            "thumb": f"cb-thumb/{name}.jpg?t={int(time.time() // 60)}" if name in _thumbs else None, "times": []}
+
+
+def discover_cb(mode: str, q: str, gender: str, offset: int) -> dict:
+    """Live rooms you don't follow: for you (sharing the tags of the rooms you follow), top (most
+    watched) or a search; only rooms _room_ok lets through."""
+    if gender and gender not in GENDERS:
+        raise ValueError("bad gender")
+    with db() as conn:
+        follows = conn.execute("SELECT name, info FROM follows WHERE source = 'chaturbate'").fetchall()
+    followed = {r["name"] for r in follows}
+    base = {"genders": gender} if gender else {}
+    if mode == "foryou":
+        counts: dict[str, int] = {}
+        for r in follows:
+            for t in (json.loads(r["info"]) if r["info"] else {}).get("tags") or []:
+                t = str(t).lower()
+                if t not in COMMON_TAGS and not safety.request_blocked(t):
+                    counts[t] = counts.get(t, 0) + 1
+        tags = sorted(counts, key=lambda t: -counts[t])[:6]
+        if not tags:
+            return {"rooms": [], "more": False, "tags": [], "note": "Once the rooms you follow have been live a while, rooms with the same tags show here."}
+        score: dict[str, list] = {}
+        for t in tags:
+            for r in _cb_list({**base, "hashtags": t, "limit": 90}):
+                if r.get("username") in followed or not _room_ok(r):
+                    continue
+                entry = score.setdefault(r["username"], [0, r])
+                entry[0] += counts[t]
+        ranked = sorted(score.values(), key=lambda e: (-e[0], -int(e[1].get("num_users") or 0)))
+        page = ranked[offset:offset + DISCOVER_PAGE]
+        return {"rooms": [_room_card(r, followed) for _, r in page], "more": len(ranked) > offset + DISCOVER_PAGE, "tags": tags}
+    if mode == "top":
+        params = {**base, "limit": DISCOVER_PAGE, "offset": offset}
+    elif mode == "search":
+        q = q.strip().lower()
+        if not 1 <= len(q) <= 60 or not re.fullmatch(r"[a-z0-9_ -]+", q):
+            raise ValueError("type a tag or a few words (letters and numbers)")
+        bad = safety.request_blocked(q.replace("_", " ")) + safety.story_blocked(q.replace("_", " "))
+        if bad:
+            raise ValueError(f"not something to look for: {', '.join(sorted(set(bad)))}")
+        params = {**base, "keywords": q, "limit": DISCOVER_PAGE, "offset": offset}
+    else:
+        raise ValueError("bad mode")
+    rooms = _cb_list(params)
+    return {"rooms": [_room_card(r, followed) for r in rooms if _room_ok(r) and r["username"] not in followed],
+            "more": len(rooms) >= DISCOVER_PAGE}     # (it sometimes gives one more than asked)
+
+
+def cb_thumb(name: str) -> bytes | None:
+    import urllib.request
+    url = _thumbs.get(name)
+    if not url:
+        return None
+
+    def fetch():
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=CB_AGENT), timeout=20) as r:
+                data = r.read(2 << 20)
+        except OSError:
+            return None
+        return data if data[:3] == b"\xff\xd8\xff" else None
+    return _cached("thumb:" + name, 60, fetch)
+
+
+def _bio(name: str) -> dict:
+    def fetch():
+        try:
+            return cbprofile.bio(name)
+        except (OSError, ValueError):
+            return None
+    return _cached("bio:" + name, 3600, fetch) or {}
+
+
+def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
+    """One profile across sites: a Chaturbate room (or the room an X or Reddit account is linked
+    to), its linked accounts, their posts from your Feed and previews, and your videos of it."""
+    with db() as conn:
+        if not room and (x or reddit):
+            src, h = ("x", x) if x else ("reddit", reddit)
+            hit = conn.execute("SELECT room FROM links WHERE source = ? AND lower(handle) = lower(?) AND state != 'removed'"
+                               " ORDER BY state = 'yours' DESC LIMIT 1", (src, h)).fetchone()
+            room = hit["room"] if hit else ""
+        if room and not ROOM.match(room):
+            raise ValueError("bad room")
+        out = {"room": room or None, "followed": False, "bio": {}, "links": [], "posts": [], "previews": {}, "videos": 0}
+        if room:
+            bio = _bio(room)
+            if bio.get("links"):
+                with conn:
+                    cbprofile.save_links(conn, room, bio["links"])
+            out["bio"] = {k: bio.get(k) for k in ("about", "followers", "age", "location", "last_broadcast")}
+            r = conn.execute("SELECT * FROM follows WHERE source = 'chaturbate' AND name = ?", (room,)).fetchone()
+            if r:
+                out.update(followed=True, live=bool(r["live"]), info=json.loads(r["info"]) if r["info"] else {},
+                           last_live=_unix(r["last_live"]) if r["last_live"] else None)
+                out["times"] = [[_unix(t["start_at"]), _unix(t["end_at"])] for t in conn.execute(
+                    "SELECT start_at, end_at FROM live_times WHERE source = 'chaturbate' AND name = ? AND end_at >= datetime('now', ?)",
+                    (room, f"-{LIVE_DAYS} days"))]
+                out["videos"] = len(cbvideos.scan(_followed()).get(room, []))
+            out["links"] = [{"source": l["source"], "handle": l["handle"], "state": l["state"]} for l in conn.execute(
+                "SELECT * FROM links WHERE room = ? AND state != 'removed' ORDER BY source, handle", (room,))]
+        xs = {l["handle"].lower() for l in out["links"] if l["source"] == "x"} | ({x.lower()} if x else set())
+        rs = {l["handle"].lower() for l in out["links"] if l["source"] == "reddit"} | ({reddit.lower()} if reddit else set())
+        out["x"], out["reddit"] = sorted(xs), sorted(rs)
+        if xs or rs:
+            marks = lambda n: ",".join("?" * n)
+            rows = conn.execute(f"SELECT * FROM follow_posts WHERE (source = 'x' AND lower(author) IN ({marks(len(xs)) or 'NULL'}))"
+                                f" OR (source = 'reddit' AND lower(author) IN ({marks(len(rs)) or 'NULL'}))"
+                                " ORDER BY posted_at DESC, id DESC LIMIT 60", [*xs, *rs]).fetchall()
+            out["posts"] = [_post_json(r) for r in rows]
+            following = {a.lower() for (a,) in conn.execute(
+                f"SELECT DISTINCT author FROM follow_posts WHERE source = 'x' AND discovered = 0 AND lower(author) IN ({marks(len(xs)) or 'NULL'})", [*xs])}
+            for h in xs:
+                p = conn.execute("SELECT status, error, kept, dropped, created_at FROM previews WHERE lower(handle) = ? ORDER BY id DESC LIMIT 1", (h,)).fetchone()
+                out["previews"][h] = {"following": h in following, **(dict(p) if p else {})}
+    return out
+
+
+def save_link(req: dict) -> dict:
+    """{"room", "source": "x"|"reddit", "handle", "remove": bool}: link an account to a room, or unlink it."""
+    room, source, handle = str(req.get("room", "")), str(req.get("source", "")), str(req.get("handle", "")).strip()
+    if not ROOM.match(room):
+        raise ValueError("bad room")
+    m = (X_HANDLE if source == "x" else REDDIT_USER if source == "reddit" else None)
+    m = m.match(handle) if m else None
+    if not m:
+        raise ValueError("an X handle (letters, numbers, _) or a Reddit username")
+    handle = m.group(1)
+    with db() as conn:
+        conn.execute("DELETE FROM links WHERE room = ? AND source = ? AND lower(handle) = lower(?)", (room, source, handle))
+        conn.execute("INSERT INTO links(room, source, handle, state) VALUES (?, ?, ?, ?)",
+                     (room, source, handle, "removed" if req.get("remove") else "yours"))
+    return {"ok": True}
+
+
+def queue_preview(req: dict) -> dict:
+    """{"handle"}: fetch an X account's recent media (through the checks) for its profile."""
+    m = X_HANDLE.match(str(req.get("handle", "")).strip())
+    if not m:
+        raise ValueError("bad X handle")
+    with db() as conn:
+        if conn.execute("SELECT 1 FROM previews WHERE lower(handle) = lower(?) AND status IN ('queued', 'running')", (m.group(1),)).fetchone():
+            raise ValueError("already being fetched")
+        conn.execute("INSERT INTO previews(source, handle) VALUES ('x', ?)", (m.group(1),))
+    return {"ok": True}
+
+
+def discover_x() -> dict:
+    """X accounts you might like and don't follow: those the rooms you follow link to, and those
+    the people you follow mention (twice or more)."""
+    with db() as conn:
+        following = {a.lower() for (a,) in conn.execute("SELECT DISTINCT author FROM follow_posts WHERE source = 'x' AND discovered = 0")}
+        people: dict[str, dict] = {}
+
+        def person(h: str) -> dict:
+            return people.setdefault(h.lower(), {"handle": h, "rooms": [], "mentions": 0, "by": set()})
+        for l in conn.execute("SELECT l.room, l.handle FROM links l JOIN follows f ON f.source = 'chaturbate' AND f.name = l.room"
+                              " WHERE l.source = 'x' AND l.state != 'removed'"):
+            if l["handle"].lower() not in following:
+                person(l["handle"])["rooms"].append(l["room"])
+        for r in conn.execute("SELECT author, mentions FROM follow_posts WHERE source = 'x' AND discovered = 0 AND mentions IS NOT NULL"):
+            for h in json.loads(r["mentions"] or "[]"):
+                if h.lower() not in following and X_HANDLE.match(h):
+                    p = person(h)
+                    p["mentions"] += 1
+                    p["by"].add(r["author"])
+        out = []
+        for key, p in people.items():
+            if not p["rooms"] and p["mentions"] < 2:
+                continue
+            prev = conn.execute("SELECT status, error, kept FROM previews WHERE lower(handle) = ? ORDER BY id DESC LIMIT 1", (key,)).fetchone()
+            first = conn.execute("SELECT media FROM follow_posts WHERE source = 'x' AND lower(author) = ? ORDER BY posted_at DESC LIMIT 1", (key,)).fetchone()
+            thumb = None
+            if first:
+                m = (json.loads(first["media"]) or [{}])[0]
+                thumb = "follow/media/" + (m.get("poster") or m.get("file")) if m else None
+                if m and m.get("kind") == "video" and not m.get("poster"):
+                    thumb = None
+            out.append({"handle": p["handle"], "rooms": p["rooms"], "mentions": p["mentions"], "by": sorted(p["by"])[:3],
+                        "preview": dict(prev) if prev else None, "thumb": thumb})
+    out.sort(key=lambda p: (-len(p["rooms"]), -p["mentions"], p["handle"].lower()))
+    return {"people": out[:80]}
 
 
 def follow_media(rel: str) -> Path | None:
@@ -1536,6 +1787,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(404, {"error": str(e)})
+        if path == "/api/discover/cb":
+            q = self.query()
+            try:
+                return self.send(200, discover_cb(q.get("mode", "foryou"), q.get("q", ""), q.get("gender", ""), max(0, int(q.get("offset", "0") or 0))))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
+        if path == "/api/discover/x":
+            return self.send(200, discover_x())
+        if path == "/api/profile":
+            q = self.query()
+            try:
+                return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+        if path.startswith("/cb-thumb/"):
+            name = path[len("/cb-thumb/"):].removesuffix(".jpg")
+            data = cb_thumb(name) if ROOM.match(name) else None
+            if not data:
+                return self.send(404, {"error": "no thumbnail"})
+            return self.send(200, data, "image/jpeg", cache="private, max-age=60")
         if path == "/api/live/videos":
             try:
                 return self.send(200, live_videos(self.query().get("name", "")))
@@ -1613,7 +1886,8 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/styles/video": queue_video, "/api/styles/video-cancel": cancel_video,
                    "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings,
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
-                   "/api/live/restore": restore_room_video}
+                   "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
+                   "/api/discover/preview": queue_preview}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

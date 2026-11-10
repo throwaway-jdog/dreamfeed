@@ -20,6 +20,7 @@ These are real people: nothing here goes to training, styles, comics or generati
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -404,7 +405,9 @@ def _post(source: str, md: dict) -> dict:
     """A downloaded file's post: its id, who posted it, where, what they wrote, the link and when."""
     if source == "x":
         author = md.get("author") or {}
+        named = [m.get("name") for m in md.get("mentions") or []] + [md.get("reply_to")]
         return {"post_id": str(md["tweet_id"]), "author": author.get("name") or "", "place": None,
+                "mentions": sorted({n for n in named if n and n != author.get("name")}),
                 "text": md.get("content") or "", "posted_at": str(md.get("date") or ""),
                 "link": f"https://x.com/{author.get('name')}/status/{md['tweet_id']}"}
     p = md.get("_parent") or md        # Reddit and e621: details written by _reddit and _e621
@@ -451,9 +454,10 @@ def _problem(vision, cfg, frames) -> tuple[str, str] | None:
     return None
 
 
-def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg) -> tuple[int, int]:
+def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg, discovered: bool = False) -> tuple[int, int]:
     """The downloaded files, checked and kept or deleted, post by post: (kept, dropped). If a
-    job or training starts meanwhile it stops, and the rest wait in incoming for next time."""
+    job or training starts meanwhile it stops, and the rest wait in incoming for next time.
+    discovered: a preview of someone you don't follow (shown on their profile, not the Feed)."""
     from .follow import busy
     for meta in incoming.glob("*.json"):       # details whose file is gone
         if not meta.with_suffix("").exists():
@@ -509,10 +513,10 @@ def check_new(conn, source: str, incoming: Path, media: Path, vision, cfg) -> tu
                 item["poster"] = str(poster.relative_to(media))
             items.append(item)
         with conn:
-            conn.execute("INSERT OR IGNORE INTO follow_posts(source, post_id, author, place, text, link, posted_at, media)"
-                         " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            conn.execute("INSERT OR IGNORE INTO follow_posts(source, post_id, author, place, text, link, posted_at, media,"
+                         " mentions, discovered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                          (source, pid, post["author"], post["place"], post["text"][:2000], post["link"], post["posted_at"],
-                          json.dumps(items)))
+                          json.dumps(items), json.dumps(post.get("mentions") or []), int(discovered)))
         kept += 1
     return kept, dropped
 
@@ -562,3 +566,61 @@ def main() -> None:
         tmp.write_text(json.dumps(status))
         tmp.replace(root / "feeds.json")
 
+
+PREVIEW_POSTS = 30        # media posts read for a preview
+X_HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+
+
+def preview(job_id: int) -> None:
+    """`follow preview <job>`: an X account's latest media posts (gallery-dl, your cookies),
+    through the same checks as the Feed, kept as discovered posts for its profile."""
+    import torch
+    from .config import Config, need
+    from .db import connect
+    from .vision import Vision
+    torch.set_num_threads(int(need("FOLLOW_THREADS")))
+    cfg = Config()
+    conn = connect(cfg.db_path)
+    row = conn.execute("SELECT handle FROM previews WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        return
+    handle = row[0]
+    root = cfg.data_dir / "generated" / "follow"
+    incoming = root / "incoming" / f"preview-{job_id}"
+    vision = None
+    try:
+        if not X_HANDLE.match(handle):
+            raise RuntimeError("not an X handle")
+        why = _signed_in("x")
+        if why:
+            raise RuntimeError(why)
+        incoming.mkdir(parents=True, exist_ok=True)
+        conf = {"extractor": {
+            "base-directory": str(incoming), "directory": [], "cookies-update": False,
+            "twitter": {"text-tweets": False, "retweets": False, "quoted": False, "filename": "{tweet_id}_{num}.{extension}"},
+        }, "downloader": {"part-directory": str(incoming / ".part"), "filesize-max": MAX_SIZE}}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(conf, f)
+        try:
+            r = subprocess.run(["gallery-dl", "--config-ignore", "--config", f.name, "--cookies", str(FEEDS["x"]["cookies"]),
+                                "--range", f"1-{PREVIEW_POSTS}", "--write-metadata", f"https://x.com/{handle}/media"],
+                               capture_output=True, text=True, timeout=900)
+        finally:
+            Path(f.name).unlink(missing_ok=True)
+            shutil.rmtree(incoming / ".part", ignore_errors=True)
+        if not any(incoming.iterdir()):
+            errors = [line for line in r.stderr.splitlines() if "][error]" in line]
+            raise RuntimeError(errors[-1].split("][error]", 1)[1].strip()[:200] if errors else "no pictures or videos there")
+        vision = Vision(cfg.models_dir)
+        kept, dropped = check_new(conn, "x", incoming, root / "media", vision, cfg, discovered=True)
+        with conn:
+            conn.execute("UPDATE previews SET status = 'done', kept = ?, dropped = ? WHERE id = ?", (kept, dropped, job_id))
+        print(f"follow: preview of x/{handle}: {kept} posts, {dropped} dropped by the checks", flush=True)
+    except Exception as e:      # the request's failure, shown where it was asked for
+        with conn:
+            conn.execute("UPDATE previews SET status = 'failed', error = ? WHERE id = ?", (str(e)[:300], job_id))
+        print(f"follow: preview of x/{handle} failed: {e}", flush=True)
+    finally:
+        if vision is not None:
+            vision.close()
+        shutil.rmtree(incoming, ignore_errors=True)

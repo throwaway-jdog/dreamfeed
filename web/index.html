@@ -273,7 +273,8 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row img, .off-row .ph { width: 56px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: var(--bg); filter: grayscale(1); opacity: .6; }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#f-source { grid-template-columns: repeat(4, 1fr); }
+#f-source { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 420px) { #f-source button { font-size: 13px; padding: 0 4px; } }
 .fposts #f-source { margin: 10px 14px; }
 .fposts > .note { margin: 0; padding: 0 14px 8px; color: var(--muted); font-size: 13px; }
 .fposts > .note:empty { display: none; }
@@ -309,6 +310,58 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .pf-acts .secondary { width: auto; min-height: 36px; padding: 0 12px; font-size: 13px; }
 .pf-acts small { color: var(--muted); font-size: 12px; flex-basis: 100%; }
 .pf-acts small.err { color: var(--accent); }
+.pf-about { margin: 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.pf-about.open { -webkit-line-clamp: unset; }
+.pf-sec { display: grid; gap: 8px; }
+.pf-sec[hidden] { display: none; }
+.pf-sec h3 { margin: 6px 0 0; font-size: 15px; }
+.pf-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--rule); border-radius: 999px; padding: 0 4px 0 12px; min-height: 36px; font-size: 14px; }
+.pf-chip a { color: inherit; }
+.pf-chip small { color: var(--muted); }
+.pf-chip button { background: none; border: 0; color: var(--muted); font-size: 18px; width: 30px; height: 30px; cursor: pointer; }
+.pf-link-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }
+.pf-link-form .secondary { width: auto; padding: 0 14px; }
+.pf-prev { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pf-prev .secondary { width: auto; padding: 0 14px; }
+.pf-sec.fposts .post { padding-left: 0; padding-right: 0; }
+.ph-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ph-row .secondary { width: auto; padding: 0 14px; min-height: 36px; font-size: 14px; }
+.seg.three { grid-template-columns: repeat(3, 1fr); }
+.seg.five { grid-template-columns: repeat(5, 1fr); margin-top: 6px; }
+.seg.five button { font-size: 13px; padding: 0 2px; }
+.d-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 6px; }
+.d-search[hidden] { display: none; }
+.d-search .secondary { width: auto; padding: 0 14px; }
+#d-note:empty { display: none; }
+.live-item .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.live-card.picked img { outline: 3px solid var(--accent); outline-offset: -3px; }
+.live-card .pick { position: absolute; right: 8px; top: 8px; width: 26px; height: 26px; border-radius: 50%; background: rgb(0 0 0 / .55);
+  color: #fff; display: grid; place-items: center; font-weight: 700; border: 2px solid #fff; }
+.mv-bar { position: fixed; z-index: 25; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: flex; gap: 8px; align-items: center; background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 8px 8px 8px 14px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .25); max-width: calc(100vw - 32px); }
+.mv-bar[hidden] { display: none; }
+.mv-bar span { font-size: 14px; white-space: nowrap; }
+.mv-bar button { width: auto; padding: 0 14px; min-height: 40px; }
+.multi { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
+.multi[hidden] { display: none; }
+.mv-grid { flex: 1; min-height: 0; display: grid; gap: 2px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
+.mv-tile { position: relative; min-height: 0; background: #000; cursor: pointer; }
+.mv-tile video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mv-tile.loud { outline: 3px solid var(--accent); outline-offset: -3px; }
+.mv-tile .lbl { position: absolute; left: 8px; bottom: 8px; color: #fff; background: rgb(0 0 0 / .6); border-radius: 8px; padding: 2px 8px; font-size: 13px; font-weight: 600; }
+.mv-tile .msg { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; text-align: center; padding: 0 12px; font-size: 14px; }
+.mv-tile .msg:empty { display: none; }
+.mv-tile .tb { position: absolute; top: 6px; display: flex; gap: 6px; right: 6px; }
+.mv-tile .tb button { min-height: 34px; padding: 0 10px; border-radius: 999px; background: rgb(0 0 0 / .6); color: #fff; border: 0; font-size: 13px; font-weight: 600; }
+.post .name.who { cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.dx { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--rule);
+  width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.dx img, .dx .ph { width: 56px; height: 56px; object-fit: cover; border-radius: 50%; background: var(--raise); display: block; }
+.dx div { display: grid; min-width: 0; }
+.dx b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dx small { color: var(--muted); font-size: 13px; }
 .player { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; }
 .player[hidden] { display: none; }
 .player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
@@ -671,13 +724,22 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <div class="seg" id="f-source" role="group" aria-label="From">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
-      <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
+      <button type="button" data-s="e621" aria-pressed="false">e621</button><button type="button" data-s="discover" aria-pressed="false">Discover</button></div>
     <p class="note" id="f-feeds"></p>
     <div id="f-posts"></div>
     <button type="button" class="secondary more" id="f-more" hidden>More</button>
   </section>
   <section class="dash follow" id="follow" hidden aria-label="Live">
-    <div class="panel"><h2>Live now</h2><p class="note" id="f-status"></p><div class="live-list" id="f-live"></div></div>
+    <div class="panel"><div class="ph-row"><h2>Live now</h2><button type="button" class="secondary" id="mv-pick">Watch several</button></div>
+      <p class="note" id="f-status"></p><div class="live-list" id="f-live"></div></div>
+    <div class="panel"><h2>Discover</h2>
+      <div class="seg three" id="d-mode" role="group" aria-label="Discover">
+        <button type="button" data-m="foryou" aria-pressed="true">For you</button><button type="button" data-m="top" aria-pressed="false">Top</button><button type="button" data-m="search" aria-pressed="false">Search</button></div>
+      <div class="seg five" id="d-gender" role="group" aria-label="Who">
+        <button type="button" data-g="" aria-pressed="true">Anyone</button><button type="button" data-g="f" aria-pressed="false">Women</button><button type="button" data-g="m" aria-pressed="false">Men</button><button type="button" data-g="c" aria-pressed="false">Couples</button><button type="button" data-g="t" aria-pressed="false">Trans</button></div>
+      <form class="d-search" id="d-search" hidden><input class="in" id="d-q" placeholder="a tag or a few words" maxlength="60" autocomplete="off" autocapitalize="off"><button type="submit" class="secondary">Search</button></form>
+      <p class="note" id="d-note"></p><div class="live-list" id="d-list"></div>
+      <button type="button" class="secondary more" id="d-more" hidden>More</button></div>
     <div class="panel" id="f-off-panel" hidden><h2>Not live</h2><ul class="plist" id="f-off"></ul></div>
   </section>
   <div class="profile" id="profile" hidden role="dialog" aria-modal="true" aria-label="Room">
@@ -685,7 +747,24 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button type="button" class="secondary" id="pf-live" hidden>Watch live</button>
       <a class="secondary" id="pf-open" target="_blank" rel="noreferrer noopener">Chaturbate</a>
       <button type="button" class="secondary" id="pf-close">Close</button></div>
-    <div class="pf-body"><p class="note" id="pf-info"></p><div class="pf-grid" id="pf-grid"></div></div>
+    <div class="pf-body">
+      <p class="note" id="pf-info"></p>
+      <p class="pf-about" id="pf-about" hidden></p>
+      <div class="pf-sec"><h3>Accounts</h3><div class="pf-links" id="pf-links"></div>
+        <form class="pf-link-form" id="pf-link-form">
+          <select class="in" id="pf-link-src" aria-label="Site"></select>
+          <input class="in" id="pf-link-in" placeholder="handle" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="64">
+          <button type="submit" class="secondary">Link</button></form></div>
+      <div class="pf-sec" id="pf-prev-sec" hidden></div>
+      <div class="pf-sec" id="pf-vid-sec" hidden><h3 id="pf-vcount">Your videos</h3><div class="pf-grid" id="pf-grid"></div></div>
+      <div class="pf-sec fposts" id="pf-post-sec" hidden><h3>Posts</h3><div id="pf-posts"></div></div>
+    </div>
+  </div>
+  <div class="mv-bar" id="mv-bar" hidden><span id="mv-count">Pick up to 4 rooms</span>
+    <button type="button" class="primary" id="mv-go" disabled>Watch</button><button type="button" class="secondary" id="mv-cancel">Cancel</button></div>
+  <div class="multi" id="multi" hidden role="dialog" aria-modal="true" aria-label="Several rooms">
+    <div class="reader-bar"><span>Tap one for its sound</span><button type="button" class="secondary" id="mv-close">Close</button></div>
+    <div class="mv-grid" id="mv-grid"></div>
   </div>
   <div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="Live room">
     <div class="reader-bar"><span id="pl-title"></span>
@@ -1385,40 +1464,143 @@ async function refreshFollowing() {
     : !st.at ? "Waiting for the first look at Chaturbate (the follow service)."
     : live.length ? "" : d.rooms.length ? "No one you follow is live right now." : "You don't follow anyone on Chaturbate yet.";
   follow.live = live;
-  $("f-live").replaceChildren(...live.map(liveCard));
+  $("f-live").replaceChildren(...live.map(r => liveCard(r, live)));
+  if (!dc.loaded) loadDiscover(true);
   $("f-off").replaceChildren(...off.map(offRow));
   $("f-off-panel").hidden = !off.length;
 
   if (state.view === "follow") follow.timer = setTimeout(refreshFollowing, 60000);
 }
-function liveCard(r) {
+function liveCard(r, list) {
   const i = r.info || {}, b = el("button", "live-card"), shot = el("span", "shot"), img = el("img");
   b.type = "button"; img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
   shot.append(img, el("span", "on", "LIVE"));
   const row = el("span", "who-row"); row.append(el("b", null, r.name), el("small", null, [
-    `${(i.viewers || 0).toLocaleString()} watching`, i.since ? `live ${relTime(i.since)}` : "",
+    i.age ? String(i.age) : "", `${(i.viewers || 0).toLocaleString()} watching`, i.since ? `live ${relTime(i.since)}` : "",
     i.show && i.show !== "public" ? i.show : ""].filter(Boolean).join(" · ")));
   b.append(shot, row, el("span", "title", i.title || ""));
   const usual = usualHours(r.times); if (usual) b.append(el("small", null, usual));
-  b.onclick = () => openRoom(r);
-  const item = el("div", "live-item"); item.append(b);
-  if (r.videos) {
-    const v = el("button", "secondary vids", `${r.videos} video${r.videos === 1 ? "" : "s"}`); v.type = "button";
-    v.onclick = () => openProfile(r); item.append(v);
-  }
+  const sync = () => {
+    const n = mv.picked.findIndex(x => x.name === r.name);
+    b.classList.toggle("picked", n >= 0); shot.querySelector(".pick")?.remove();
+    if (mv.picking && n >= 0) shot.append(el("span", "pick", String(n + 1)));
+  };
+  b.onclick = () => {
+    if (!mv.picking) return openRoom(r, list);
+    const n = mv.picked.findIndex(x => x.name === r.name);
+    if (n >= 0) mv.picked.splice(n, 1); else if (mv.picked.length < 4) mv.picked.push(r); else return toast("Up to 4 at once.");
+    mvSync();
+  };
+  b._sync = sync; sync();
+  const item = el("div", "live-item"), acts = el("div", "acts"), pfb = el("button", "secondary vids",
+    r.videos ? `Profile · ${r.videos} video${r.videos === 1 ? "" : "s"}` : "Profile");
+  pfb.type = "button"; pfb.onclick = () => openProfile(r); acts.append(pfb);
+  item.append(b, acts);
   return item;
 }
 function offRow(r) {
-  const li = el("li"), row = r.videos ? el("button", "off-row") : el("div", "off-row"), d = el("div");
-  li.append(row);
+  const li = el("li"), row = el("button", "off-row"), d = el("div");
+  row.type = "button"; row.onclick = () => openProfile(r); li.append(row);
   if (r.thumb) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = r.thumb; row.append(img); }
   else row.append(el("span", "ph"));
   const last = r.last_live ? `last live ${relTime(new Date(r.last_live * 1000).toISOString())} ago` : "not seen live yet";
   d.append(el("b", null, r.name), el("small", null, [last, usualHours(r.times)].filter(Boolean).join(" · ")));
-  if (r.videos) { d.append(el("small", "has", `${r.videos} video${r.videos === 1 ? "" : "s"}`)); row.type = "button"; row.onclick = () => openProfile(r); }
+  if (r.videos) d.append(el("small", "has", `${r.videos} video${r.videos === 1 ? "" : "s"}`));
   row.append(d);
   return li;
 }
+
+/* Watch several: pick up to 4 live rooms (yours or from Discover), each in its own tile, all
+   muted but the one you tapped. Lower quality per tile (hls.js caps it to the tile's size). */
+const mv = { picking: false, picked: [], tiles: [] };
+function mvSync() {
+  document.querySelectorAll(".live-card").forEach(b => b._sync && b._sync());
+  $("mv-bar").hidden = !mv.picking;
+  $("mv-count").textContent = mv.picked.length ? `${mv.picked.length} picked` : "Pick up to 4 rooms";
+  $("mv-go").disabled = mv.picked.length < 1;
+  $("mv-pick").textContent = mv.picking ? "Picking…" : "Watch several";
+}
+$("mv-pick").onclick = () => { mv.picking = !mv.picking; if (!mv.picking) mv.picked = []; mvSync(); };
+$("mv-cancel").onclick = () => { mv.picking = false; mv.picked = []; mvSync(); };
+$("mv-go").onclick = () => { const rooms = mv.picked.slice(); mv.picking = false; mv.picked = []; mvSync(); openMulti(rooms); };
+function mvLayout() {
+  const n = mv.tiles.length, wide = innerWidth > innerHeight;
+  $("mv-grid").style.setProperty("--cols", n <= 1 ? 1 : wide ? 2 : n <= 2 ? 1 : 2);
+}
+addEventListener("resize", () => { if (!$("multi").hidden) mvLayout(); });
+async function openMulti(rooms) {
+  closeMulti();
+  $("multi").hidden = false;
+  mv.tiles = rooms.map(r => ({ r, hls: null }));
+  mvLayout();
+  const Hls = await hlsLib().catch(() => null);
+  $("mv-grid").replaceChildren(...mv.tiles.map((t, k) => {
+    const box = el("div", "mv-tile"), v = el("video"), msg = el("p", "msg", "Loading…"), tb = el("div", "tb");
+    v.playsInline = v.autoplay = v.muted = true;
+    const big = el("button", null, "Full"), rm = el("button", null, "✕"); big.type = rm.type = "button";
+    big.onclick = e => { e.stopPropagation(); const rs = mv.tiles.map(x => x.r); closeMulti(); openRoom(t.r, rs); };
+    rm.onclick = e => { e.stopPropagation(); const rest = mv.tiles.filter(x => x !== t).map(x => x.r); rest.length ? openMulti(rest) : closeMulti(); };
+    tb.append(big, rm);
+    box.append(v, el("span", "lbl", t.r.name), msg, tb);
+    box.onclick = () => mvLoud(k);
+    t.v = v; t.box = box;
+    api(`api/live/stream?name=${encodeURIComponent(t.r.name)}`).then(d => {
+      if (!mv.tiles.includes(t)) return;
+      if (!d.hls) { msg.textContent = { private: "In a private show", hidden: "Hidden show", away: "Away" }[d.status] || "Not live right now"; return; }
+      if (Hls && Hls.isSupported()) {
+        t.hls = new Hls({ capLevelToPlayerSize: true, liveSyncDurationCount: 3 });
+        t.hls.on(Hls.Events.ERROR, (_, e) => { if (e.fatal) msg.textContent = "The stream stopped"; });
+        t.hls.loadSource(d.hls); t.hls.attachMedia(v);
+      } else if (v.canPlayType("application/vnd.apple.mpegurl")) v.src = d.hls;
+      else { msg.textContent = "This browser can't play live video"; return; }
+      v.onplaying = () => { msg.textContent = ""; };
+      v.play().catch(() => {});
+    }).catch(err => { msg.textContent = err.message; });
+    return box;
+  }));
+}
+function mvLoud(k) {
+  mv.tiles.forEach((t, j) => { t.v.muted = j !== k; t.box.classList.toggle("loud", j === k); if (j === k) t.v.play().catch(() => {}); });
+}
+function closeMulti() {
+  for (const t of mv.tiles) { if (t.hls) t.hls.destroy(); if (t.v) { t.v.pause(); t.v.removeAttribute("src"); t.v.load(); } }
+  mv.tiles = []; $("mv-grid").replaceChildren(); $("multi").hidden = true;
+}
+$("mv-close").onclick = closeMulti;
+
+/* Discover (Live): rooms you don't follow, through the same age and word checks. */
+const dc = { mode: "foryou", gender: "", q: "", offset: 0, rooms: [], gen: 0, loaded: false };
+document.querySelectorAll("#d-mode button").forEach(b => b.onclick = () => {
+  dc.mode = b.dataset.m;
+  document.querySelectorAll("#d-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  $("d-search").hidden = dc.mode !== "search";
+  if (dc.mode === "search") { $("d-q").focus(); if (!dc.q) { $("d-list").replaceChildren(); $("d-note").textContent = ""; $("d-more").hidden = true; return; } }
+  loadDiscover(true);
+});
+document.querySelectorAll("#d-gender button").forEach(b => b.onclick = () => {
+  dc.gender = b.dataset.g;
+  document.querySelectorAll("#d-gender button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  if (dc.mode !== "search" || dc.q) loadDiscover(true);
+});
+$("d-search").onsubmit = e => { e.preventDefault(); dc.q = $("d-q").value.trim(); if (dc.q) loadDiscover(true); };
+$("d-more").onclick = () => loadDiscover(false);
+async function loadDiscover(reset) {
+  if (reset) { dc.offset = 0; dc.rooms = []; $("d-list").replaceChildren(); }
+  const gen = ++dc.gen; dc.loaded = true;
+  $("d-note").textContent = "Looking…"; $("d-more").hidden = true;
+  let d;
+  try {
+    d = await api(`api/discover/cb?mode=${dc.mode}&gender=${dc.gender}&offset=${dc.offset}&q=${encodeURIComponent(dc.q)}`);
+  } catch (err) { if (gen === dc.gen) $("d-note").textContent = err.message; return; }
+  if (gen !== dc.gen) return;
+  const have = new Set(dc.rooms.map(r => r.name)), fresh = d.rooms.filter(r => !have.has(r.name));
+  dc.rooms.push(...fresh); dc.offset += dc.mode === "foryou" ? d.rooms.length : 60;
+  $("d-list").append(...fresh.map(r => liveCard(r, dc.rooms)));
+  $("d-note").textContent = d.note || (dc.mode === "foryou" && d.tags && d.tags.length ? `Live now with tags like yours: ${d.tags.map(t => "#" + t).join(" ")}` : "")
+    || (!dc.rooms.length ? "No one here right now." : "");
+  $("d-more").hidden = !d.more;
+}
+
 // The hours of the day (your time) they're usually live: those they were live in on at least
 // 40% of the days they streamed, the longest run of them. Needs 3 days of streams to say.
 function usualHours(times) {
@@ -1449,6 +1631,7 @@ document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
 });
 $("f-more").onclick = () => loadPosts(false);
 async function loadPosts(reset) {
+  if (fp.source === "discover") return reset && loadPeople();
   if (reset) { fp.offset = 0; fp.gen++; $("f-posts").replaceChildren(); }
   else if (fp.loading) return;
   const gen = fp.gen; fp.loading = true; $("f-more").hidden = true;
@@ -1464,10 +1647,36 @@ async function loadPosts(reset) {
   } catch (err) { toast(err.message); }
   finally { if (gen === fp.gen) fp.loading = false; }
 }
+// Discover (Feed): X accounts linked from the rooms you follow, or mentioned by people you follow.
+async function loadPeople() {
+  const gen = ++fp.gen; fp.more = false; $("f-more").hidden = true;
+  $("f-posts").replaceChildren(el("p", "note", "Looking…"));
+  $("f-feeds").textContent = "People you don't follow on X: linked from the Chaturbate rooms you follow, or mentioned by people you follow. Tap one for their profile; Preview fetches their recent media through the checks.";
+  let d;
+  try { d = await api("api/discover/x"); } catch (err) { if (gen === fp.gen) $("f-posts").replaceChildren(el("p", "note", err.message)); return; }
+  if (gen !== fp.gen) return;
+  $("f-posts").replaceChildren(...d.people.map(p => {
+    const b = el("button", "dx"), info = el("div"); b.type = "button";
+    if (p.thumb) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = p.thumb; b.append(img); } else b.append(el("span", "ph"));
+    const why = [p.rooms.length ? `on ${p.rooms.join(", ")}'s Chaturbate` : "",
+                 p.mentions ? `mentioned ${p.mentions}× by ${p.by.join(", ")}` : ""].filter(Boolean).join(" · ");
+    const pv = p.preview || {};
+    const state = pv.status === "done" ? `${pv.kept} previewed` : pv.status === "queued" || pv.status === "running" ? "preview coming" : "";
+    info.append(el("b", null, "@" + p.handle), el("small", null, [why, state].filter(Boolean).join(" · ")));
+    b.append(info);
+    b.onclick = () => openPerson(p.rooms.length ? { room: p.rooms[0] } : { x: p.handle });
+    return b;
+  }));
+  if (!d.people.length) $("f-posts").append(el("p", "note", "No one yet. Suggestions come from the rooms' bios (read once a day) and from mentions in new X posts."));
+}
 function postCard(p) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
   const av = el("span", "av sm", (p.author || "?").slice(0, 1).toUpperCase());
-  head.append(el("span", "name", p.author || "?"),
+  const who = el("span", "name", p.author || "?");
+  if (p.author && (p.source === "x" || p.source === "reddit")) {
+    who.classList.add("who"); who.onclick = () => openPerson(p.source === "x" ? { x: p.author } : { reddit: p.author });
+  }
+  head.append(who,
               el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : "X"),
               el("span", "time", "· " + relTime(p.posted_at)));
   body.append(head);
@@ -1498,8 +1707,8 @@ function hlsLib() {
   });
   return pl.lib;
 }
-function openRoom(r) {
-  pl.mode = "live"; pl.rooms = (follow.live || []).slice(); pl.i = Math.max(0, pl.rooms.findIndex(x => x.name === r.name));
+function openRoom(r, list) {
+  pl.mode = "live"; pl.rooms = (list || follow.live || []).slice(); pl.i = Math.max(0, pl.rooms.findIndex(x => x.name === r.name));
   if (!pl.rooms.length) pl.rooms = [r];
   $("player").hidden = false; playRoom();
 }
@@ -1564,28 +1773,118 @@ function vidLength(s) {
 function vidSize(b) { return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`; }
 function vidDate(f) { return new Date(f.mtime * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); }
 
-/* A room's profile: when they're on, and your own videos of them. */
-const pf = { room: null, videos: [], gen: 0, timer: null };
-async function openProfile(r) {
+/* One profile across sites: a Chaturbate room (followed or from Discover) with the X and
+   Reddit accounts linked to it (from its bio, or by you), their posts and your videos of it;
+   or an X or Reddit account on its own (from the Feed or Discover), with a preview to fetch. */
+const pf = { room: null, key: null, data: null, videos: [], gen: 0, timer: null, ptimer: null, card: null };
+function openProfile(r) { pf.card = r; openPerson({ room: r.name }); }
+async function openPerson(key) {
   const gen = ++pf.gen;
-  pf.room = r; pf.videos = [];
-  $("pf-title").textContent = r.name;
-  $("pf-open").href = `https://chaturbate.com/${encodeURIComponent(r.name)}/`;
-  $("pf-live").hidden = !r.live;
-  const last = r.live ? "Live now" : r.last_live ? `Last live ${relTime(new Date(r.last_live * 1000).toISOString())} ago` : "Not seen live yet";
-  const about = [last, usualHours(r.times)].filter(Boolean).join(" · ");
-  $("pf-info").textContent = about + " · loading videos…";
-  $("pf-grid").replaceChildren();
-  $("profile").hidden = false;
+  clearTimeout(pf.timer); clearTimeout(pf.ptimer);
+  pf.key = key; pf.videos = []; pf.data = null; pf.room = key.room ? { name: key.room } : null;
+  if (!key.room) pf.card = null;
+  $("pf-title").textContent = key.room || (key.x ? "@" + key.x : "u/" + key.reddit);
+  $("pf-info").textContent = "Loading…"; $("pf-about").hidden = true;
+  for (const id of ["pf-links", "pf-grid", "pf-posts"]) $(id).replaceChildren();
+  for (const id of ["pf-prev-sec", "pf-vid-sec", "pf-post-sec"]) $(id).hidden = true;
+  $("pf-live").hidden = true; $("pf-open").hidden = true;
+  $("profile").hidden = false; $("profile").scrollTop = 0;
+  await loadPerson(gen);
+}
+async function loadPerson(gen) {
+  const k = pf.key, q = k.room ? `room=${encodeURIComponent(k.room)}` : k.x ? `x=${encodeURIComponent(k.x)}` : `reddit=${encodeURIComponent(k.reddit)}`;
   let d;
-  try { d = await api(`api/live/videos?name=${encodeURIComponent(r.name)}`); } catch (err) { if (gen === pf.gen) $("pf-info").textContent = `${about} · ${err.message}`; return; }
+  try { d = await api(`api/profile?${q}`); } catch (err) { if (gen === pf.gen) $("pf-info").textContent = err.message; return; }
   if (gen !== pf.gen) return;
-  pf.videos = d.videos; pf.about = about;
+  pf.data = d;
+  if (d.room && !pf.room) { pf.room = { name: d.room }; pf.key = { room: d.room }; }
+  const room = d.room, card = pf.card || {}, live = d.followed ? d.live : !!card.live;
+  $("pf-title").textContent = room || $("pf-title").textContent;
+  $("pf-open").hidden = !room;
+  if (room) { $("pf-open").href = `https://chaturbate.com/${encodeURIComponent(room)}/`; $("pf-open").textContent = "Chaturbate"; }
+  $("pf-live").hidden = !(room && live);
+  const b = d.bio || {}, times = d.times || card.times || [];
+  const when = !room ? "" : live ? "Live now" : d.last_live ? `Last live ${relTime(new Date(d.last_live * 1000).toISOString())} ago`
+    : b.last_broadcast ? `Last live ${b.last_broadcast}` : "";
+  $("pf-info").textContent = [when, usualHours(times), b.age ? `${b.age}` : "", b.location,
+    b.followers ? `${Number(b.followers).toLocaleString()} followers` : "", room && !d.followed ? "not followed" : ""].filter(Boolean).join(" · ");
+  $("pf-about").textContent = b.about || ""; $("pf-about").hidden = !b.about;
+  renderLinks(d);
+  renderPreview(d, gen);
+  $("pf-post-sec").hidden = !d.posts.length;
+  $("pf-posts").replaceChildren(...d.posts.map(postCard));
+  if (room && d.followed && d.videos) {
+    try { const v = await api(`api/live/videos?name=${encodeURIComponent(room)}`); if (gen !== pf.gen) return; pf.videos = v.videos; } catch {}
+  } else pf.videos = [];
   renderProfile(gen);
+}
+$("pf-about").onclick = () => $("pf-about").classList.toggle("open");
+function renderLinks(d) {
+  const chips = [];
+  const chip = (label, href, note, onRemove) => {
+    const c = el("span", "pf-chip"), a = el("a", null, label); a.href = href; a.target = "_blank"; a.rel = "noreferrer noopener";
+    c.append(a); if (note) c.append(el("small", null, note));
+    if (onRemove) { const x = el("button", null, "×"); x.type = "button"; x.title = "Unlink"; x.onclick = onRemove; c.append(x); }
+    return c;
+  };
+  for (const l of d.links) {
+    const label = l.source === "x" ? "@" + l.handle : "u/" + l.handle;
+    const href = l.source === "x" ? `https://x.com/${l.handle}` : `https://www.reddit.com/user/${l.handle}`;
+    chips.push(chip(label, href, l.state === "bio" ? "their bio" : "", () => linkAccount(d.room, l.source, l.handle, true)));
+  }
+  if (!d.room) {
+    for (const h of d.x) chips.push(chip("@" + h, `https://x.com/${h}`));
+    for (const h of d.reddit) chips.push(chip("u/" + h, `https://www.reddit.com/user/${h}`));
+  }
+  if (!chips.length) chips.push(el("small", "note", "None linked yet."));
+  $("pf-links").replaceChildren(...chips);
+  // With a room: link its accounts. Without: link this account to a room.
+  const src = $("pf-link-src"), was = src.value;
+  src.replaceChildren(...(d.room ? [["x", "X"], ["reddit", "Reddit"]] : [["room", "Chaturbate"]]).map(([v, t]) => {
+    const o = el("option", null, t); o.value = v; return o;
+  }));
+  if (d.room && was === "reddit") src.value = "reddit";
+  $("pf-link-in").placeholder = d.room ? "their handle there" : "their Chaturbate room";
+}
+$("pf-link-form").onsubmit = async e => {
+  e.preventDefault();
+  const d = pf.data, v = $("pf-link-in").value.trim(); if (!d || !v) return;
+  if ($("pf-link-src").value === "room") {
+    const [source, handle] = pf.key.x ? ["x", pf.key.x] : ["reddit", pf.key.reddit];
+    if (await linkAccount(v.toLowerCase(), source, handle, false, true)) { $("pf-link-in").value = ""; openPerson({ room: v.toLowerCase() }); }
+  } else if (await linkAccount(d.room, $("pf-link-src").value, v, false)) $("pf-link-in").value = "";
+};
+async function linkAccount(room, source, handle, remove, quiet) {
+  try { await api("api/profile/link", { room, source, handle, remove }); }
+  catch (err) { toast(err.message); return false; }
+  if (!quiet) loadPerson(pf.gen);
+  return true;
+}
+// An X account you don't follow: its recent media, fetched on request through the checks.
+function renderPreview(d, gen) {
+  const sec = $("pf-prev-sec"), rows = [];
+  let waiting = false;
+  for (const h of d.x) {
+    const p = d.previews[h] || {};
+    if (p.following) continue;
+    const row = el("div", "pf-prev"), go = el("button", "secondary", p.status === "done" ? "Fetch again" : "Preview their media");
+    go.type = "button";
+    go.onclick = async () => { try { await api("api/discover/preview", { handle: h }); } catch (err) { return toast(err.message); } loadPerson(pf.gen); };
+    const what = p.status === "queued" ? "Waiting its turn (after the feeds, a job or training)…"
+      : p.status === "running" ? "Fetching and checking…"
+      : p.status === "done" ? `${p.kept} post${p.kept === 1 ? "" : "s"} kept, ${p.dropped} dropped by the checks`
+      : p.status === "failed" ? `Didn't work: ${p.error || "?"}` : "You don't follow them on X.";
+    row.append(el("small", "note", `@${h}: ${what}`));
+    if (!["queued", "running"].includes(p.status)) row.append(go); else waiting = true;
+    rows.push(row);
+  }
+  sec.replaceChildren(...rows); sec.hidden = !rows.length;
+  if (waiting) pf.ptimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 8000);
 }
 function renderProfile(gen) {
   clearTimeout(pf.timer);
-  $("pf-info").textContent = `${pf.about} · ${pf.videos.length} video${pf.videos.length === 1 ? "" : "s"}`;
+  $("pf-vid-sec").hidden = !pf.videos.length;
+  $("pf-vcount").textContent = `Your videos (${pf.videos.length})`;
   $("pf-grid").replaceChildren(...pf.videos.map((f, i) => {
     const item = el("div", "pf-item"), b = el("button", "pf-vid"), shot = el("span", "shot"); b.type = "button";
     if (f.poster) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = f.poster; shot.append(img); }
@@ -1644,13 +1943,16 @@ async function deleteVideo(f) {
     reloadProfile(pf.gen); refreshFollowing();
   });
 }
-function closeProfile() { pf.gen++; clearTimeout(pf.timer); $("profile").hidden = true; }
+function closeProfile() { pf.gen++; clearTimeout(pf.timer); clearTimeout(pf.ptimer); $("profile").hidden = true; }
 $("pf-close").onclick = closeProfile;
-$("pf-live").onclick = () => openRoom(pf.room);
+$("pf-live").onclick = () => openRoom(pf.card && pf.card.name === pf.room.name ? pf.card : { ...pf.room, info: (pf.data || {}).info || {} }, null);
 function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }
 $("pl-close").onclick = closeRoom;
 document.addEventListener("keydown", e => {
-  if ($("player").hidden) { if (e.key === "Escape" && !$("profile").hidden) closeProfile(); return; }
+  if ($("player").hidden) {
+    if (e.key === "Escape") { if (!$("multi").hidden) closeMulti(); else if (!$("profile").hidden) closeProfile(); }
+    return;
+  }
   if (e.key === "Escape") closeRoom();
   else if (e.key === "ArrowRight") $("pl-next").click();
   else if (e.key === "ArrowLeft") $("pl-prev").click();

@@ -432,6 +432,36 @@ Under each video:
   deletes what's been there over a week. Highlights are videos of their own, so deleting one
   leaves the other.
 
+### One profile across sites, Discover, Watch several
+
+**Profiles.** Every room has a Profile (under its card, or tap it in Not live): when they're
+usually live, their bio, the X and Reddit accounts linked to the room, their posts from your
+Feed, and your videos of them. Accounts get linked by themselves when the performer links them
+for free in their Chaturbate bio (the follow service reads a few bios each round, each once a
+day; links that cost tokens are left alone), or by you on the profile; × unlinks one (it isn't
+linked again). Tapping a poster's name in the Feed opens their profile too, the room's if
+they're linked to one.
+
+**Discover, on Live:** live rooms you don't follow. For you has rooms sharing the most common
+tags of the rooms you follow, Top the most watched, Search a tag or a few words, each for
+anyone or for women, men, couples or trans performers. Only rooms Chaturbate lists as age
+verified, 18 or over and with no password are shown, and rooms whose tags or title have words
+dreamfeed never takes (the same rules as everywhere: teen, petite, schoolgirl and the like)
+are left out; searches for those words are refused. They play in the same player; follow them
+on Chaturbate (and they're here within the hour).
+
+**Discover, in the Feed:** X accounts you don't follow (you follow whoever your Following
+timeline shows): those linked from the rooms you follow, and those people you follow mention
+or reply to, twice or more (counted from new posts on). On their profile, Preview their media
+fetches their latest 30 media posts with your X cookies, through the same checks as the Feed
+(one at a time, never while the feeds are being read, a job runs or training: the checks
+need the same few GB). They're shown on the profile only, never in the Feed, and expire after
+14 days like the Feed's.
+
+**Watch several:** on Live, pick up to 4 live rooms (yours or from Discover) and watch them
+together, each in its own tile at a quality to fit. All are muted but the one you tap;
+Full opens one in the player, ✕ drops one.
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/personas.json`,
