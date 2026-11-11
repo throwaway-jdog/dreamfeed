@@ -19,6 +19,7 @@ GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subre
 GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
+GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
 GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, link, cover), to import
@@ -2100,6 +2101,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, recent_browses())
         if path == "/api/discover/x":
             return self.send(200, discover_x())
+        if path == "/api/post/comments":
+            try:
+                return self.send(200, {"comments": livefeeds.comments(self.query().get("id", ""))})
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except (LookupError, OSError) as e:
+                return self.send(502, {"error": str(e)[:200]})
         if path == "/api/profile":
             q = self.query()
             try:

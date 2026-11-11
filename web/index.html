@@ -259,6 +259,8 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 480px) { .views .long { display: none; } .views .short { display: inline; } .views button { padding: 0 9px; } }
 /* Following: the rooms you follow, live ones as cards, the rest as a list. */
 .follow .panel { grid-column: 1 / -1; }
+.follow .panel[hidden] { display: none; }
+.follow .live-pages { grid-column: 1 / -1; }
 .live-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .live-card { display: grid; gap: 4px; text-align: left; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; min-width: 0; }
 .live-card .shot { position: relative; }
@@ -286,6 +288,24 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .br-recent:empty { display: none; }
 .br-recent button { min-height: 32px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--rule); background: none; color: inherit; font-size: 13px; cursor: pointer; }
 #browse #br-sorts { margin: 10px 14px 0; }
+/* a post, opened: it and its comments (live from its site) */
+#post-view { z-index: 31; }
+.pv-h { margin: 14px 14px 0; font-size: 15px; }
+.pv-comments { padding: 0 14px 48px; }
+.pv-comments > .note { margin: 10px 0; }
+.cm { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 8px; padding-top: 10px; }
+.cm > .av { width: 28px; height: 28px; font-size: 12px; background: var(--raise); color: var(--muted); }
+.cm-head { display: flex; gap: 6px; align-items: baseline; font-size: 14px; min-width: 0; }
+.cm-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-head b.who { cursor: pointer; }
+.cm-head small { color: var(--muted); white-space: nowrap; }
+.cm-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+.cm-media { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.cm-media img { max-width: 160px; max-height: 200px; border-radius: 10px; }
+.cm-replies { grid-column: 2; border-left: 2px solid var(--rule); padding-left: 10px; }
+.cm-replies .cm-replies .cm-replies { border-left: 0; padding-left: 0; }
+.fposts .post .comments-btn { color: var(--muted); font-size: 13px; min-height: 32px; margin-bottom: 4px; }
+.fposts .post .text.go, .fposts .post .media.go { cursor: pointer; }
 #browse .br-status { margin: 8px 14px; color: var(--muted); font-size: 13px; }
 .fposts .post .where.go { cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
 .fposts .post .acts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -756,9 +776,11 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <button type="button" class="secondary more" id="f-more" hidden>More</button>
   </section>
   <section class="dash follow" id="follow" hidden aria-label="Live">
-    <div class="panel"><div class="ph-row"><h2>Live now</h2><button type="button" class="secondary" id="mv-pick">Watch several</button></div>
+    <div class="seg two live-pages" id="live-page" role="group" aria-label="Live">
+      <button type="button" data-p="following" aria-pressed="true">Following</button><button type="button" data-p="discover" aria-pressed="false">Discover</button></div>
+    <div class="panel" id="f-live-panel"><div class="ph-row"><h2>Live now</h2><button type="button" class="secondary" id="mv-pick">Watch several</button></div>
       <p class="note" id="f-status"></p><div class="live-list" id="f-live"></div></div>
-    <div class="panel"><h2>Discover</h2>
+    <div class="panel" id="d-panel" hidden><h2>Discover</h2>
       <div class="seg three" id="d-mode" role="group" aria-label="Discover">
         <button type="button" data-m="foryou" aria-pressed="true">For you</button><button type="button" data-m="top" aria-pressed="false">Top</button><button type="button" data-m="search" aria-pressed="false">Search</button></div>
       <div class="seg five" id="d-gender" role="group" aria-label="Who">
@@ -788,6 +810,13 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="pf-sec fposts" id="pf-post-sec" hidden><h3>Posts</h3><div id="pf-posts"></div>
         <button type="button" class="secondary more" id="pf-more" hidden>More</button></div>
     </div>
+  </div>
+  <div class="profile fposts" id="post-view" hidden role="dialog" aria-modal="true" aria-label="Post">
+    <div class="reader-bar"><span id="pv-title">Post</span>
+      <button type="button" class="secondary" id="pv-close">Close</button></div>
+    <div id="pv-post"></div>
+    <h3 class="pv-h" id="pv-h">Comments</h3>
+    <div class="pv-comments" id="pv-comments"></div>
   </div>
   <div class="profile fposts" id="browse" hidden role="dialog" aria-modal="true" aria-label="Subreddit">
     <div class="reader-bar"><span id="br-title"></span>
@@ -1526,6 +1555,19 @@ async function refreshSummary() {
 }
 
 /* ---------- following ---------- */
+// The Live tab's two pages: Following (who you follow, live and not) and Discover.
+const livePage = { page: "following" };
+try { if (localStorage.getItem("livePage") === "discover") livePage.page = "discover"; } catch {}
+function showLivePage(page, load = true) {
+  livePage.page = page;
+  try { localStorage.setItem("livePage", page); } catch {}
+  document.querySelectorAll("#live-page button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.p === page)));
+  $("f-live-panel").hidden = page !== "following";
+  $("f-off-panel").hidden = page !== "following" || !$("f-off").children.length;
+  $("d-panel").hidden = page !== "discover";
+  if (load && page === "discover" && !dc.loaded) loadDiscover(true);
+}
+document.querySelectorAll("#live-page button").forEach(b => b.onclick = () => showLivePage(b.dataset.p));
 const follow = { timer: null };
 async function refreshFollowing() {
   clearTimeout(follow.timer);
@@ -1538,9 +1580,9 @@ async function refreshFollowing() {
     : live.length ? "" : d.rooms.length ? "No one you follow is live right now." : "You don't follow anyone on Chaturbate yet.";
   follow.live = live;
   $("f-live").replaceChildren(...live.map(r => liveCard(r, live)));
-  if (!dc.loaded) loadDiscover(true);
   $("f-off").replaceChildren(...off.map(offRow));
-  $("f-off-panel").hidden = !off.length;
+  $("f-off-panel").hidden = !off.length || livePage.page !== "following";
+  if (livePage.page === "discover" && !dc.loaded) loadDiscover(true);
 
   if (state.view === "follow") follow.timer = setTimeout(refreshFollowing, 60000);
 }
@@ -1652,6 +1694,7 @@ $("mv-close").onclick = closeMulti;
 
 /* Discover (Live): rooms you don't follow, through the same age and word checks. */
 const dc = { mode: "foryou", gender: "", q: "", offset: 0, rooms: [], gen: 0, loaded: false };
+showLivePage(livePage.page, false);      // (Discover loads when the Live tab opens on it)
 document.querySelectorAll("#d-mode button").forEach(b => b.onclick = () => {
   dc.mode = b.dataset.m;
   document.querySelectorAll("#d-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
@@ -1774,6 +1817,7 @@ async function loadRecentBrowses() {
 }
 document.querySelectorAll("#br-sorts button").forEach(b => b.onclick = () => openBrowse(br.sub, b.dataset.o));
 function openBrowse(sub, sort) {
+  if (!$("post-view").hidden) closePost();
   sub = sub.replace(/^\/?r\//i, "").replace(/\/$/, "");
   br.gen++; br.sub = sub; br.sort = sort; br.after = ""; br.loading = false;
   document.querySelectorAll("#br-sorts button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.o === sort)));
@@ -1796,10 +1840,49 @@ async function moreBrowse() {
   finally { if (gen === br.gen) br.loading = false; }
 }
 $("br-more").onclick = moreBrowse;
+// A post, opened: the post and its comments, read live from its site.
+const pv = { gen: 0 };
+async function openPost(p) {
+  const gen = ++pv.gen;
+  $("pv-title").textContent = { x: "Post on X", reddit: p.place ? `r/${p.place}` : "Reddit", e621: "e621" }[p.source] || "Post";
+  $("pv-post").replaceChildren(postCard(p, true));
+  $("pv-h").textContent = { x: "Replies", reddit: "Comments", e621: "Comments" }[p.source] || "Comments";
+  $("pv-comments").replaceChildren(el("p", "note", "Reading the comments…"));
+  $("post-view").hidden = false; $("post-view").scrollTop = 0;
+  let d;
+  try { d = await api(`api/post/comments?id=${encodeURIComponent(p.id)}`); }
+  catch (err) { if (gen === pv.gen) $("pv-comments").replaceChildren(el("p", "note", err.message)); return; }
+  if (gen !== pv.gen) return;
+  const count = cs => cs.reduce((n, c) => n + 1 + count(c.replies), 0), n = count(d.comments);
+  $("pv-h").textContent += n ? ` · ${n.toLocaleString()}` : "";
+  $("pv-comments").replaceChildren(...(n ? d.comments.map(c => commentEl(c, p.source)) : [el("p", "note", "No comments yet.")]));
+}
+function commentEl(c, source) {
+  const box = el("div", "cm"), av = el("span", "av", c.avatar ? null : (c.author || "?").slice(0, 1).toUpperCase()), main = el("div");
+  if (c.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = c.avatar; av.append(im); }
+  const head = el("div", "cm-head"), who = el("b", null, c.author || "?");
+  const person = source === "x" ? { x: c.author } : source === "reddit" && c.author !== "[deleted]" ? { reddit: c.author } : null;
+  if (person && c.author) { who.classList.add("who"); who.onclick = av.onclick = () => { closePost(); openPerson(person); }; }
+  const score = c.score == null ? "" : source === "x" ? `${c.score} ♥` : `${c.score} pts`;
+  head.append(who, el("small", null, [relTime(c.at), score].filter(Boolean).join(" · ")));
+  main.append(head);
+  if (c.text) main.append(el("p", "cm-text", c.text));
+  if ((c.media || []).length) {
+    const m = el("div", "cm-media");
+    for (const u of c.media) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = u; m.append(im); }
+    main.append(m);
+  }
+  box.append(av, main);
+  if ((c.replies || []).length) { const r = el("div", "cm-replies"); r.append(...c.replies.map(x => commentEl(x, source))); box.append(r); }
+  return box;
+}
+function closePost() { pv.gen++; $("post-view").hidden = true; $("pv-post").replaceChildren(); $("pv-comments").replaceChildren(); }
+$("pv-close").onclick = closePost;
 function closeBrowse() { br.gen++; $("browse").hidden = true; for (const v of $("br-posts").querySelectorAll("video")) v.pause(); }
 $("br-close").onclick = closeBrowse;
-function postCard(p) {
+function postCard(p, opened) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
+  const canOpen = !opened && /^(x|reddit|e621):/.test(String(p.id || ""));
   const av = el("span", "av sm", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
   if (p.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = p.avatar; av.append(im); }
   // whose profile the name opens: X's and Reddit's author, e621's (first) artist
@@ -1815,7 +1898,10 @@ function postCard(p) {
                        return w; })(),
               el("span", "time", "· " + relTime(p.posted_at)));
   body.append(head);
-  if (p.text) body.append(el("p", "text", p.text));
+  if (p.text) {
+    const t = el("p", "text", p.text); body.append(t);
+    if (canOpen) { t.classList.add("go"); t.onclick = () => openPost(p); }
+  }
   for (const m of p.media) {
     const box = el("div", "media");
     if (m.kind === "video" || m.kind === "hls") {
@@ -1823,10 +1909,17 @@ function postCard(p) {
       if (m.poster) v.poster = m.poster;
       if (m.kind === "video") v.src = m.url; else feedHls(v, m);
       box.append(v);
-    } else { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = m.url; box.append(img); }
+    } else {
+      const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = m.url; box.append(img);
+      if (canOpen) { box.classList.add("go"); box.onclick = () => openPost(p); }
+    }
     body.append(box);
   }
   const acts = el("div", "acts");
+  if (canOpen) {
+    const c = el("button", "comments-btn", p.comments ? `💬 ${Number(p.comments).toLocaleString()}` : "💬 Comments");
+    c.type = "button"; c.onclick = () => openPost(p); acts.append(c);
+  }
   if (p.link) {
     const out = el("a", "out", { reddit: "Open on Reddit", e621: "Open on e621" }[p.source] || "Open on X");
     out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; acts.append(out);
@@ -1953,6 +2046,7 @@ function vidDate(f) { return new Date(f.mtime * 1000).toLocaleDateString(undefin
 const pf = { room: null, key: null, data: null, videos: [], gen: 0, timer: null, ptimer: null, card: null };
 function openProfile(r) { pf.card = r; openPerson({ room: r.name }); }
 async function openPerson(key) {
+  if (!$("post-view").hidden) closePost();
   const gen = ++pf.gen;
   clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); pf.toldFail = false;
   pf.key = key; pf.videos = []; pf.data = null; pf.posts = null; pf.room = key.room ? { name: key.room } : null;
@@ -2189,7 +2283,7 @@ function closeRoom() { pl.gen++; stopVideo(); $("player").hidden = true; }
 $("pl-close").onclick = closeRoom;
 document.addEventListener("keydown", e => {
   if ($("player").hidden) {
-    if (e.key === "Escape") { if (!$("multi").hidden) closeMulti(); else if (!$("browse").hidden) closeBrowse(); else if (!$("profile").hidden) closeProfile(); }
+    if (e.key === "Escape") { if (!$("multi").hidden) closeMulti(); else if (!$("post-view").hidden) closePost(); else if (!$("browse").hidden) closeBrowse(); else if (!$("profile").hidden) closeProfile(); }
     return;
   }
   if (e.key === "Escape") closeRoom();

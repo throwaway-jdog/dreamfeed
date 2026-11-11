@@ -247,7 +247,7 @@ def _reddit_listing(d: dict, via: str) -> tuple[list[dict], str | None]:
                       "avatar": icon if icon and icon.startswith("https://") else None,
                       "place": p.get("subreddit"), "text": p.get("title") or "", "posted_at": _utc(p.get("created_utc")),
                       "link": "https://www.reddit.com" + (p.get("permalink") or ""), "via": via,
-                      "saved": bool(p.get("saved")), "media": media})
+                      "saved": bool(p.get("saved")), "media": media, "comments": p.get("num_comments")})
     return posts, (d.get("data") or {}).get("after")
 
 
@@ -327,11 +327,12 @@ def _x_video(url: str, md: dict) -> str:
     return pick["url"] if pick else url
 
 
-def _x(url: str, start: int, count: int, timeout: int = 90) -> list:
+def _x(url: str, start: int, count: int, timeout: int = 90, options: tuple = ()) -> list:
     if not x_cookies():
         raise LookupError("X isn't signed in (X_COOKIES_FILE)")
     try:
         out = subprocess.run([sys.executable, "-c", X_RUNNER, "--config-ignore", "--cookies", x_cookies(), "-o", "cookies-update=false",
+                              *[a for o in options for a in ("-o", o)],
                               "--range", f"{start}-{start + count - 1}", "-j", url],
                              capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
@@ -371,7 +372,7 @@ def _x_posts(items: list, via: str) -> tuple[list[dict], list[dict], int]:
             p = posts[tid] = {"id": f"x:{tid}", "source": "x", "author": a["name"], "nick": a.get("nick"),
                               "avatar": a.get("profile_image") or None, "place": None, "text": md.get("content") or "",
                               "posted_at": str(md.get("date") or ""), "link": f"https://x.com/{a['name']}/status/{tid}",
-                              "via": via, "saved": False, "media": [],
+                              "via": via, "saved": False, "media": [], "comments": md.get("reply_count"),
                               "mentions": sorted({n for n in named if n and n.lower() != a["name"].lower()})}
             if md.get("date_bookmarked"):           # your bookmarks: when you bookmarked it (UTC)
                 p["saved_at"] = str(md["date_bookmarked"])[:19]
@@ -441,7 +442,7 @@ def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict
             out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"], "artists": d["artists"],
                         "place": search, "text": d["title"], "posted_at": d["date"], "link": d["link"],
                         "via": "foryou" if top else "following", "saved": False,
-                        "score": ((p.get("score") or {}).get("total") or 0),
+                        "score": ((p.get("score") or {}).get("total") or 0), "comments": p.get("comment_count"),
                         "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
                                    "poster": prev if kind == "video" else None}]})
         if len(found) < E621_PAGE:
@@ -567,6 +568,96 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
         if p["id"] not in seen:
             seen.add(p["id"]); out.append(p)
     return {"posts": out, "users": users, "cursor": nxt, "more": any(v is not None for v in nxt.values()), "errors": errors}
+
+
+# ---- a post's comments ----
+MAX_COMMENTS = 150      # read a post, at most
+COMMENT_DEPTH = 4       # replies to replies ... (Reddit)
+
+
+def _comment(cid, author, text, at, score=None, avatar=None, media=None) -> dict:
+    return {"id": str(cid), "author": author or "", "text": text or "", "at": at or "", "score": score,
+            "avatar": avatar if avatar and str(avatar).startswith("https://") else None, "media": media or [], "replies": []}
+
+
+def _reddit_comments(pid: str) -> list[dict]:
+    d = _reddit(f"/comments/{pid}?raw_json=1&limit={MAX_COMMENTS}&depth={COMMENT_DEPTH}&sort=top")
+    def walk(children) -> list[dict]:
+        out = []
+        for ch in children or []:
+            c = ch.get("data") or {}
+            if ch.get("kind") != "t1" or c.get("author") == "AutoModerator" or text_blocked(c.get("body")):
+                continue
+            item = _comment(c.get("id"), c.get("author"), c.get("body"), _utc(c.get("created_utc")), c.get("score"))
+            replies = c.get("replies")
+            item["replies"] = walk(((replies or {}).get("data") or {}).get("children")) if isinstance(replies, dict) else []
+            out.append(item)
+        return out
+    return walk(((d[1] if isinstance(d, list) and len(d) > 1 else {}).get("data") or {}).get("children"))
+
+
+def _e621_comments(pid: str) -> list[dict]:
+    d = e621.get("/comments.json", {"group_by": "comment", "search[post_id]": pid, "limit": MAX_COMMENTS})
+    rows = d if isinstance(d, list) else []          # (none: {"comments": []})
+    rows = [c for c in rows if not c.get("is_hidden") and not text_blocked(c.get("body"))]
+    rows.sort(key=lambda c: c.get("created_at") or "")
+    out = []
+    for c in rows:
+        try:
+            at = dt.datetime.fromisoformat(c["created_at"]).astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        except (KeyError, ValueError):
+            at = ""
+        out.append(_comment(c.get("id"), c.get("creator_name"), c.get("body"), at, c.get("score")))
+    return out
+
+
+def _x_comments(tid: str) -> list[dict]:
+    """The replies under a post (gallery-dl's conversation of it), nested by what each answers."""
+    items = _x(f"https://x.com/i/web/status/{tid}", 1, MAX_COMMENTS, timeout=60,
+               options=("conversations=true", "text-tweets=true", "replies=true", "retweets=false", "quoted=false"))
+    tweets: dict[str, dict] = {}
+    parent: dict[str, str] = {}
+    for it in items:
+        if not isinstance(it, list) or len(it) < 2 or it[0] not in (2, 3):
+            continue
+        md = it[-1] if isinstance(it[-1], dict) else {}
+        t = str(md.get("tweet_id") or "")
+        a = md.get("author") or {}
+        if not t or t == tid or not a.get("name"):
+            continue
+        if t not in tweets:
+            if text_blocked(md.get("content")):
+                tweets[t] = None
+                continue
+            text = re.sub(r"^(?:@\w{1,15}\s+)+", "", md.get("content") or "")     # (the @names it answers, as X hides them)
+            tweets[t] = _comment(t, a["name"], text, str(md.get("date") or ""), md.get("favorite_count"),
+                                 a.get("profile_image"))
+            parent[t] = str(md.get("reply_id") or "")
+        url = it[1] if it[0] == 3 else ""
+        if tweets.get(t) is not None and isinstance(url, str) and url.startswith("https://pbs.twimg.com/"):
+            tweets[t]["media"].append(url.replace("name=orig", "name=small"))
+    top = []
+    for t, c in tweets.items():
+        if c is None:
+            continue
+        up = tweets.get(parent.get(t, ""))
+        (up["replies"] if up else top).append(c)
+    top.sort(key=lambda c: -(c["score"] or 0))
+    return top
+
+
+def comments(post_id: str) -> list[dict]:
+    """A post's comments, live from its site: [{"id", "author", "avatar", "text", "at", "score",
+    "media" (X: pictures in a reply), "replies": [...]}]. Comments whose text has words
+    dreamfeed never shows are left out (and their replies with them)."""
+    m = re.fullmatch(r"(x|reddit|e621):([A-Za-z0-9_]{1,30})", post_id or "")
+    if not m:
+        raise ValueError("bad post")
+    site, pid = m.groups()
+    read = {"x": _x_comments, "reddit": _reddit_comments, "e621": _e621_comments}[site]
+    if site == "reddit" and not reddit_ready():
+        raise LookupError("Reddit isn't signed in")
+    return _cached(f"comments:{post_id}", lambda: read(pid))
 
 
 # ---- what you saved on the sites (Saved's import) ----

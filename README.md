@@ -397,6 +397,11 @@ the **Saved** tab, below):
 **Browse now (Reddit).** With Reddit picked, type a subreddit (or tap one on a post) to see it
 as it is now: Hot, New or the day's Top, 25 posts a page, More for the next.
 
+**Comments.** Tap a post's text or picture, or 💬 (with how many it has), to open it with its
+comments, read live from its site: X's replies (nested by what they answer, with their pictures),
+Reddit's comments (top first, replies to replies four deep; AutoModerator left out) and e621's.
+Comments with words dreamfeed never shows are left out.
+
 **Profiles.** Tap an X name or picture (Following, For you, anywhere) for their profile: their
 picture, name, bio and counts, and their latest media posts, read as you open it (More for
 older ones). A Reddit name gives their latest posts the same way (Reddit's search by author),
@@ -474,7 +479,7 @@ day; links that cost tokens are left alone), or by you on the profile; × unlink
 linked again). Tapping a poster's name in the Feed opens their profile too, the room's if
 they're linked to one.
 
-**Discover, on Live:** live rooms you don't follow. For you has rooms sharing the most common
+**Discover, on Live** (its own page next to Following, which has who you follow, live and not): live rooms you don't follow. For you has rooms sharing the most common
 tags of the rooms you follow, Top the most watched, Search a tag or a few words, each for
 anyone or for women, men, couples or trans performers. Only rooms Chaturbate lists as age
 verified, 18 or over and with no password are shown, and rooms whose tags or title have words
