@@ -1,7 +1,8 @@
 """Your own videos of the Chaturbate rooms you follow, from a folder you keep (CB_VIDEOS,
 mounted read-only; CB_VIDEOS_DIR in .env): each room's under a folder named after it
-(<folder>/<room>/..., subfolders too), or loose in the folder with a name starting with the
-room's ("<room>_2026-11-10.mp4"; the longest room name that fits wins). The Live tab lists
+(<folder>/<room>/..., subfolders too; "<room> [CB]/" as recorders name it works too), or loose
+in the folder with a name starting with the room's ("<room>_2026-11-10.mp4"). Either way the
+longest room name that fits wins. The Live tab lists
 them on the room's profile and plays them. dreamfeed writes there only when you ask it to:
 - highlights (cbhighlights.py) go in the room's folder, under highlights/ (made if needed);
 - a video you delete is moved to .trash/ there first (Undo puts it back) and is gone for good
@@ -37,6 +38,14 @@ def posters(data: Path) -> Path:
     return data / "generated" / "follow" / "videos"
 
 
+def _room_of(name: str, rooms) -> str | None:
+    """The room a folder or file name is of: the longest of rooms it starts with, followed by
+    nothing or by something that isn't a letter or digit ("room", "room [CB]", "room_2026...")."""
+    low = name.lower()
+    return next((r for r in sorted(rooms, key=len, reverse=True)
+                 if low.startswith(r) and not low[len(r):len(r) + 1].isalnum()), None)
+
+
 def _videos(folder: Path):
     for p in folder.rglob("*"):
         if p.suffix.lower() in EXTS and not any(part.startswith(".") for part in p.relative_to(folder).parts) and p.is_file():
@@ -50,16 +59,14 @@ def scan(rooms) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     if not base:
         return out
-    by_length = sorted(rooms, key=len, reverse=True)
     for entry in sorted(base.iterdir()):
         if entry.name.startswith("."):
             continue
         if entry.is_dir():
-            name = entry.name.lower()
-            files = list(_videos(entry)) if name in rooms else []
+            name = _room_of(entry.name, rooms)
+            files = list(_videos(entry)) if name else []
         elif entry.is_file() and entry.suffix.lower() in EXTS:
-            low = entry.name.lower()
-            name = next((r for r in by_length if low.startswith(r) and not low[len(r):len(r) + 1].isalnum()), None)
+            name = _room_of(entry.name, rooms)
             files = [entry] if name else []
         else:
             continue
@@ -81,12 +88,7 @@ def _owner(rel: str, rooms) -> str | None:
     parts = rel.split("/")
     if any(not p or p.startswith(".") for p in parts):
         return None
-    rooms = {r.lower() for r in rooms}
-    if len(parts) > 1:
-        return parts[0].lower() if parts[0].lower() in rooms else None
-    low = parts[0].lower()
-    return next((r for r in sorted(rooms, key=len, reverse=True)
-                 if low.startswith(r) and not low[len(r):len(r) + 1].isalnum()), None)
+    return _room_of(parts[0], {r.lower() for r in rooms})
 
 
 def file(room: str, rel: str, rooms) -> Path | None:
@@ -149,12 +151,10 @@ def is_highlight(rel: str) -> bool:
 
 
 def room_folder(room: str) -> Path:
-    """The room's folder (an existing one in any case, else <room>, made when written to)."""
+    """The room's folder (an existing one, "room" or "room [CB]", else <room>, made when written to)."""
     base = root()
-    for entry in base.iterdir():
-        if entry.is_dir() and entry.name.lower() == room:
-            return entry
-    return base / room
+    dirs = [e for e in sorted(base.iterdir()) if e.is_dir() and not e.name.startswith(".") and _room_of(e.name, {room})]
+    return next((e for e in dirs if e.name.lower() == room), dirs[0] if dirs else base / room)
 
 
 def highlight_of(rel: str, room: str) -> str:

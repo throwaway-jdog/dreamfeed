@@ -432,8 +432,11 @@ out.
 
 **Your own videos of them.** Videos you have of the rooms you follow go in the folder
 `CB_VIDEOS_DIR` (mounted into the web and follow services; dreamfeed writes there only for
-highlights and deletes, below): a folder per room, named after it (`<room>/...`, subfolders too), or loose files whose
-names start with the room's (`<room>_2026-11-10.mp4`; the longest room name that fits wins).
+highlights and deletes, below): a folder per room, named after it (`<room>/...`, subfolders too;
+`<room> [CB]/`, as streamonitor names them, too), or loose files whose names start with the
+room's (`<room>_2026-11-10.mp4`); the longest room name that fits wins. When your recorder makes
+the folders as another user (root), set `CB_VIDEOS_GID` to a group the folder lets write (its
+ACL), so highlights and deletes can write there.
 MP4, M4V, MOV, WebM and MKV are listed; MP4 plays in every browser. A room with videos says how
 many: tap that (or the room, in Not live) for its profile, with the videos newest first, each
 with a poster and its length, played in the same player (‹ › go through that room's videos).
