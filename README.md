@@ -490,7 +490,18 @@ usually live, their bio, the X and Reddit accounts linked to the room, their lat
 (read live), and your videos of them. Accounts get linked by themselves when the performer links them
 for free in their Chaturbate bio (the follow service reads a few bios each round, each once a
 day; links that cost tokens are left alone), or by you on the profile; × unlinks one (it isn't
-linked again). An xvideos profile works the same way (its address in their bio, or linked by you
+linked again). **Their accounts, found across sites** (`linking.py`, run by the web app: it has the Reddit and
+X sign-ins). From what a room links, dreamfeed follows what the creator publishes themselves: link
+pages (Linktree, AllMyLinks) are read and every account on them linked; each account's own profile
+is read for more (an X bio and website, a Reddit profile, a RedGifs profile), two steps out. Then
+their names (the room's, their OnlyFans, Fansly, X and Reddit names) are looked for on RedGifs and
+Reddit: one whose profile links back to an account already theirs is linked ("links back"); a
+RedGifs one that doesn't is only suggested (dashed, "same name: theirs?", ✓ or ×), since others
+use the same names. Each link says where it was found. A room is looked at when you open it and
+again after a week; the rooms you follow, a few each half hour; Look again on the profile does it
+now. OnlyFans and Fansly aren't read (paywalled); nothing is guessed from faces or anything else.
+A linked RedGifs account gives the profile a RedGifs tab: their clips, newest first, played here.
+An xvideos profile works the same way (its address in their bio, or linked by you
 as its name or address): the profile then has an xvideos tab next to Posts with their videos,
 newest first, played in xvideos' own player inside dreamfeed (nothing is downloaded). Tapping a poster's name in the Feed opens their profile too, the room's if
 they're linked to one.

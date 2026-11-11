@@ -80,9 +80,10 @@ CREATE TABLE IF NOT EXISTS highlights (       -- highlight cuts of your own room
 );
 CREATE TABLE IF NOT EXISTS links (            -- a Chaturbate room's accounts elsewhere (one profile across sites)
     room        TEXT NOT NULL,
-    source      TEXT NOT NULL,               -- x | reddit
+    source      TEXT NOT NULL,               -- x | reddit | xvideos | redgifs | onlyfans | fansly
     handle      TEXT NOT NULL,               -- as written there (compared without case)
-    state       TEXT NOT NULL,               -- bio (their own Chaturbate bio links it) | yours | removed
+    state       TEXT NOT NULL,               -- bio (they link it themselves) | suggested (same name) | yours | removed
+    via         TEXT,                        -- where it was found ("their Linktree", "links back" ...)
     PRIMARY KEY (room, source, handle)
 );
 CREATE TABLE IF NOT EXISTS x_users (          -- X accounts seen in the live Feed: who they are, for profiles
@@ -153,6 +154,10 @@ def connect(path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE saved_posts ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'")
         conn.execute("ALTER TABLE saved_posts ADD COLUMN files TEXT")
         conn.execute("ALTER TABLE saved_posts ADD COLUMN error TEXT")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(links)")}
+    if "via" not in cols:         # where a link was found (linking.py)
+        conn.execute("ALTER TABLE links ADD COLUMN via TEXT")
+    conn.execute("CREATE TABLE IF NOT EXISTS link_checks (room TEXT PRIMARY KEY, at TEXT NOT NULL, found TEXT)")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(follows)")}
     if "bio_at" not in cols:      # when the room's bio was last read for its links
         conn.execute("ALTER TABLE follows ADD COLUMN bio_at TEXT")

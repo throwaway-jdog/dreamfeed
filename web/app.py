@@ -20,6 +20,8 @@ GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
+GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
+POST /api/profile/relink {"room"}  look for the room's accounts across sites again (linking.py)
 GET  /api/xvideos      ?name=PROFILE&page=N  an xvideos profile's videos (a room's linked one), live
 GET  /api/post         ?id=x:ID|reddit:ID|e621:ID  one post (its own page): your kept copy if you saved it, else live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
@@ -78,7 +80,7 @@ import dvr
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, cbprofile, cbvideos, e621, livefeeds, personas as people, safety, savedposts   # the worker's own rules (see Dockerfile)
+from dreamfeed import acts, cbprofile, cbvideos, e621, linking, livefeeds, personas as people, safety, savedposts   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -96,7 +98,7 @@ DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
 # Each part of the page has its own address (the page reads it and opens that part):
 PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
-         "x", "u", "r", "e621", "post", "xvideos"}
+         "x", "u", "r", "e621", "post", "xvideos", "redgifs"}
 # Where the page is served from, as the reverse proxy says (X-Forwarded-Prefix: e.g. Caddy's
 # handle_path strips it, so the page needs it for its own links); none: the site's root.
 PREFIX = re.compile(r"^(?:/[A-Za-z0-9._~-]+)*$")
@@ -148,7 +150,18 @@ def db() -> sqlite3.Connection:
         saved_at TEXT NOT NULL DEFAULT (datetime('now')), status TEXT NOT NULL DEFAULT 'queued', files TEXT, error TEXT)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS x_seen (handle TEXT NOT NULL COLLATE NOCASE, kind TEXT NOT NULL, post TEXT NOT NULL,
         by TEXT, at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (handle, kind, post))""")
+    if not _migrated:            # (once a start) links found across sites: where each came from (linking.py)
+        _migrated.append(True)
+        conn.execute("""CREATE TABLE IF NOT EXISTS links (room TEXT NOT NULL, source TEXT NOT NULL, handle TEXT NOT NULL,
+            state TEXT NOT NULL, via TEXT, PRIMARY KEY (room, source, handle))""")
+        if "via" not in {r[1] for r in conn.execute("PRAGMA table_info(links)")}:
+            conn.execute("ALTER TABLE links ADD COLUMN via TEXT")
+        conn.execute("CREATE TABLE IF NOT EXISTS link_checks (room TEXT PRIMARY KEY, at TEXT NOT NULL, found TEXT)")
+        conn.commit()
     return conn
+
+
+_migrated: list = []
 
 
 def clip_seconds(checkpoint: str | None) -> int:
@@ -962,6 +975,75 @@ def _bio(name: str) -> dict:
     return _cached("bio:" + name, 3600, fetch) or {}
 
 
+LINK_DAYS = 7              # a room's links are looked for again after this
+LINK_SWEEP = 1800          # seconds between looks at the rooms you follow (a few each time)
+_linking: set = set()
+_linking_lock = threading.Lock()
+
+
+def start_linking(room: str) -> bool:
+    """Look for the room's accounts across sites (linking.py), in the background, one room at a time."""
+    with _linking_lock:
+        if room in _linking or len(_linking) >= 2:
+            return False
+        _linking.add(room)
+    threading.Thread(target=_run_linking, args=(room,), daemon=True).start()
+    return True
+
+
+def _run_linking(room: str) -> None:
+    try:
+        with db() as conn:
+            known = [(l["source"], l["handle"]) for l in conn.execute(
+                "SELECT source, handle FROM links WHERE room = ? AND state IN ('bio', 'yours')", (room,))]
+            removed = {(l["source"], l["handle"].lower()) for l in conn.execute(
+                "SELECT source, handle FROM links WHERE room = ? AND state = 'removed'", (room,))}
+        try:
+            bio = cbprofile.bio(room)["links"]          # (with their link pages, which aren't kept)
+        except (OSError, ValueError):
+            bio = []
+        start = list(dict.fromkeys(known + [(s, h) for s, h in bio if (s, h.lower()) not in removed]))
+        found = [f for f in linking.find(room, start) if (f[0], f[1].lower()) not in removed]
+        with db() as conn:
+            cbprofile.save_links(conn, room, [(s, h) for s, h in bio if s in cbprofile.ACCOUNTS])
+            cbprofile.save_links(conn, room, found)
+            conn.execute("INSERT INTO link_checks(room, at, found) VALUES (?, datetime('now'), ?)"
+                         " ON CONFLICT(room) DO UPDATE SET at = excluded.at, found = excluded.found",
+                         (room, json.dumps(found)))
+        if found:
+            print(time.strftime("%F %T"), f"web: {room}: {len(found)} account(s) found across sites", flush=True)
+    except Exception as e:      # (the profile just shows what it had)
+        print(time.strftime("%F %T"), f"web: looking for {room}'s accounts failed: {e}", flush=True)
+    finally:
+        with _linking_lock:
+            _linking.discard(room)
+
+
+def _link_sweep() -> None:
+    """The rooms you follow, a few each half hour, each again after LINK_DAYS."""
+    while True:
+        time.sleep(LINK_SWEEP)
+        try:
+            with db() as conn:
+                rooms = [r[0] for r in conn.execute(
+                    "SELECT f.name FROM follows f LEFT JOIN link_checks c ON c.room = f.name WHERE f.source = 'chaturbate'"
+                    " AND (c.at IS NULL OR c.at < datetime('now', ?)) ORDER BY c.at LIMIT 3", (f"-{LINK_DAYS} days",))]
+            for r in rooms:
+                while _linking:
+                    time.sleep(5)
+                start_linking(r)
+        except sqlite3.Error:
+            pass
+
+
+def relink(req: dict) -> dict:
+    """{"room"}: look for the room's accounts again now."""
+    room = str(req.get("room", ""))
+    if not ROOM.match(room):
+        raise ValueError("bad room")
+    return {"running": start_linking(room) or room in _linking}
+
+
 def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = "") -> dict:
     """One profile across sites: a Chaturbate room (or the room an X or Reddit account is linked
     to), its linked accounts (who they are on X and Reddit) and your videos of it; or an e621
@@ -1003,13 +1085,22 @@ def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = ""
             rec = _dvr()
             out["dvr"] = {"on": dvr.enabled(), "room": rec.get("rooms", {}).get(room), "free": rec.get("free"),
                           "error": rec.get("error")}
-            out["links"] = [{"source": l["source"], "handle": l["handle"], "state": l["state"]} for l in conn.execute(
-                "SELECT * FROM links WHERE room = ? AND state != 'removed' ORDER BY source, handle", (room,))]
-        xs = ({l["handle"].lower() for l in out["links"] if l["source"] == "x"} | ({x.lower()} if x else set())
+            out["links"] = [{"source": l["source"], "handle": l["handle"], "state": l["state"],
+                             "via": l["via"] or ("their Chaturbate bio" if l["state"] == "bio" else None)} for l in conn.execute(
+                "SELECT * FROM links WHERE room = ? AND state != 'removed' ORDER BY state = 'suggested', source, handle", (room,))]
+            chk = conn.execute("SELECT at, at < datetime('now', ?) AS old FROM link_checks WHERE room = ?",
+                               (f"-{LINK_DAYS} days", room)).fetchone()
+            out["linking"] = {"running": room in _linking, "at": chk["at"] if chk else None}
+            if not chk or chk["old"]:
+                start_linking(room)                  # (in the background: the profile shows them when done)
+                out["linking"]["running"] = True
+        mine = [l for l in out["links"] if l["state"] != "suggested"]        # (a suggestion is only shown)
+        xs = ({l["handle"].lower() for l in mine if l["source"] == "x"} | ({x.lower()} if x else set())
               | set(artist["x"] if artist else []))
-        rs = {l["handle"].lower() for l in out["links"] if l["source"] == "reddit"} | ({reddit.lower()} if reddit else set())
+        rs = {l["handle"].lower() for l in mine if l["source"] == "reddit"} | ({reddit.lower()} if reddit else set())
         out["x"], out["reddit"] = sorted(xs), sorted(rs)
-        out["xvideos"] = sorted({l["handle"].lower() for l in out["links"] if l["source"] == "xvideos"})
+        out["xvideos"] = sorted({l["handle"].lower() for l in mine if l["source"] == "xvideos"})
+        out["redgifs"] = sorted({l["handle"].lower() for l in mine if l["source"] == "redgifs"})
         if rs and not xs and livefeeds.reddit_ready():      # their picture (X's own is in xusers)
             try:
                 out["reddituser"] = livefeeds.reddit_user(sorted(rs)[0])
@@ -1038,16 +1129,19 @@ def follow_room(req: dict) -> dict:
 
 
 def save_link(req: dict) -> dict:
-    """{"room", "source": "x"|"reddit"|"xvideos", "handle", "remove": bool}: link an account to a
-    room, or unlink it. An xvideos profile can be given as its address."""
+    """{"room", "source": "x"|"reddit"|"xvideos"|"redgifs"|"onlyfans"|"fansly", "handle", "remove": bool}:
+    link an account to a room (or confirm a suggested one), or unlink it. A profile can be given as
+    its address."""
     room, source, handle = str(req.get("room", "")), str(req.get("source", "")), str(req.get("handle", "")).strip()
     if not ROOM.match(room):
         raise ValueError("bad room")
-    if source == "xvideos":
-        found = cbprofile.XVIDEOS_LINK.findall(handle + " ")
-        handle = (found[0] if found else handle).lower()
-        if not livefeeds.XVIDEOS_NAME.match(handle):
-            raise ValueError("an xvideos profile's name or address (xvideos.com/profiles/NAME)")
+    pattern = {"xvideos": cbprofile.XVIDEOS_LINK, "redgifs": cbprofile.REDGIFS_LINK, "onlyfans": cbprofile.ONLYFANS_LINK,
+               "fansly": cbprofile.FANSLY_LINK}.get(source)
+    if pattern:
+        found = pattern.findall(handle + " ")
+        handle = (found[0] if found else handle.lstrip("@")).lower()
+        if not re.fullmatch(r"[a-z0-9_.-]{2,60}", handle):
+            raise ValueError(f"a {source} name or address")
     else:
         m = (X_HANDLE if source == "x" else REDDIT_USER if source == "reddit" else None)
         m = m.match(handle) if m else None
@@ -2180,6 +2274,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(404, {"error": str(e)[:200]})
+        if path == "/api/redgifs":
+            q = self.query()
+            try:
+                return self.send(200, livefeeds.redgifs_page(q.get("name", ""), int(q.get("page", "1") or 1)))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
+        if path == "/api/redgifs/clip":
+            try:
+                clip = livefeeds.redgifs_clip(self.query().get("id", ""))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            return self.send(200, {"clip": clip}) if clip else self.send(404, {"error": "that clip isn't there"})
         if path == "/api/xvideos":
             q = self.query()
             try:
@@ -2291,7 +2399,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
-                   "/api/dvr": dvr_action}
+                   "/api/dvr": dvr_action, "/api/profile/relink": relink}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
@@ -2329,4 +2437,5 @@ if __name__ == "__main__":
         icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
              "<circle cx='8' cy='8' r='6' fill='%23e5604a'/></svg>")
     print(time.strftime("%F %T"), f"web: feed on :{PORT}", flush=True)
+    threading.Thread(target=_link_sweep, daemon=True).start()
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()

@@ -158,6 +158,64 @@ def _new_redgifs_token() -> str:
     return tok
 
 
+def _redgifs_get(path: str):
+    """redgifs' API with a temporary token (as its own site uses); a new token when it's refused."""
+    for attempt in (0, 1):
+        with _lock:
+            tok = _redgifs["value"] if time.time() < _redgifs["until"] else ""
+        if not tok or attempt:
+            with _redgifs_token_lock:
+                with _lock:
+                    tok = _redgifs["value"] if time.time() < _redgifs["until"] and not attempt else ""
+                tok = tok or _new_redgifs_token()
+        req = urllib.request.Request("https://api.redgifs.com" + path,
+                                     headers={"User-Agent": _agent(), "Authorization": f"Bearer {tok}"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code != 401 or attempt:
+                raise
+
+
+REDGIFS_NAME = re.compile(r"^[a-z0-9_.-]{2,40}$")
+
+
+def redgifs_page(name: str, page: int) -> dict:
+    """A RedGifs creator's clips, newest first, 40 a page: {"clips": [{"id", "url", "poster",
+    "duration", "views", "tags"}], "total", "more"}. Played from redgifs' own servers."""
+    name = name.strip().lower()
+    if not REDGIFS_NAME.match(name) or not 1 <= page <= 200:
+        raise ValueError("bad RedGifs profile")
+    def fetch():
+        try:
+            d = _redgifs_get(f"/v2/users/{urllib.parse.quote(name)}/search?order=new&count=40&page={page}")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return {"clips": [], "total": 0, "more": False}
+            raise LookupError(f"RedGifs didn't answer ({e})") from e
+        except (OSError, ValueError) as e:
+            raise LookupError(f"RedGifs didn't answer ({e})") from e
+        out = []
+        for g in d.get("gifs") or []:
+            urls = g.get("urls") or {}
+            src = urls.get("hd") or urls.get("sd")
+            if not g.get("id") or not src or text_blocked(g.get("description"), " ".join(g.get("tags") or [])):
+                continue
+            out.append({"id": g["id"], "url": src, "poster": urls.get("poster") or urls.get("thumbnail"),
+                        "duration": round(g.get("duration") or 0), "views": g.get("views"), "tags": (g.get("tags") or [])[:6],
+                        "has_audio": bool(g.get("hasAudio"))})
+        return {"clips": out, "total": d.get("total") or 0, "more": page < (d.get("pages") or 0)}
+    return _cached(f"redgifs:{name}:{page}", fetch, 600)
+
+
+def redgifs_clip(cid: str) -> dict | None:
+    """One RedGifs clip by its id (its own page)."""
+    if not re.fullmatch(r"[a-z]{3,80}", cid or ""):
+        raise ValueError("bad clip")
+    return _redgifs_clip(f"https://www.redgifs.com/watch/{cid}")
+
+
 def _redgifs_clip(url: str) -> dict | None:
     """A redgifs link's clip, from redgifs' own API (a temporary token, as its site uses); kept
     an hour (its addresses are signed for longer)."""

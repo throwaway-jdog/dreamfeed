@@ -349,6 +349,9 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .profile .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 /* a room's profile: Follow (filled until you follow), Watch live, Chaturbate */
 .pf-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-chip.maybe { border-style: dashed; opacity: .85; }
+.pf-chip.maybe button { font-weight: 700; }
+.pf-relink { width: auto; min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: 999px; }
 .pf-acts > * { width: auto; padding: 0 16px; min-height: 40px; }
 .pf-acts a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 .pf-acts [hidden] { display: none !important; }
@@ -366,7 +369,8 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .xv-card small { color: var(--muted); font-size: 12px; }
 .xv-player { position: fixed; inset: 0; z-index: 32; background: #000; display: flex; flex-direction: column; }
 .xv-player[hidden] { display: none; }
-.xv-player iframe { flex: 1; width: 100%; border: 0; background: #000; }
+.xv-player iframe, .xv-player video { flex: 1; width: 100%; min-height: 0; border: 0; background: #000; }
+.xv-player [hidden] { display: none !important; }
 .xv-player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 .pf-body { padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; }
 .pf-body .note { margin: 0; color: var(--muted); }
@@ -863,10 +867,12 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="pf-sec" id="pf-prev-sec" hidden></div>
       <div class="pf-sec" id="pf-vid-sec" hidden><h3 id="pf-vcount">Your videos</h3><div class="pf-grid" id="pf-grid"></div></div>
       <div class="pf-sec fposts" id="pf-post-sec" hidden>
-        <div class="seg two pf-tabs" id="pf-tabs" role="group" aria-label="Show" hidden>
-          <button type="button" data-t="posts" aria-pressed="true">Posts</button><button type="button" data-t="xvideos" aria-pressed="false">xvideos</button></div>
+        <div class="seg pf-tabs" id="pf-tabs" role="group" aria-label="Show" hidden>
+          <button type="button" data-t="posts" aria-pressed="true">Posts</button><button type="button" data-t="redgifs" aria-pressed="false">RedGifs</button><button type="button" data-t="xvideos" aria-pressed="false">xvideos</button></div>
         <div id="pf-posts-tab"><h3>Posts</h3><div id="pf-posts"></div>
           <button type="button" class="secondary more" id="pf-more" hidden>More</button></div>
+        <div id="pf-rg" hidden><p class="note" id="pf-rg-note"></p><div class="xv-grid" id="pf-rg-grid"></div>
+          <button type="button" class="secondary more" id="pf-rg-more" hidden>More</button></div>
         <div id="pf-xv" hidden><p class="note" id="pf-xv-note"></p><div class="xv-grid" id="pf-xv-grid"></div>
           <button type="button" class="secondary more" id="pf-xv-more" hidden>More</button></div></div>
     </div>
@@ -897,6 +903,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button type="button" class="secondary" id="xv-close">Close</button></div>
     <iframe id="xv-frame" title="xvideos player" allow="autoplay; fullscreen" allowfullscreen referrerpolicy="no-referrer"
       sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
+    <video id="xv-video" controls playsinline loop hidden></video>
   </div>
   <div class="multi" id="multi" hidden role="dialog" aria-modal="true" aria-label="Several rooms">
     <div class="reader-bar"><span id="mv-hint">Tap one for its sound</span>
@@ -1645,7 +1652,7 @@ async function refreshSummary() {
    /r/SUB[/new|top], /e621/ARTIST, /post/SITE/ID, /xvideos/ID. Opening one replaces what's shown
    (no stacking): Close and Back go to the page before, or home when the page was opened by link. */
 const BASE = new URL(document.baseURI).pathname;        // where the page is served (the proxy says), e.g. /dreamfeed/
-const nav = { routed: null, posts: new Map(), rooms: new Map(), lists: new Map(), xv: new Map() };
+const nav = { routed: null, posts: new Map(), rooms: new Map(), lists: new Map(), xv: new Map(), clips: new Map() };
 const enc = encodeURIComponent;
 const ROOM_NAME = /^[a-z0-9_]{1,64}$/;
 function here() { const p = location.pathname; return p.startsWith(BASE) ? p.slice(BASE.length) : ""; }
@@ -1760,6 +1767,7 @@ function route() {
     case "r": if (b) return showBrowse(b, ["new", "top"].includes(c) ? c : "hot"); break;
     case "post": if (b && c) return showPostId(`${b}:${c}`); break;
     case "xvideos": if (b) return showXvideo(nav.xv.get(b) || { id: b, title: "xvideos" }); break;
+    case "redgifs": if (/^[a-z]{3,80}$/.test(b)) return showClip(b); break;
   }
   go("", true);
 }
@@ -2465,8 +2473,8 @@ async function showPerson(key) {
   if (!key.room) pf.card = null;
   $("pf-title").textContent = key.room || (key.x ? "@" + key.x : key.e621 ? key.e621.replace(/_/g, " ") : "u/" + key.reddit);
   $("pf-info").textContent = "Loading…"; $("pf-about").hidden = true; $("pf-head").hidden = true;
-  for (const id of ["pf-links", "pf-grid", "pf-posts", "pf-xv-grid"]) $(id).replaceChildren();
-  pf.xv = null; $("pf-tabs").hidden = true;
+  for (const id of ["pf-links", "pf-grid", "pf-posts", "pf-xv-grid", "pf-rg-grid"]) $(id).replaceChildren();
+  pf.xv = pf.rg = null; $("pf-tabs").hidden = true; clearTimeout(pf.ltimer);
   for (const id of ["pf-prev-sec", "pf-vid-sec", "pf-post-sec"]) $(id).hidden = true;
   $("pf-live").hidden = true; $("pf-open").hidden = true;
   $("profile").hidden = false; $("profile").scrollTop = 0;
@@ -2502,7 +2510,7 @@ async function loadPerson(gen) {
   renderDvr(d, gen);
   renderLinks(d);
   renderXHead(d);
-  const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...d.reddit.map(h => "u/" + h),
+  const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...d.reddit.map(h => "u/" + h), ...(d.redgifs || []).map(h => "rg:" + h),
                ...(d.xvideos || []).map(h => "xv:" + h)].join(" ");
   if (!pf.posts || pf.posts.gen !== gen || pf.posts.who !== who) startPersonPosts(d, gen, who);
   if (room && d.followed && d.videos) {
@@ -2543,6 +2551,19 @@ $("pf-follow").onclick = async () => {
   try { await api("api/live/follow", { name: d.room, follow: !d.followed }); } catch (err) { return toast(err.message); }
   pf.toldFail = false; pf.waitingFollow = true; loadPerson(pf.gen);
 };
+function linkLabel(src, h) {
+  if (src === "linkpage") { let u; try { u = new URL(h); } catch { return [h, h]; } return [u.hostname.replace(/^www\./, "") + u.pathname, h]; }
+  return {
+    x: ["@" + h, `https://x.com/${h}`], reddit: ["u/" + h, `https://www.reddit.com/user/${h}`],
+    xvideos: [`xvideos: ${h}`, `https://www.xvideos.com/profiles/${h}`], redgifs: [`RedGifs: ${h}`, `https://www.redgifs.com/users/${h}`],
+    onlyfans: [`OnlyFans: ${h}`, `https://onlyfans.com/${h}`], fansly: [`Fansly: ${h}`, `https://fansly.com/${h}`],
+  }[src] || [h, "#"];
+}
+// While the room's accounts are being looked for: the profile again in a bit.
+function pfLinkWait(gen) {
+  clearTimeout(pf.ltimer);
+  pf.ltimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 6000);
+}
 function renderLinks(d) {
   const chips = [];
   const chip = (label, href, note, onRemove) => {
@@ -2551,11 +2572,27 @@ function renderLinks(d) {
     if (onRemove) { const x = el("button", null, "×"); x.type = "button"; x.title = "Unlink"; x.onclick = onRemove; c.append(x); }
     return c;
   };
+  // each link with where it was found; a suggestion (the same name, not linked back) to confirm or not
   for (const l of d.links) {
-    const label = l.source === "x" ? "@" + l.handle : l.source === "xvideos" ? `xvideos: ${l.handle}` : "u/" + l.handle;
-    const href = l.source === "x" ? `https://x.com/${l.handle}` : l.source === "xvideos" ? `https://www.xvideos.com/profiles/${l.handle}`
-      : `https://www.reddit.com/user/${l.handle}`;
-    chips.push(chip(label, href, l.state === "bio" ? "their bio" : "", () => linkAccount(d.room, l.source, l.handle, true)));
+    const [label, href] = linkLabel(l.source, l.handle);
+    if (l.state === "suggested") {
+      const c = chip(label, href, "same name: theirs?");
+      c.classList.add("maybe");
+      const yes = el("button", null, "✓"), no = el("button", null, "×"); yes.type = no.type = "button";
+      yes.title = "Yes, theirs"; no.title = "Not theirs";
+      yes.onclick = () => linkAccount(d.room, l.source, l.handle, false);
+      no.onclick = () => linkAccount(d.room, l.source, l.handle, true);
+      c.append(yes, no); chips.push(c);
+    } else chips.push(chip(label, href, l.state === "yours" ? "linked by you" : l.via || "", () => linkAccount(d.room, l.source, l.handle, true)));
+  }
+  if (d.room) {
+    const lk = d.linking || {}, more = el("button", "secondary pf-relink", lk.running ? "Looking across sites…" : "Look again");
+    more.type = "button"; more.disabled = !!lk.running;
+    more.title = lk.at ? `Last looked ${relTime(lk.at)} ago: their link pages, profiles, and their names elsewhere` : "";
+    more.onclick = async () => { more.disabled = true; more.textContent = "Looking across sites…";
+      try { await api("api/profile/relink", { room: d.room }); } catch (err) { toast(err.message); } pfLinkWait(pf.gen); };
+    chips.push(more);
+    if (lk.running) pfLinkWait(pf.gen);
   }
   if (!d.room) {
     for (const a of d.e621 || []) chips.push(chip("e621", `https://e621.net/artists/show_or_new?name=${encodeURIComponent(a)}`));
@@ -2571,10 +2608,11 @@ function renderLinks(d) {
   $("pf-link-form").hidden = !!pf.key.e621;            // (rooms are linked to X and Reddit accounts)
   // With a room: link its accounts. Without: link this account to a room.
   const src = $("pf-link-src"), was = src.value;
-  src.replaceChildren(...(d.room ? [["x", "X"], ["reddit", "Reddit"], ["xvideos", "xvideos"]] : [["room", "Chaturbate"]]).map(([v, t]) => {
+  const SITES = [["x", "X"], ["reddit", "Reddit"], ["redgifs", "RedGifs"], ["xvideos", "xvideos"], ["onlyfans", "OnlyFans"], ["fansly", "Fansly"]];
+  src.replaceChildren(...(d.room ? SITES : [["room", "Chaturbate"]]).map(([v, t]) => {
     const o = el("option", null, t); o.value = v; return o;
   }));
-  if (d.room && (was === "reddit" || was === "xvideos")) src.value = was;
+  if (d.room && SITES.some(([v]) => v === was)) src.value = was;
   $("pf-link-in").placeholder = d.room ? "their handle there" : "their Chaturbate room";
 }
 $("pf-link-form").onsubmit = async e => {
@@ -2626,12 +2664,17 @@ function startPersonPosts(d, gen, who) {
                  ...d.x.map(h => ({ source: "x", handle: h, cursor: "" })), ...d.reddit.map(h => ({ source: "reddit", handle: h, cursor: "" }))];
   pf.posts = { gen, feeds, who, loading: false };
   $("pf-posts").replaceChildren(); $("pf-more").hidden = true;
-  const xv = (d.xvideos || [])[0];
+  const xv = (d.xvideos || [])[0], rg = (d.redgifs || [])[0];
   pf.xv = xv ? { name: xv, page: 0, gen, loaded: false } : null;
+  pf.rg = rg ? { name: rg, page: 1, gen, loaded: false } : null;
   $("pf-xv-grid").replaceChildren(); $("pf-xv-more").hidden = true; $("pf-xv-note").textContent = "";
-  $("pf-post-sec").hidden = !feeds.length && !xv;
-  $("pf-tabs").hidden = !(feeds.length && xv);
-  setPfTab(feeds.length ? "posts" : "xvideos");
+  $("pf-rg-grid").replaceChildren(); $("pf-rg-more").hidden = true; $("pf-rg-note").textContent = "";
+  const tabs = [feeds.length && "posts", rg && "redgifs", xv && "xvideos"].filter(Boolean);
+  $("pf-post-sec").hidden = !tabs.length;
+  $("pf-tabs").hidden = tabs.length < 2;
+  $("pf-tabs").style.gridTemplateColumns = `repeat(${tabs.length}, 1fr)`;
+  document.querySelectorAll("#pf-tabs button").forEach(b => { b.hidden = !tabs.includes(b.dataset.t); });
+  setPfTab(tabs[0] || "posts");
   const following = new Set(d.following_x || []);
   $("pf-prev-sec").replaceChildren(...d.x.map(h => el("small", "note", `@${h}: ${following.has(h) ? "you follow them on X" : "you don't follow them on X"}`)));
   $("pf-prev-sec").hidden = !d.x.length;
@@ -2639,10 +2682,34 @@ function startPersonPosts(d, gen, who) {
 }
 // Posts, or their xvideos videos (loaded when that tab is opened), watched in xvideos' own player.
 function setPfTab(t) {
-  $("pf-posts-tab").hidden = t !== "posts"; $("pf-xv").hidden = t !== "xvideos";
+  $("pf-posts-tab").hidden = t !== "posts"; $("pf-xv").hidden = t !== "xvideos"; $("pf-rg").hidden = t !== "redgifs";
   document.querySelectorAll("#pf-tabs button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
   if (t === "xvideos" && pf.xv && !pf.xv.loaded) moreXvideos();
+  if (t === "redgifs" && pf.rg && !pf.rg.loaded) moreRedgifs();
 }
+// Their RedGifs clips (the free ones they post themselves), played here from redgifs' servers.
+async function moreRedgifs() {
+  const st = pf.rg; if (!st || st.loading) return;
+  st.loaded = st.loading = true; $("pf-rg-more").hidden = true;
+  if (st.page === 1) $("pf-rg-note").textContent = `Reading RedGifs: ${st.name}…`;
+  let d;
+  try { d = await api(`api/redgifs?name=${encodeURIComponent(st.name)}&page=${st.page}`); }
+  catch (err) { if (pf.rg === st) { $("pf-rg-note").textContent = err.message; st.loading = false; } return; }
+  if (pf.rg !== st) return;
+  st.loading = false; st.page++;
+  $("pf-rg-note").textContent = d.total ? `${Number(d.total).toLocaleString()} clips on RedGifs (${st.name})` : `No clips on RedGifs (${st.name}).`;
+  $("pf-rg-grid").append(...d.clips.map(c => {
+    const b = el("button", "xv-card"), shot = el("span", "shot"); b.type = "button";
+    if (c.poster) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = c.poster; shot.append(im); }
+    if (c.duration) shot.append(el("span", "len", vidLength(c.duration)));
+    b.append(shot, el("small", null, [c.views != null && `${Number(c.views).toLocaleString()} views`, (c.tags || []).slice(0, 3).join(", ")]
+      .filter(Boolean).join(" · ")));
+    b.onclick = () => openClip(c);
+    return b;
+  }));
+  $("pf-rg-more").hidden = !d.more;
+}
+$("pf-rg-more").onclick = moreRedgifs;
 document.querySelectorAll("#pf-tabs button").forEach(b => b.onclick = () => setPfTab(b.dataset.t));
 async function moreXvideos() {
   const st = pf.xv; if (!st || st.loading) return;
@@ -2665,13 +2732,28 @@ async function moreXvideos() {
   $("pf-xv-more").hidden = !d.more;
 }
 $("pf-xv-more").onclick = moreXvideos;
+function openClip(c) { nav.clips.set(c.id, c); go(`redgifs/${enc(c.id)}`); }
+async function showClip(id) {
+  let c = nav.clips.get(id);
+  $("xv-title").textContent = "RedGifs"; $("xv-open").href = `https://www.redgifs.com/watch/${enc(id)}`;
+  $("xv-frame").hidden = true; $("xv-video").hidden = false; $("xv-player").hidden = false;
+  if (!c) {
+    try { c = (await api(`api/redgifs/clip?id=${enc(id)}`)).clip; } catch (err) { toast(err.message); return leave(); }
+    if (here() !== `redgifs/${enc(id)}`) return;
+  }
+  const v = $("xv-video"); v.poster = c.poster || ""; v.src = c.url; v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+}
 function showXvideo(v) {
+  $("xv-frame").hidden = false; $("xv-video").hidden = true;
   $("xv-title").textContent = v.title;
   $("xv-open").href = `https://www.xvideos.com/video.${encodeURIComponent(v.id)}/`;
   $("xv-frame").src = `https://www.xvideos.com/embedframe/${encodeURIComponent(v.id)}`;
   $("xv-player").hidden = false;
 }
-function closeXvideo() { $("xv-frame").src = "about:blank"; $("xv-player").hidden = true; }
+function closeXvideo() {
+  $("xv-frame").src = "about:blank"; $("xv-player").hidden = true;
+  const v = $("xv-video"); v.pause(); v.removeAttribute("src"); v.load();
+}
 $("xv-close").onclick = leave;
 async function morePersonPosts() {
   const st = pf.posts; if (!st || st.loading) return;
