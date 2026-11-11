@@ -21,6 +21,7 @@ GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's lates
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
 GET  /api/xvideos      ?name=PROFILE&page=N  an xvideos profile's videos (a room's linked one), live
+GET  /api/post         ?id=x:ID|reddit:ID|e621:ID  one post (its own page): your kept copy if you saved it, else live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
@@ -93,6 +94,12 @@ GENERATED = DATA / "generated"
 LIKED = DATA / "liked"
 DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
+# Each part of the page has its own address (the page reads it and opens that part):
+PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
+         "x", "u", "r", "e621", "post", "xvideos"}
+# Where the page is served from, as the reverse proxy says (X-Forwarded-Prefix: e.g. Caddy's
+# handle_path strips it, so the page needs it for its own links); none: the site's root.
+PREFIX = re.compile(r"^(?:/[A-Za-z0-9._~-]+)*$")
 PERSONAS = DATA / "personas.json"
 LORA_DIR = Path(required("LORA_DIR"))
 GENERATE_WINDOW = required("GENERATE_WINDOW")
@@ -160,8 +167,13 @@ def item(row) -> dict:
                         "avatar": bool(row["avatar"])} if row["persona"] else None}
 
 
-def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
+def feed(view: str, medium: str, offset: int, persona: str = "", gid: int | None = None) -> dict:
+    """A page of the persona feed; gid: just that post (its own page), unless you skipped it."""
     where, args = [], []
+    if gid is not None:
+        where.append("g.id = ? AND g.status = 'feed' AND (f.action IS NULL OR f.action = 'like')")
+        args.append(gid)
+        view, medium, persona = "item", "", ""
     if medium in MEDIUMS:
         where.append("g.medium = ?")
         args.append(medium)
@@ -170,6 +182,8 @@ def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
         args.append(persona)
     if view == "liked":
         return saved_view(medium, offset)
+    elif view == "item":
+        order = "g.id"
     else:   # the timeline: persona posts only (v1 images stay reachable from Liked)
         where.append("g.status = 'feed' AND p.active = 1 AND (f.action IS NULL OR f.action = 'like')")
         order = "coalesce(g.posted_at, g.created_at) DESC, g.id DESC"
@@ -786,6 +800,21 @@ def _saved_json(r) -> dict:
         p["media"] = [{"kind": f["kind"], "url": base + f["file"], "poster": base + f["poster"] if f.get("poster") else None}
                       for f in json.loads(r["files"])]
     return p
+
+
+def one_post(post_id: str) -> dict:
+    """A post's own page: a post you saved (from its kept copy), else live from its site."""
+    with db() as conn:
+        r = conn.execute("SELECT * FROM saved_posts WHERE id = ? AND status != 'removed'", (post_id,)).fetchone()
+    if r:
+        return {"post": _saved_json(r)}
+    try:
+        found = livefeeds.post(post_id)
+    except OSError as e:
+        raise LookupError(f"the site didn't answer ({e})")
+    if not found:
+        raise LookupError("that post isn't there any more (or dreamfeed leaves it out)")
+    return {"post": _mark_saved([found])[0]}
 
 
 def saved_file(rel: str) -> Path | None:
@@ -2051,8 +2080,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
-        if path in ("/", "/index.html"):
-            return self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+        if path in ("/", "/index.html") or path.strip("/").split("/")[0] in PAGES:
+            prefix = (self.headers.get("X-Forwarded-Prefix") or "").rstrip("/")
+            base = (prefix if PREFIX.match(prefix) else "") + "/"
+            page = PAGE.read_bytes().replace(b"<head>", b'<head>\n<base href="' + base.encode() + b'">', 1)
+            return self.send(200, page, "text/html; charset=utf-8")
         if path == "/api/feed":
             q = self.query()
             try:
@@ -2064,7 +2096,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": "bad persona"})
             if q.get("view") == "liked":
                 return self.send(200, saved_view(q.get("medium", "all"), offset, q.get("source", "all")))
-            return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset, persona))
+            gid = q.get("id", "")
+            if gid and not gid.isdigit():
+                return self.send(400, {"error": "bad id"})
+            return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset, persona, int(gid) if gid else None))
         if path == "/api/personas":
             return self.send(200, personas())
         if path == "/api/personas/edit":
@@ -2138,6 +2173,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, recent_browses())
         if path == "/api/discover/x":
             return self.send(200, discover_x())
+        if path == "/api/post":
+            try:
+                return self.send(200, one_post(self.query().get("id", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(404, {"error": str(e)[:200]})
         if path == "/api/xvideos":
             q = self.query()
             try:

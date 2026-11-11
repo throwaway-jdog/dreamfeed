@@ -533,6 +533,24 @@ title under the video stays current while you watch.
   files are: settings (`source.json`), what was kept, voices (`voice.json`) and download
   archives.
 
+## Addresses
+
+Each part of the page has its own address, so links, bookmarks and the Back button work. Opening
+one replaces what's on screen (nothing stacks); Close and Back go to the page before, or home when
+you came by link:
+
+- tabs: `/feed` (`/feed/foryou`), `/saved` (`/saved/x`, `/saved/reddit` ...), `/live`
+  (`/live/discover`), `/comics` (`/comics/ID`: a comic), `/dashboard`; `/` opens the tab you used last
+- personas: `/personas` (everyone's posts), `/p/HANDLE`, `/item/ID` (one post, in the viewer)
+- rooms: `/room/NAME` (profile), `/room/NAME/watch`, `/room/NAME/video/PATH` (one of your videos),
+  `/watch/A+B+C` (Watch several)
+- people and places: `/x/HANDLE`, `/u/NAME` (Reddit), `/r/SUB` (`/r/SUB/new`, `/r/SUB/top`),
+  `/e621/ARTIST`, `/xvideos/ID` (a video)
+- posts: `/post/x/ID`, `/post/reddit/ID`, `/post/e621/ID` (your kept copy when you saved it, else
+  read again from the site)
+
+Signing in always lands on home (the sign-in page doesn't keep where you were going).
+
 ## Caddy
 
 In the public section of the `<your domain>` block (the app has its own sign-in):
@@ -540,9 +558,16 @@ In the public section of the `<your domain>` block (the app has its own sign-in)
 ```
 redir /dreamfeed /dreamfeed/
 handle_path /dreamfeed/* {
-	reverse_proxy dreamfeed-web:8000
+	reverse_proxy dreamfeed-web:8000 {
+		header_up X-Forwarded-Prefix /dreamfeed
+	}
 }
 ```
+
+Every part of dreamfeed has its own address under that prefix (`/dreamfeed/saved`,
+`/dreamfeed/room/NAME`, `/dreamfeed/post/x/ID` ...: see **Addresses**), so the page needs to know
+the prefix the proxy strips: `X-Forwarded-Prefix` says it. Without it the app assumes it's at the
+site's root.
 
 The Caddyfile is a single-file mount: after editing it, `docker restart caddy` (a reload
 alone keeps reading the old file).

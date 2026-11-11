@@ -1249,6 +1249,7 @@ async function loadMore() {
     const q = new URLSearchParams({ view: state.view, medium: state.medium, offset: state.offset });
     if (state.view === "liked") q.set("source", state.savedSource);
     if (state.persona && state.view === "feed") q.set("persona", state.persona);
+    if (state.single && state.view === "feed") q.set("id", state.single);
     const data = await api(`api/feed?${q}`);
     if (gen !== state.gen) return;
     state.offset += data.items.length; state.more = data.more;
@@ -1257,6 +1258,7 @@ async function loadMore() {
       else addCard(it);
     }
     showEmpty();
+    if (state.single && state.openSingle && state.items.length && viewer.hidden) { state.openSingle = false; openViewer(0, true); }
   } catch (e) { if (e.message !== "signed out") toast(e.message); state.more = false; }
   finally { state.loading = false; $("loading").hidden = true; }
 }
@@ -1342,7 +1344,7 @@ function renderPeople() {
   }
   row.hidden = state.view !== "feed" || !state.people.length;   // a persona's generated posts (Saved has none to pick)
 }
-function openProfile(handle) {
+function showPersona(handle) {
   if (state.view !== "feed") { state.persona = handle; setView("feed"); return; }
   if (state.persona === handle) return;
   state.persona = handle; renderPeople(); scrollTo({ top: 0 }); reset();
@@ -1415,19 +1417,24 @@ function removeItem(it) {
 
 /* ---------- viewer ---------- */
 const viewer = $("viewer"), vimg = $("v-img"), vvid = $("v-vid");
-function openViewer(i) {
+function openViewer(i, replace) {
   viewer.hidden = false; document.body.style.overflow = "hidden";
-  history.pushState({ viewer: true }, ""); showAt(i);
+  const it = state.items[i], st = history.state || {};
+  if (replace) history.replaceState({ n: st.n || 0, overlay: "viewer" }, "", BASE + `item/${it.id}`);
+  else history.pushState({ n: (st.n || 0) + 1, overlay: "viewer" }, "", BASE + `item/${it.id}`);
+  showAt(i);
 }
 function closeViewer(fromPop) {
   if (viewer.hidden) return;
   viewer.hidden = true; document.body.style.overflow = ""; vvid.pause(); const it = state.items[state.idx]; state.idx = -1;
   it?.el.scrollIntoView({ block: "nearest" });
-  if (!fromPop && history.state?.viewer) history.back();
+  if (fromPop || history.state?.overlay !== "viewer") return;
+  if (history.state.n > 0 && !state.single) history.back(); else go(tabPath("feed"), true);   // (opened from its own address)
 }
 function showAt(i) {
   if (i < 0 || i >= state.items.length) return;
   state.idx = i; const it = state.items[i];
+  if (history.state?.overlay === "viewer") history.replaceState(history.state, "", BASE + `item/${it.id}`);
   closeMotion();
   const isVid = it.kind === "video";
   vimg.hidden = isVid; vvid.hidden = !isVid; $("v-scrub").hidden = !isVid; $("v-seek").value = 0;
@@ -1449,7 +1456,6 @@ $("v-prev").onclick = () => step(-1);
 $("v-next").onclick = () => step(1);
 $("v-like").onclick = () => { const it = state.items[state.idx]; if (it) toggleLike(it); };
 $("v-skip").onclick = () => { const it = state.items[state.idx]; if (it) skip(it); };
-addEventListener("popstate", () => closeViewer(true));
 
 function flashHeart() { const h = $("v-heart"); h.classList.add("show"); setTimeout(() => h.classList.remove("show"), 450); }
 let lastTap = 0;
@@ -1570,7 +1576,7 @@ addEventListener("keydown", e => {
 });
 
 /* ---------- header ---------- */
-for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => setView(b.dataset.view);
+for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => go(tabPath(b.dataset.view));
 function setView(v) {
   if (state.view === v) return;
   state.view = v;
@@ -1610,7 +1616,7 @@ $("saved-import").onclick = () => importStatus(true);
   if (v) { state.savedSource = v; document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === v))); }
 }
 document.querySelectorAll("#saved-src button").forEach(b => b.onclick = () => {
-  state.savedSource = b.dataset.s; remember("savedSource", state.savedSource);
+  state.savedSource = b.dataset.s; remember("savedSource", state.savedSource); setUrl(tabPath("liked"));
   document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   reset();
 });
@@ -1633,6 +1639,168 @@ async function refreshSummary() {
   } catch {}
 }
 
+/* ---------- pages: each part has its own address ----------
+   /feed, /feed/foryou, /saved[/x], /live[/discover], /comics[/ID], /dashboard, /personas, /p/HANDLE,
+   /item/ID (a persona post), /room/NAME[/watch | /video/PATH], /watch/A+B, /x/HANDLE, /u/NAME,
+   /r/SUB[/new|top], /e621/ARTIST, /post/SITE/ID, /xvideos/ID. Opening one replaces what's shown
+   (no stacking): Close and Back go to the page before, or home when the page was opened by link. */
+const BASE = new URL(document.baseURI).pathname;        // where the page is served (the proxy says), e.g. /dreamfeed/
+const nav = { routed: null, posts: new Map(), rooms: new Map(), lists: new Map(), xv: new Map() };
+const enc = encodeURIComponent;
+const ROOM_NAME = /^[a-z0-9_]{1,64}$/;
+function here() { const p = location.pathname; return p.startsWith(BASE) ? p.slice(BASE.length) : ""; }
+function segs(rel) { return rel.split("/").filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { return x; } }); }
+function go(rel, replace) {
+  const n = (history.state || {}).n || 0;
+  if (replace) history.replaceState({ n }, "", BASE + rel); else history.pushState({ n: n + 1 }, "", BASE + rel);
+  route();
+}
+function setUrl(rel) {
+  if (here() === rel) return;
+  history.replaceState({ ...(history.state || {}), n: (history.state || {}).n || 0 }, "", BASE + rel);
+  nav.routed = rel;
+}
+function leave() { if (((history.state || {}).n || 0) > 0) history.back(); else go("", true); }
+function tabPath(v) {
+  return { posts: fp.mode === "foryou" ? "feed/foryou" : "feed",
+           liked: state.savedSource !== "all" ? `saved/${state.savedSource}` : "saved",
+           comics: "comics", follow: livePage.page === "discover" ? "live/discover" : "live", dash: "dashboard",
+           feed: state.persona ? `p/${enc(state.persona)}` : "personas" }[v] || "feed";
+}
+function lastTab() {
+  let v = "posts"; try { v = localStorage.getItem("dreamfeed-view") || "posts"; } catch {}
+  return ["dash", "liked", "comics", "follow", "posts"].includes(v) ? v : "posts";
+}
+function playerPath() {
+  const f = pl.rooms[pl.i];
+  return pl.mode === "file" ? `room/${enc(pf.room.name)}/video/${enc(f.path)}` : `room/${enc(f.name)}/watch`;
+}
+function watchPath() { return "watch/" + mv.tiles.map(t => enc(t.r.name)).join("+"); }
+function roomFor(name) {
+  return nav.rooms.get(name) || (follow.live || []).find(r => r.name === name) || (dc.rooms || []).find(r => r.name === name)
+    || { name, info: {} };
+}
+// the public ways to open a page
+function openPerson(k) {
+  go(k.room ? `room/${enc(k.room)}` : k.x ? `x/${enc(k.x)}` : k.e621 ? `e621/${enc(k.e621)}` : `u/${enc(k.reddit)}`);
+}
+function openProfile(handle) { go(handle ? `p/${enc(handle)}` : "personas"); }      // a persona's posts
+function openBrowse(sub, sort) {
+  const name = String(sub || "").trim().replace(/^\/?r\//i, "").replace(/\/+$/, "");
+  const same = !$("browse").hidden && br.sub && br.sub.toLowerCase() === name.toLowerCase();
+  go(`r/${enc(name)}` + (sort && sort !== "hot" ? `/${sort}` : ""), same);
+}
+function postPath(id) { const k = String(id).indexOf(":"); return `post/${String(id).slice(0, k)}/${enc(String(id).slice(k + 1))}`; }
+function openPost(p) { nav.posts.set(p.id, p); go(postPath(p.id)); }
+function openRoom(r, list) { nav.rooms.set(r.name, r); if (list) nav.lists.set(r.name, list); go(`room/${enc(r.name)}/watch`); }
+function openMulti(rooms) { for (const r of rooms) nav.rooms.set(r.name, r); go("watch/" + rooms.map(r => enc(r.name)).join("+")); }
+function openXvideo(v) { nav.xv.set(v.id, v); go(`xvideos/${enc(v.id)}`); }
+function openComic(c) { go(`comics/${enc(c.id)}`); }
+// what each address shows
+function closePages() {
+  if (!viewer.hidden) closeViewer(true);
+  closePicture(true);
+  if (!$("profile").hidden) closeProfile();
+  if (!$("browse").hidden) closeBrowse();
+  if (!$("post-view").hidden) closePost();
+  if (!$("player").hidden) closeRoom();
+  if (!$("multi").hidden) closeMulti();
+  if (!$("xv-player").hidden) closeXvideo();
+  if (!$("reader").hidden) closeComic();
+}
+function route() {
+  const rel = here(), [a = "", b = "", c = "", ...rest] = segs(rel);
+  nav.routed = rel;
+  closePages();
+  const wasSingle = state.single;
+  state.single = a === "item" && /^\d+$/.test(b) ? b : null;
+  if (wasSingle && !state.single && state.view === "feed") state.view = "";     // (the whole feed again)
+  switch (a) {
+    case "": case "home": return go(tabPath(lastTab()), true);
+    case "feed": {
+      const m = b === "foryou" ? "foryou" : "following";
+      if (fp.mode !== m) {
+        fp.mode = m; remember("feedMode", m);
+        document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m)));
+        if (state.view === "posts") loadPosts(true);
+      }
+      return setView("posts");
+    }
+    case "saved": {
+      const src = [...document.querySelectorAll("#saved-src button")].map(x => x.dataset.s).includes(b) ? b : "all";
+      if (state.savedSource !== src) {
+        state.savedSource = src; remember("savedSource", src);
+        document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === src)));
+        if (state.view === "liked") reset();
+      }
+      return setView("liked");
+    }
+    case "live": showLivePage(b === "discover" ? "discover" : "following", state.view === "follow"); return setView("follow");
+    case "comics": setView("comics"); if (b) showComicId(b); return;
+    case "dashboard": return setView("dash");
+    case "personas": return showPersona("");
+    case "p": return showPersona(b);
+    case "item":
+      if (!state.single) return go("personas", true);
+      state.openSingle = true; state.persona = "";
+      if (state.view === "feed") reset(); else setView("feed");
+      return;
+    case "room":
+      if (!ROOM_NAME.test(b)) break;
+      if (c === "watch") return showRoom(roomFor(b), nav.lists.get(b) || null);
+      if (c === "video") return showRoomVideo(b, rest.length ? rest.join("/") : "");
+      return showPerson({ room: b });
+    case "watch": {
+      const rooms = b.split("+").filter(n => ROOM_NAME.test(n)).slice(0, MV_MAX).map(roomFor);
+      return rooms.length ? showMulti(rooms) : go("live", true);
+    }
+    case "x": if (b) return showPerson({ x: b }); break;
+    case "u": if (b) return showPerson({ reddit: b }); break;
+    case "e621": if (b) return showPerson({ e621: b }); break;
+    case "r": if (b) return showBrowse(b, ["new", "top"].includes(c) ? c : "hot"); break;
+    case "post": if (b && c) return showPostId(`${b}:${c}`); break;
+    case "xvideos": if (b) return showXvideo(nav.xv.get(b) || { id: b, title: "xvideos" }); break;
+  }
+  go("", true);
+}
+addEventListener("popstate", () => {
+  const st = history.state || {};
+  if (!viewer.hidden && st.overlay !== "viewer") closeViewer(true);
+  if (!$("pic-view").hidden && st.overlay !== "picture") closePicture(true);
+  if (st.overlay || here() === nav.routed) return;
+  route();
+});
+// a post's own address, opened by link: your kept copy, or read again from its site
+async function showPostId(id) {
+  const p = nav.posts.get(id);
+  if (p) return showPost(p);
+  const gen = ++pv.gen;
+  $("pv-title").textContent = "Post"; $("pv-post").replaceChildren(el("p", "note", "Reading the post…"));
+  $("pv-h").textContent = ""; $("pv-comments").replaceChildren(); $("post-view").hidden = false;
+  try {
+    const d = await api(`api/post?id=${enc(id)}`);
+    if (gen !== pv.gen) return;
+    nav.posts.set(id, d.post); showPost(d.post);
+  } catch (err) { if (gen === pv.gen) $("pv-post").replaceChildren(el("p", "note", err.message)); }
+}
+// one of your videos of a room, by its address
+async function showRoomVideo(room, path) {
+  let vids = pf.room && pf.room.name === room && pf.videos.length ? pf.videos : null;
+  if (!vids) {
+    try { vids = (await api(`api/live/videos?name=${enc(room)}`)).videos; } catch (err) { toast(err.message); return go(`room/${enc(room)}`, true); }
+  }
+  const i = vids.findIndex(v => v.path === path);
+  if (i < 0) return go(`room/${enc(room)}`, true);
+  pf.room = pf.room && pf.room.name === room ? pf.room : { name: room }; pf.videos = vids;
+  pl.mode = "file"; pl.rooms = vids.slice(); pl.i = i; $("player").hidden = false; playFile();
+}
+// a comic by its address (once the list says what it is)
+async function showComicId(id) {
+  let d; try { d = await api("api/comics"); } catch (err) { return toast(err.message); }
+  const c = d.comics.find(x => String(x.id) === String(id));
+  if (c && here() === `comics/${enc(id)}`) showComic(c); else if (!c) go("comics", true);
+}
+
 /* ---------- following ---------- */
 // The Live tab's two pages: Following (who you follow, live and not) and Discover.
 const livePage = { page: "following" };
@@ -1646,7 +1814,7 @@ function showLivePage(page, load = true) {
   $("d-panel").hidden = page !== "discover";
   if (load && page === "discover" && !dc.loaded) loadDiscover(true);
 }
-document.querySelectorAll("#live-page button").forEach(b => b.onclick = () => showLivePage(b.dataset.p));
+document.querySelectorAll("#live-page button").forEach(b => b.onclick = () => { showLivePage(b.dataset.p); setUrl(tabPath("follow")); });
 const follow = { timer: null };
 async function refreshFollowing() {
   clearTimeout(follow.timer);
@@ -1690,7 +1858,7 @@ function liveCard(r, list) {
   b._sync = sync; sync();
   const item = el("div", "live-item"), acts = el("div", "acts"), pfb = el("button", "secondary vids",
     r.videos ? `Profile · ${r.videos} video${r.videos === 1 ? "" : "s"}` : "Profile");
-  pfb.type = "button"; pfb.onclick = () => openProfile(r); acts.append(pfb);
+  pfb.type = "button"; pfb.onclick = () => openRoomProfile(r); acts.append(pfb);
   if ((follow.dvr || {}).on && r.dvr !== undefined) {      // (rooms you follow: your recorder's say on each)
     const on = !!(r.dvr && r.dvr.running), rb = el("button", "secondary vids", on ? "● Recording" : "Record");
     rb.type = "button"; rb.setAttribute("aria-pressed", String(on));
@@ -1722,7 +1890,7 @@ function dvrWords(st) {
 }
 function offRow(r) {
   const li = el("li"), row = el("button", "off-row"), d = el("div");
-  row.type = "button"; row.onclick = () => openProfile(r); li.append(row);
+  row.type = "button"; row.onclick = () => openRoomProfile(r); li.append(row);
   if (r.thumb) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = r.thumb; row.append(img); }
   else row.append(el("span", "ph"));
   const last = r.last_live ? `last live ${relTime(new Date(r.last_live * 1000).toISOString())} ago` : "not seen live yet";
@@ -1754,7 +1922,7 @@ addEventListener("resize", () => { if (!$("multi").hidden) mvLayout(); });
 // Each tile plays on its own: adding or closing one leaves the others playing. Every minute
 // each tile's title and viewers are asked again.
 const MV_MAX = 4;
-async function openMulti(rooms) {
+async function showMulti(rooms) {
   closeMulti();
   $("multi").hidden = false;
   for (const r of rooms.slice(0, MV_MAX)) mvAdd(r);
@@ -1768,7 +1936,7 @@ function mvAdd(r) {
   lbl.append(name, title);
   v.playsInline = v.autoplay = v.muted = true;
   const big = el("button", null, "Full"), rm = el("button", null, "✕"); big.type = rm.type = "button";
-  big.onclick = e => { e.stopPropagation(); const rs = mv.tiles.map(x => x.r); closeMulti(); openRoom(t.r, rs); };
+  big.onclick = e => { e.stopPropagation(); openRoom(t.r, mv.tiles.map(x => x.r)); };
   rm.onclick = e => { e.stopPropagation(); mvRemove(t); };
   tb.append(big, rm);
   box.append(v, lbl, msg, tb);
@@ -1778,7 +1946,7 @@ function mvAdd(r) {
   $("mv-grid").append(box);
   mvTitle(t, (r.info || {}).title, (r.info || {}).viewers);
   mvPlay(t);
-  mvLayout(); mvBar();
+  mvLayout(); mvBar(); if (!$("multi").hidden) setUrl(watchPath());
 }
 function mvTitle(t, title, viewers) {
   t.title.textContent = [viewers != null ? `${Number(viewers).toLocaleString()} watching` : "", title || ""].filter(Boolean).join(" · ");
@@ -1810,8 +1978,8 @@ async function mvPlay(t) {
 function mvRemove(t) {
   t.gen++; if (t.hls) t.hls.destroy(); t.v.pause(); t.v.removeAttribute("src"); t.v.load(); t.box.remove();
   mv.tiles = mv.tiles.filter(x => x !== t);
-  if (!mv.tiles.length) return closeMulti();
-  mvLayout(); mvBar();
+  if (!mv.tiles.length) return leave();
+  mvLayout(); mvBar(); setUrl(watchPath());
 }
 function mvWatch() {
   clearTimeout(mv.timer);
@@ -1860,7 +2028,7 @@ function closeMulti() {
   for (const t of mv.tiles) { t.gen++; if (t.hls) t.hls.destroy(); if (t.v) { t.v.pause(); t.v.removeAttribute("src"); t.v.load(); } }
   mv.tiles = []; $("mv-grid").replaceChildren(); $("multi").hidden = true; $("mv-picker").hidden = true;
 }
-$("mv-close").onclick = closeMulti;
+$("mv-close").onclick = leave;
 $("mv-add").onclick = mvPicker;
 $("mv-mute").onclick = mvMuteAll;
 $("mv-picker-close").onclick = () => { $("mv-picker").hidden = true; };
@@ -1923,7 +2091,7 @@ function usualHours(times) {
 }
 const fp = { source: "all", mode: "following", tags: "", cursor: "", more: false, loading: false, gen: 0, shown: 0 };
 document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
-  fp.mode = b.dataset.m; remember("feedMode", fp.mode);
+  fp.mode = b.dataset.m; remember("feedMode", fp.mode); setUrl(tabPath("posts"));
   document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
@@ -2006,8 +2174,7 @@ async function loadRecentBrowses() {
   } catch {}
 }
 document.querySelectorAll("#br-sorts button").forEach(b => b.onclick = () => openBrowse(br.sub, b.dataset.o));
-function openBrowse(sub, sort) {
-  if (!$("post-view").hidden) closePost();
+function showBrowse(sub, sort) {
   sub = sub.replace(/^\/?r\//i, "").replace(/\/$/, "");
   br.gen++; br.sub = sub; br.sort = sort; br.after = ""; br.loading = false;
   document.querySelectorAll("#br-sorts button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.o === sort)));
@@ -2032,7 +2199,7 @@ async function moreBrowse() {
 $("br-more").onclick = moreBrowse;
 // A post, opened: the post and its comments, read live from its site.
 const pv = { gen: 0 };
-async function openPost(p) {
+async function showPost(p) {
   const gen = ++pv.gen;
   $("pv-title").textContent = { x: "Post on X", reddit: p.place ? `r/${p.place}` : "Reddit", e621: "e621" }[p.source] || "Post";
   $("pv-post").replaceChildren(postCard(p, true));
@@ -2052,7 +2219,7 @@ function commentEl(c, source) {
   if (c.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = c.avatar; av.append(im); }
   const head = el("div", "cm-head"), who = el("b", null, c.author || "?");
   const person = source === "x" ? { x: c.author } : source === "reddit" && c.author !== "[deleted]" ? { reddit: c.author } : null;
-  if (person && c.author) { who.classList.add("who"); who.onclick = av.onclick = () => { closePost(); openPerson(person); }; }
+  if (person && c.author) { who.classList.add("who"); who.onclick = av.onclick = () => openPerson(person); }
   const score = c.score == null ? "" : source === "x" ? `${c.score} ♥` : `${c.score} pts`;
   head.append(who, el("small", null, [relTime(c.at), score].filter(Boolean).join(" · ")));
   main.append(head);
@@ -2066,13 +2233,20 @@ function commentEl(c, source) {
   if ((c.replies || []).length) { const r = el("div", "cm-replies"); r.append(...c.replies.map(x => commentEl(x, source))); box.append(r); }
   return box;
 }
-function openPicture(src) { $("pic-img").src = src; $("pic-view").hidden = false; }
-function closePicture() { $("pic-view").hidden = true; $("pic-img").removeAttribute("src"); }
-$("pic-view").onclick = closePicture;
+function openPicture(src) {
+  $("pic-img").src = src; $("pic-view").hidden = false;
+  history.pushState({ n: ((history.state || {}).n || 0) + 1, overlay: "picture" }, "", location.href);
+}
+function closePicture(fromPop) {
+  if ($("pic-view").hidden) return;
+  $("pic-view").hidden = true; $("pic-img").removeAttribute("src");
+  if (!fromPop && history.state?.overlay === "picture") history.back();
+}
+$("pic-view").onclick = () => closePicture();
 function closePost() { pv.gen++; $("post-view").hidden = true; $("pv-post").replaceChildren(); $("pv-comments").replaceChildren(); }
-$("pv-close").onclick = closePost;
+$("pv-close").onclick = leave;
 function closeBrowse() { br.gen++; $("browse").hidden = true; for (const v of $("br-posts").querySelectorAll("video")) v.pause(); }
-$("br-close").onclick = closeBrowse;
+$("br-close").onclick = leave;
 function postCard(p, opened) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
   const canOpen = !opened && /^(x|reddit|e621):/.test(String(p.id || ""));
@@ -2185,7 +2359,7 @@ function plFollowBtn(r) {
     catch (err) { toast(err.message); fb.disabled = false; fb.textContent = "Follow"; }
   };
 }
-$("pl-multi").onclick = () => { const r = pl.rooms[pl.i]; closeRoom(); openMulti([r]); };
+$("pl-multi").onclick = () => openMulti([pl.rooms[pl.i]]);
 function hlsLib() {
   if (!pl.lib) pl.lib = new Promise((ok, no) => {
     const sc = document.createElement("script"); sc.src = "vendor/hls.min.js";
@@ -2209,7 +2383,7 @@ function feedHls(v, m) {
   });
   if (m.fallback) v.dataset.fallback = m.fallback;
 }
-function openRoom(r, list) {
+function showRoom(r, list) {
   pl.mode = "live"; pl.rooms = (list || follow.live || []).slice(); pl.i = Math.max(0, pl.rooms.findIndex(x => x.name === r.name));
   if (!pl.rooms.length) pl.rooms = [r];
   $("player").hidden = false; playRoom();
@@ -2252,8 +2426,8 @@ async function playRoom() {
 }
 $("pl-sound").onclick = () => { pl.muted = false; const v = $("pl-video"); v.muted = false; v.play().catch(() => {}); $("pl-sound").hidden = true; };
 $("pl-video").onvolumechange = () => { pl.muted = $("pl-video").muted; $("pl-sound").hidden = !pl.muted; };
-$("pl-prev").onclick = () => { pl.i = (pl.i - 1 + pl.rooms.length) % pl.rooms.length; playRoom(); };
-$("pl-next").onclick = () => { pl.i = (pl.i + 1) % pl.rooms.length; playRoom(); };
+$("pl-prev").onclick = () => { pl.i = (pl.i - 1 + pl.rooms.length) % pl.rooms.length; playRoom(); setUrl(playerPath()); };
+$("pl-next").onclick = () => { pl.i = (pl.i + 1) % pl.rooms.length; playRoom(); setUrl(playerPath()); };
 // A video from the room's profile: ‹ › go through that room's videos. With sound, since it
 // was a tap that opened it (muted only if the browser refuses).
 function playFile() {
@@ -2282,9 +2456,9 @@ function vidDate(f) { return new Date(f.mtime * 1000).toLocaleDateString(undefin
    Reddit accounts linked to it (from its bio, or by you), their posts and your videos of it;
    or an X or Reddit account on its own (from the Feed or Discover), with a preview to fetch. */
 const pf = { room: null, key: null, data: null, videos: [], gen: 0, timer: null, ptimer: null, card: null };
-function openProfile(r) { pf.card = r; openPerson({ room: r.name }); }
-async function openPerson(key) {
-  if (!$("post-view").hidden) closePost();
+function openRoomProfile(r) { nav.rooms.set(r.name, r); openPerson({ room: r.name }); }
+async function showPerson(key) {
+  if (key.room && nav.rooms.has(key.room)) pf.card = nav.rooms.get(key.room);
   const gen = ++pf.gen;
   clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); pf.toldFail = false;
   pf.key = key; pf.videos = []; pf.data = null; pf.posts = null; pf.room = key.room ? { name: key.room } : null;
@@ -2491,14 +2665,14 @@ async function moreXvideos() {
   $("pf-xv-more").hidden = !d.more;
 }
 $("pf-xv-more").onclick = moreXvideos;
-function openXvideo(v) {
+function showXvideo(v) {
   $("xv-title").textContent = v.title;
   $("xv-open").href = `https://www.xvideos.com/video.${encodeURIComponent(v.id)}/`;
   $("xv-frame").src = `https://www.xvideos.com/embedframe/${encodeURIComponent(v.id)}`;
   $("xv-player").hidden = false;
 }
 function closeXvideo() { $("xv-frame").src = "about:blank"; $("xv-player").hidden = true; }
-$("xv-close").onclick = closeXvideo;
+$("xv-close").onclick = leave;
 async function morePersonPosts() {
   const st = pf.posts; if (!st || st.loading) return;
   const gen = st.gen, todo = st.feeds.filter(f => f.cursor !== null);
@@ -2536,7 +2710,7 @@ function renderProfile(gen) {
     if (f.duration) shot.append(el("span", "len", vidLength(f.duration)));
     const about = f.highlight && f.duration && f.of ? `${vidLength(f.duration)} of ${vidLength(f.of)}` : vidDate(f);
     b.append(shot, el("b", null, f.title), el("small", null, `${about} · ${vidSize(f.size)}`));
-    b.onclick = () => { pl.mode = "file"; pl.rooms = pf.videos.slice(); pl.i = i; $("player").hidden = false; playFile(); };
+    b.onclick = () => go(`room/${enc(pf.room.name)}/video/${enc(pf.videos[i].path)}`);
     item.append(b, videoActions(f));
     return item;
   }));
@@ -2587,17 +2761,19 @@ async function deleteVideo(f) {
   });
 }
 function closeProfile() { pf.gen++; clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); $("profile").hidden = true; }
-$("pf-close").onclick = closeProfile;
+$("pf-close").onclick = leave;
 $("pf-live").onclick = () => openRoom(pf.card && pf.card.name === pf.room.name ? pf.card : { ...pf.room, info: (pf.data || {}).info || {} }, null);
 function closeRoom() { pl.gen++; clearTimeout(pl.timer); stopVideo(); $("player").hidden = true; }
-$("pl-close").onclick = closeRoom;
+$("pl-close").onclick = leave;
 document.addEventListener("keydown", e => {
   if ($("player").hidden) {
-    if (e.key === "Escape") { if (!$("pic-view").hidden) closePicture(); else if (!$("xv-player").hidden) closeXvideo();
-      else if (!$("mv-picker").hidden) $("mv-picker").hidden = true; else if (!$("multi").hidden) closeMulti(); else if (!$("post-view").hidden) closePost(); else if (!$("browse").hidden) closeBrowse(); else if (!$("profile").hidden) closeProfile(); }
+    if (e.key === "Escape") {
+      if (!$("pic-view").hidden) closePicture(); else if (!$("mv-picker").hidden) $("mv-picker").hidden = true;
+      else if (["xv-player", "multi", "post-view", "browse", "profile"].some(id => !$(id).hidden)) leave();
+    }
     return;
   }
-  if (e.key === "Escape") closeRoom();
+  if (e.key === "Escape") leave();
   else if (e.key === "ArrowRight") $("pl-next").click();
   else if (e.key === "ArrowLeft") $("pl-prev").click();
 });
@@ -2780,7 +2956,7 @@ async function refreshComics() {
   if ((state.view === "comics" || !$("reader").hidden) && d.making.length) comicState.timer = setTimeout(refreshComics, 10000);
 }
 const rd = { c: null, picking: false, chosen: null, drawing: false, page: 1, grid: false, wraps: [], queued: [] };
-function openComic(c) {
+function showComic(c) {
   Object.assign(rd, { c, picking: false, chosen: null, drawing: false, page: 1, grid: false });
   $("reader-title").textContent = c.title || "Untitled";
   const anim = $("reader-animate"); anim.hidden = false; anim.setAttribute("aria-pressed", "false"); anim.textContent = "Animate";
@@ -2927,7 +3103,7 @@ function buildGrid() {
   const del = el("button", "secondary del", "Delete this comic"); del.type = "button";
   del.onclick = async () => {
     if (!confirm("Delete this comic?")) return;
-    try { await api("api/comics/delete", { id: c.id }); closeComic(); refreshComics(); } catch (err) { toast(err.message); }
+    try { await api("api/comics/delete", { id: c.id }); go("comics", true); refreshComics(); } catch (err) { toast(err.message); }
   };
   grid.append(del);
   grid.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "center" });
@@ -2948,7 +3124,7 @@ $("reader-animate").onclick = () => {
 };
 document.addEventListener("keydown", e => {
   if ($("reader").hidden || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-  if (e.key === "Escape") return closeComic();
+  if (e.key === "Escape") return leave();
   if (rd.grid) return;
   if (e.key === "ArrowRight" || e.key === "PageDown") { e.preventDefault(); goTo(rd.page + 1); }
   if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); goTo(rd.page - 1); }
@@ -3033,7 +3209,7 @@ $("rd-ask").onsubmit = async e => {
   } catch (err) { $("rd-err").textContent = err.message; }
   $("rd-go").disabled = false;
 };
-$("reader-close").onclick = closeComic;
+$("reader-close").onclick = leave;
 
 /* ---------- dashboard ---------- */
 const SEC_PER_IMAGE = 10.5;
@@ -3557,14 +3733,13 @@ $("e-pic").onclick = async () => {
 new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { rootMargin: "800px" }).observe($("sentinel"));
 refreshSummary();
 loadPeople().then(() => { for (const it of state.items) if (it.persona) fillAvatar(it.el.querySelector(".av"), personaOf(it.persona.handle) || it.persona); });
-let startView = "posts";
-try { startView = localStorage.getItem("dreamfeed-view") || "posts"; } catch {}
-if (location.hash === "#dashboard") startView = "dash";
-if (location.hash === "#comics") startView = "comics";
-if (location.hash === "#following") startView = "follow";
-if (location.hash === "#live") startView = "follow";
+// The page opens what its address names (old #live-style links too).
+{
+  const old = { dashboard: "dashboard", comics: "comics", following: "live", live: "live" }[location.hash.slice(1)];
+  history.replaceState({ n: 0 }, "", old ? BASE + old : location.pathname);
+}
 state.view = "";   // so setView runs for the first view
-setView(["dash", "liked", "comics", "follow", "posts"].includes(startView) ? startView : "posts");
+route();
 </script>
 </body>
 </html>

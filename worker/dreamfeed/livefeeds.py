@@ -419,6 +419,26 @@ def _e621_full(p: dict, kind: str) -> str | None:
 TOP_TODAY = "order:score date:day"      # For you: the best rated of the last 24 hours
 
 
+def _e621_post(p: dict, place: str, top: bool = False) -> dict | None:
+    """One e621 post as the Feed shows it, or None when it's left out."""
+    got = e621.media(p)
+    if e621.blocked(p) or not got or text_blocked(p.get("description")):
+        return None
+    d = e621.details(p)
+    kind = "video" if got[1] in ("mp4", "webm") else "image"
+    sample = p.get("sample") or {}
+    prev = sample.get("url") or (p.get("preview") or {}).get("url")
+    # a picture shows e621's 850px copy (the original is often 5-20 MB): the original is
+    # what Save keeps. A GIF's copy is a still, so it shows itself.
+    shown = sample["url"] if kind == "image" and got[1] != "gif" and sample.get("has") and sample.get("url") else got[0]
+    return {"id": f"e621:{d['id']}", "source": "e621", "author": d["author"], "artists": d["artists"],
+            "place": place, "text": d["title"], "posted_at": d["date"], "link": d["link"],
+            "via": "foryou" if top else "following", "saved": False,
+            "score": ((p.get("score") or {}).get("total") or 0), "comments": p.get("comment_count"),
+            "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
+                       "poster": prev if kind == "video" else None}]}
+
+
 def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict], int | None]:
     """A page of an e621 tag search: the newest (at: the post id the page starts below), or
     with top, the best rated of the last 24 hours (at: the page number)."""
@@ -427,24 +447,7 @@ def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict
         if at:
             params["page"] = str(at) if top else f"b{at}"
         found = e621.get("/posts.json", params).get("posts") or []
-        out = []
-        for p in found:
-            got = e621.media(p)
-            if e621.blocked(p) or not got or text_blocked(p.get("description")):
-                continue
-            d = e621.details(p)
-            kind = "video" if got[1] in ("mp4", "webm") else "image"
-            sample = p.get("sample") or {}
-            prev = sample.get("url") or (p.get("preview") or {}).get("url")
-            # a picture shows e621's 850px copy (the original is often 5-20 MB): the original is
-            # what Save keeps. A GIF's copy is a still, so it shows itself.
-            shown = sample["url"] if kind == "image" and got[1] != "gif" and sample.get("has") and sample.get("url") else got[0]
-            out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"], "artists": d["artists"],
-                        "place": search, "text": d["title"], "posted_at": d["date"], "link": d["link"],
-                        "via": "foryou" if top else "following", "saved": False,
-                        "score": ((p.get("score") or {}).get("total") or 0), "comments": p.get("comment_count"),
-                        "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
-                                   "poster": prev if kind == "video" else None}]})
+        out = [x for x in (_e621_post(p, search, top) for p in found) if x]
         if len(found) < E621_PAGE:
             return out, None
         if top:
@@ -602,6 +605,27 @@ def xvideos_page(name: str, page: int) -> dict:
         total, per = int(d.get("nb_videos") or 0), int(d.get("nb_per_page") or 36)
         return {"videos": out, "total": total, "more": (page + 1) * per < total}
     return _cached(f"xvideos:{name}:{page}", fetch, 600)
+
+
+# ---- one post, by its id (its own page) ----
+def post(post_id: str) -> dict | None:
+    """A post as the Feed shows it, live from its site; None when it's gone or left out."""
+    m = re.fullmatch(r"(x|reddit|e621):([A-Za-z0-9_]{1,30})", post_id or "")
+    if not m:
+        raise ValueError("bad post")
+    site, pid = m.groups()
+    def fetch():
+        if site == "reddit":
+            if not reddit_ready():
+                raise LookupError("Reddit isn't signed in")
+            posts, _ = _reddit_listing(_reddit(f"/api/info?id=t3_{pid}&raw_json=1&sr_detail=1"), "post")
+        elif site == "e621":
+            found = (e621.get(f"/posts/{pid}.json", {}) or {}).get("post")
+            posts = [x for x in [_e621_post(found, "")] if x] if found else []
+        else:
+            posts, _, _ = _x_posts(_x(f"https://x.com/i/web/status/{pid}", 1, 20), "post")
+        return next((x for x in posts if x["id"] == post_id), None)
+    return _cached(f"post:{post_id}", fetch)
 
 
 # ---- a post's comments ----
