@@ -234,6 +234,7 @@ services:
       # the refresh token from `follow reddit-login`). Without them, that site is left out.
       X_COOKIES: /config/x-cookies.txt
       X_RELATED_QUERY: ${X_RELATED_QUERY:-}      # X's "more videos" call id, when X changes it (empty: the known one)
+      RANDOM_SUBREDDITS_URL: ${RANDOM_SUBREDDITS_URL:-}   # Browse's 🎲: a list of subreddit names, one a line (empty: off)
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
       REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET-}
       REDDIT_USERNAME: ${REDDIT_USERNAME-}

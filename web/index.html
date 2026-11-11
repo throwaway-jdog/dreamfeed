@@ -284,6 +284,10 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .br-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin: 10px 14px 0; }
 .br-form[hidden] { display: none; }
 .br-form .secondary { width: auto; padding: 0 14px; }
+#br-form { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+#br-form .br-recent { grid-column: 1 / -1; }
+#browse .reader-bar { gap: 6px; }
+#browse .reader-bar .secondary { padding: 0 10px; font-size: 14px; }
 .br-recent { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
 .br-recent:empty { display: none; }
 .br-recent button { min-height: 32px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--rule); background: none; color: inherit; font-size: 13px; cursor: pointer; }
@@ -851,6 +855,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <input class="in" id="br-sub" placeholder="Browse a subreddit now: r/…" maxlength="24" autocomplete="off" autocapitalize="off" spellcheck="false">
       <select class="in" id="br-sort" aria-label="Sort"><option value="hot">Hot</option><option value="new">New</option><option value="top">Top today</option></select>
       <button type="submit" class="secondary">Browse</button>
+      <button type="button" class="secondary br-random" id="br-random" title="A random subreddit">🎲 Random</button>
       <div class="br-recent" id="br-recent"></div></form>
     <form class="br-form e6-tags-form" id="e6-tags-form" hidden>
       <input class="in" id="e6-tags" placeholder="Only these tags: anal, or anal canine…" maxlength="300" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
@@ -914,6 +919,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   </div>
   <div class="profile fposts" id="browse" hidden role="dialog" aria-modal="true" aria-label="Subreddit">
     <div class="reader-bar"><span id="br-title"></span>
+      <button type="button" class="secondary" id="br-another" title="Another random subreddit">🎲 Another</button>
       <a class="secondary" id="br-open" target="_blank" rel="noreferrer noopener">Reddit</a>
       <button type="button" class="secondary" id="br-close">Close</button></div>
     <div class="seg three" id="br-sorts" role="group" aria-label="Sort">
@@ -2408,6 +2414,17 @@ function closePicture(fromPop) {
 $("pic-view").onclick = () => closePicture();
 function closePost() { pv.gen++; $("post-view").hidden = true; $("pv-post").replaceChildren(); $("pv-comments").replaceChildren(); }
 $("pv-close").onclick = leave;
+// 🎲: a random subreddit from your list (one with posts now); Another from its page replaces it.
+async function randomBrowse(btn, replace) {
+  const was = btn.textContent; btn.disabled = true; btn.textContent = "🎲 …";
+  try {
+    const d = await api(`api/reddit/random?not=${encodeURIComponent(replace && br.sub || "")}`);
+    go(`r/${encodeURIComponent(d.sub)}`, replace);
+  } catch (err) { toast(err.message); }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+$("br-random").onclick = e => randomBrowse(e.currentTarget, false);
+$("br-another").onclick = e => randomBrowse(e.currentTarget, true);
 function closeBrowse() { br.gen++; $("browse").hidden = true; for (const v of $("br-posts").querySelectorAll("video")) v.pause(); }
 $("br-close").onclick = leave;
 function postCard(p, opened) {

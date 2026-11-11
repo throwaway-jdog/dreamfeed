@@ -421,6 +421,11 @@ comments, read live from its site: X's replies (nested by what they answer, with
 Reddit's comments (top first, replies to replies four deep; AutoModerator left out) and e621's.
 Comments with words dreamfeed never shows are left out.
 
+**🎲 Random** (next to Browse) opens a random subreddit from a list you keep (`RANDOM_SUBREDDITS_URL`:
+an https address of a text file, one name a line; read again each day). The usual subreddit rules
+still apply to it; banned, private and empty ones are passed over. 🎲 Another, on the subreddit's
+page, swaps it for another one.
+
 **Profiles.** Tap an X name or picture (Following, For you, anywhere) for their profile: their
 picture, name, bio and counts, and their latest media posts, read as you open it (More for
 older ones). A Reddit name gives their latest posts the same way (Reddit's search by author),

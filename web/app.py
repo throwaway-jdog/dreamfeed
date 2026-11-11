@@ -20,6 +20,7 @@ GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
+GET  /api/reddit/random ?not=SUB  a random subreddit from RANDOM_SUBREDDITS_URL's list that has posts now
 GET  /api/videos/more  ?id=reddit:ID|e621:ID&cursor=C  more videos after that one: its subreddit, your subscriptions (Reddit); its search, yours (e621)
 GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after that one (its full-screen player's swipe-up feed)
 GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
@@ -669,6 +670,50 @@ def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = 
 
 SUBREDDIT = re.compile(r"^(?:/?r/)?([A-Za-z0-9_]{2,21})/?$")
 BROWSE_SORTS = {"hot": "/hot", "new": "/new", "top": "/top?t=day"}
+
+
+# A random subreddit (Browse's 🎲): from a list of names, one a line (RANDOM_SUBREDDITS_URL, an
+# https address of a text file; read again each day). Off when it's not set.
+RANDOM_SUBS_URL = os.environ.get("RANDOM_SUBREDDITS_URL", "").strip()
+RANDOM_TRIES = 6           # banned, private or empty ones are passed over
+
+
+def _random_names() -> list[str]:
+    def fetch():
+        import urllib.request
+        if not RANDOM_SUBS_URL.startswith("https://"):
+            raise ValueError("RANDOM_SUBREDDITS_URL isn't an https address")
+        req = urllib.request.Request(RANDOM_SUBS_URL, headers={"User-Agent": "dreamfeed (random subreddit list)"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                text = r.read(4 << 20).decode("utf-8", "replace")
+        except OSError as e:
+            raise LookupError(f"the subreddit list didn't load ({e})")
+        names = {}
+        for line in text.splitlines():
+            n = line.strip().removeprefix("r/").removeprefix("/r/").strip("/")
+            if SUBREDDIT.match(n) and not livefeeds.place_blocked(n):      # (the usual rules still apply)
+                names.setdefault(n.lower(), n)
+        return list(names.values())
+    return _cached("random-subs", 86400, fetch)
+
+
+def random_subreddit(avoid: str = "") -> dict:
+    """{"sub"}: a random one from the list that has posts to show now."""
+    import random
+    if not RANDOM_SUBS_URL:
+        raise ValueError("no subreddit list set up (RANDOM_SUBREDDITS_URL)")
+    names = [n for n in _random_names() if n.lower() != avoid.lower()]
+    if not names:
+        raise LookupError("the subreddit list is empty")
+    for name in random.sample(names, min(RANDOM_TRIES, len(names))):
+        try:
+            posts, _ = livefeeds.reddit_page(f"/r/{name}/hot", None, "browse")   # (kept: Browse shows it at once)
+        except LookupError:
+            continue
+        if posts:
+            return {"sub": name}
+    raise LookupError("no luck this time: try again")
 
 
 def browse(sub: str, sort: str, after: str) -> dict:
@@ -2342,6 +2387,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(404, {"error": str(e)[:200]})
+        if path == "/api/reddit/random":
+            try:
+                return self.send(200, random_subreddit(self.query().get("not", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path == "/api/videos/more":
             q = self.query()
             try:
