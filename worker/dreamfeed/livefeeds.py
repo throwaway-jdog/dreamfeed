@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -288,11 +289,38 @@ def reddit_save(post_id: str, save: bool) -> None:
 
 
 # ---- X ----
+# gallery-dl as the X reader, with each video's other sizes and its preview picture kept in the
+# metadata too (gallery-dl itself names only the biggest file, up to 4K: slow on a phone).
+X_RUNNER = """
+import sys
+from gallery_dl.extractor import twitter
+_source = twitter.TwitterExtractor._extract_media_source
+def _more(self, dest, media):
+    _source(self, dest, media)
+    info = media.get("video_info") or {}
+    dest["variants"] = [{"url": v.get("url"), "bitrate": v.get("bitrate"), "type": v.get("content_type")}
+                        for v in info.get("variants") or []]
+    dest["poster_url"] = media.get("media_url_https")
+twitter.TwitterExtractor._extract_media_source = _more
+import gallery_dl
+sys.argv = ["gallery-dl"] + sys.argv[1:]
+sys.exit(gallery_dl.main())
+"""
+X_VIDEO_BITRATE = 2_500_000   # the biggest MP4 at or under this (about 720p); the smallest if none is
+
+
+def _x_video(url: str, md: dict) -> str:
+    mp4s = [v for v in md.get("variants") or [] if v.get("type") == "video/mp4" and v.get("url") and v.get("bitrate")]
+    fits = [v for v in mp4s if v["bitrate"] <= X_VIDEO_BITRATE]
+    pick = max(fits, key=lambda v: v["bitrate"]) if fits else min(mp4s, key=lambda v: v["bitrate"], default=None)
+    return pick["url"] if pick else url
+
+
 def _x(url: str, start: int, count: int) -> list:
     if not x_cookies():
         raise LookupError("X isn't signed in (X_COOKIES_FILE)")
     try:
-        out = subprocess.run(["gallery-dl", "--config-ignore", "--cookies", x_cookies(), "-o", "cookies-update=false",
+        out = subprocess.run([sys.executable, "-c", X_RUNNER, "--config-ignore", "--cookies", x_cookies(), "-o", "cookies-update=false",
                               "--range", f"{start}-{start + count - 1}", "-j", url],
                              capture_output=True, text=True, timeout=90)
     except subprocess.TimeoutExpired as e:
@@ -338,7 +366,7 @@ def _x_posts(items: list, via: str) -> tuple[list[dict], list[dict], int]:
         if not str(url).startswith("https://"):
             continue
         if ext in ("mp4", "webm", "mov", "m4v"):
-            p["media"].append({"kind": "video", "url": url, "poster": md.get("image") or None})
+            p["media"].append({"kind": "video", "url": _x_video(url, md), "poster": md.get("poster_url") or None})
         elif ext in ("jpg", "jpeg", "png", "webp", "gif"):
             p["media"].append({"kind": "image", "url": url.replace("name=orig", "name=large")})
     kept = [p for p in posts.values() if p["media"] and not text_blocked(p["text"])]
