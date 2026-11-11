@@ -315,11 +315,21 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .fposts #f-source { margin: 10px 14px; }
 .fposts > .note { margin: 0; padding: 0 14px 8px; color: var(--muted); font-size: 13px; }
 .fposts > .note:empty { display: none; }
+.fposts > .note .retry { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 #f-posts { border-top: 1px solid var(--rule); }
 #f-posts > .note { padding: 24px 16px; text-align: center; color: var(--muted); }
 .fposts .post .av { background: var(--raise); color: var(--muted); font-size: 13px; }
 .fposts .post .where { color: var(--muted); font-size: 13px; }
 .fposts .post .media { aspect-ratio: auto; max-height: none; margin-bottom: 8px; }
+.g-wrap { position: relative; margin-bottom: 8px; }
+.gallery { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 8px; scrollbar-width: none; overscroll-behavior-x: contain; }
+.gallery::-webkit-scrollbar { display: none; }
+.fposts .post .gallery .media { flex: 0 0 100%; scroll-snap-align: center; margin-bottom: 0; display: grid; place-items: center; }
+.g-count { position: absolute; right: 10px; top: 10px; background: rgb(0 0 0 / .6); color: #fff; font-size: 12px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+.pic-view { position: fixed; inset: 0; z-index: 33; background: #000; display: grid; place-items: center; cursor: zoom-out; }
+.pic-view[hidden] { display: none; }
+.pic-view img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .fposts .post .media img, .fposts .post .media video { height: auto; max-height: 80vh; object-fit: contain; background: #000; }
 .fposts .post .out { color: var(--muted); font-size: 13px; display: inline-flex; min-height: 32px; align-items: center; margin-bottom: 4px; }
 .fposts .more { margin: 12px 16px; }
@@ -861,6 +871,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
           <button type="button" class="secondary more" id="pf-xv-more" hidden>More</button></div></div>
     </div>
   </div>
+  <div class="pic-view" id="pic-view" hidden role="dialog" aria-label="Picture"><img id="pic-img" alt=""></div>
   <div class="profile fposts" id="post-view" hidden role="dialog" aria-modal="true" aria-label="Post">
     <div class="reader-bar"><span id="pv-title">Post</span>
       <button type="button" class="secondary" id="pv-close">Close</button></div>
@@ -1594,8 +1605,12 @@ async function importStatus(started) {
   if (d.running) importStatus.was = true;
 }
 $("saved-import").onclick = () => importStatus(true);
+{
+  const v = recalled("savedSource", [...document.querySelectorAll("#saved-src button")].map(b => b.dataset.s));
+  if (v) { state.savedSource = v; document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === v))); }
+}
 document.querySelectorAll("#saved-src button").forEach(b => b.onclick = () => {
-  state.savedSource = b.dataset.s;
+  state.savedSource = b.dataset.s; remember("savedSource", state.savedSource);
   document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   reset();
 });
@@ -1840,7 +1855,15 @@ function mvPicker() {
   }) : [el("p", "note", "No other live rooms. Open Discover on the Live tab for more.")]));
   $("mv-picker").hidden = false;
 }
+function closeMulti() {
+  clearTimeout(mv.timer);
+  for (const t of mv.tiles) { t.gen++; if (t.hls) t.hls.destroy(); if (t.v) { t.v.pause(); t.v.removeAttribute("src"); t.v.load(); } }
+  mv.tiles = []; $("mv-grid").replaceChildren(); $("multi").hidden = true; $("mv-picker").hidden = true;
+}
 $("mv-close").onclick = closeMulti;
+$("mv-add").onclick = mvPicker;
+$("mv-mute").onclick = mvMuteAll;
+$("mv-picker-close").onclick = () => { $("mv-picker").hidden = true; };
 
 /* Discover (Live): rooms you don't follow, through the same age and word checks. */
 const dc = { mode: "foryou", gender: "", q: "", offset: 0, rooms: [], gen: 0, loaded: false };
@@ -1900,20 +1923,36 @@ function usualHours(times) {
 }
 const fp = { source: "all", mode: "following", tags: "", cursor: "", more: false, loading: false, gen: 0, shown: 0 };
 document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
-  fp.mode = b.dataset.m;
+  fp.mode = b.dataset.m; remember("feedMode", fp.mode);
   document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
 document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
-  fp.source = b.dataset.s;
+  fp.source = b.dataset.s; remember("feedSource", fp.source);
   $("br-form").hidden = fp.source !== "reddit"; if (fp.source === "reddit") loadRecentBrowses();
   $("e6-tags-form").hidden = fp.source !== "e621";
   document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
 $("f-more").onclick = () => loadPosts(false);
+// The Feed and Saved as you left them (mode, site, Saved's filter), in this browser.
+function remember(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function recalled(k, ok) { try { const v = localStorage.getItem(k); return ok.includes(v) ? v : null; } catch { return null; } }
+{
+  const m = recalled("feedMode", ["following", "foryou"]), src = recalled("feedSource", ["all", "x", "reddit", "e621"]);
+  if (m) { fp.mode = m; document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m))); }
+  if (src) {
+    fp.source = src; document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === src)));
+    $("br-form").hidden = src !== "reddit"; $("e6-tags-form").hidden = src !== "e621";
+  }
+}
 // e621's tag filter: only posts with these tags (Following: newest; For you: top today)
 $("e6-tags-form").onsubmit = e => { e.preventDefault(); fp.tags = $("e6-tags").value.trim().split(/\s+/).join(" "); loadPosts(true); };
+function retryBtn() {
+  const b = el("button", "retry", "Try again"); b.type = "button";
+  b.onclick = () => loadPosts(true);
+  return b;
+}
 async function loadPosts(reset) {
   if (reset) {
     fp.cursor = ""; fp.shown = 0; fp.gen++; $("f-posts").replaceChildren();
@@ -1931,7 +1970,8 @@ async function loadPosts(reset) {
     $("f-posts").append(...d.posts.map(postCard));
     fp.shown += d.posts.length; fp.cursor = d.cursor || ""; fp.more = d.more; $("f-more").hidden = !d.more;
     if (!fp.shown && !d.more) $("f-posts").append(el("p", "note", "No posts."));
-  } catch (err) { if (gen === fp.gen) $("f-feeds").textContent = err.message; }
+    if (Object.keys(d.errors || {}).length) $("f-feeds").append(" ", retryBtn());
+  } catch (err) { if (gen === fp.gen) { $("f-feeds").textContent = err.message + " "; $("f-feeds").append(retryBtn()); } }
   finally { if (gen === fp.gen) fp.loading = false; }
 }
 // For you (Feed): X accounts you don't follow, from your rooms' bios, your follows' mentions
@@ -2026,6 +2066,9 @@ function commentEl(c, source) {
   if ((c.replies || []).length) { const r = el("div", "cm-replies"); r.append(...c.replies.map(x => commentEl(x, source))); box.append(r); }
   return box;
 }
+function openPicture(src) { $("pic-img").src = src; $("pic-view").hidden = false; }
+function closePicture() { $("pic-view").hidden = true; $("pic-img").removeAttribute("src"); }
+$("pic-view").onclick = closePicture;
 function closePost() { pv.gen++; $("post-view").hidden = true; $("pv-post").replaceChildren(); $("pv-comments").replaceChildren(); }
 $("pv-close").onclick = closePost;
 function closeBrowse() { br.gen++; $("browse").hidden = true; for (const v of $("br-posts").querySelectorAll("video")) v.pause(); }
@@ -2052,19 +2095,29 @@ function postCard(p, opened) {
     const t = el("p", "text", p.text); body.append(t);
     if (canOpen) { t.classList.add("go"); t.onclick = () => openPost(p); }
   }
-  for (const m of p.media) {
+  // pictures and videos: several swipe sideways (n / N); videos play muted while on screen;
+  // opened, a post shows its pictures in full quality and a tap shows one full screen
+  const boxes = p.media.map(m => {
     const box = el("div", "media");
     if (m.kind === "video" || m.kind === "hls") {
       const v = el("video"); v.controls = v.loop = v.muted = v.playsInline = true; v.preload = "none";
       if (m.poster) v.poster = m.poster;
       if (m.kind === "video") v.src = m.url; else feedHls(v, m);
-      box.append(v);
+      box.append(v); playObs.observe(v);
     } else {
-      const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = m.url; box.append(img);
+      const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = opened && m.full ? m.full : m.url; box.append(img);
+      if (opened && m.full) img.onerror = () => { if (img.src !== m.url) img.src = m.url; };
       if (canOpen) { box.classList.add("go"); box.onclick = () => openPost(p); }
+      else if (opened) { box.classList.add("go"); box.onclick = () => openPicture(img.src); }
     }
-    body.append(box);
-  }
+    return box;
+  });
+  if (boxes.length > 1) {
+    const strip = el("div", "gallery"), count = el("span", "g-count", `1 / ${boxes.length}`), wrap = el("div", "g-wrap");
+    strip.append(...boxes);
+    strip.addEventListener("scroll", () => { count.textContent = `${Math.round(strip.scrollLeft / strip.clientWidth) + 1} / ${boxes.length}`; }, { passive: true });
+    wrap.append(strip, count); body.append(wrap);
+  } else body.append(...boxes);
   const acts = el("div", "acts");
   if (canOpen) {
     const c = el("button", "comments-btn", p.comments ? `💬 ${Number(p.comments).toLocaleString()}` : "💬 Comments");
@@ -2540,7 +2593,8 @@ function closeRoom() { pl.gen++; clearTimeout(pl.timer); stopVideo(); $("player"
 $("pl-close").onclick = closeRoom;
 document.addEventListener("keydown", e => {
   if ($("player").hidden) {
-    if (e.key === "Escape") { if (!$("xv-player").hidden) closeXvideo(); else if (!$("multi").hidden) closeMulti(); else if (!$("post-view").hidden) closePost(); else if (!$("browse").hidden) closeBrowse(); else if (!$("profile").hidden) closeProfile(); }
+    if (e.key === "Escape") { if (!$("pic-view").hidden) closePicture(); else if (!$("xv-player").hidden) closeXvideo();
+      else if (!$("mv-picker").hidden) $("mv-picker").hidden = true; else if (!$("multi").hidden) closeMulti(); else if (!$("post-view").hidden) closePost(); else if (!$("browse").hidden) closeBrowse(); else if (!$("profile").hidden) closeProfile(); }
     return;
   }
   if (e.key === "Escape") closeRoom();

@@ -397,6 +397,12 @@ the **Saved** tab, below):
 **Browse now (Reddit).** With Reddit picked, type a subreddit (or tap one on a post) to see it
 as it is now: Hot, New or the day's Top, 25 posts a page, More for the next.
 
+**Watching the Feed.** Videos play (muted) while they're on screen and pause when you scroll
+past. A post with several pictures or videos swipes sideways (2 / 7 in the corner). Opened, a
+post shows its pictures in full quality; tap one to see it full screen. A site that didn't
+answer says so at the top, with Try again. The Feed's mode and site, and Saved's filter, stay as
+you left them (in this browser).
+
 **Comments.** Tap a post's text or picture, or 💬 (with how many it has), to open it with its
 comments, read live from its site: X's replies (nested by what they answer, with their pictures),
 Reddit's comments (top first, replies to replies four deep; AutoModerator left out) and e621's.
