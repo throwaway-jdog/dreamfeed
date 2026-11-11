@@ -274,8 +274,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #f-source { grid-template-columns: repeat(4, 1fr); }
-#f-source.no-e621 { grid-template-columns: repeat(3, 1fr); }
-#f-source.no-e621 [data-s="e621"] { display: none; }
+.br-form.e6-tags-form { grid-template-columns: minmax(0, 1fr) auto; }
 .fposts #f-mode { margin: 10px 14px 0; }
 .saved-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 14px 0; }
 .saved-bar .secondary { width: auto; padding: 0 14px; }
@@ -748,6 +747,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <select class="in" id="br-sort" aria-label="Sort"><option value="hot">Hot</option><option value="new">New</option><option value="top">Top today</option></select>
       <button type="submit" class="secondary">Browse</button>
       <div class="br-recent" id="br-recent"></div></form>
+    <form class="br-form e6-tags-form" id="e6-tags-form" hidden>
+      <input class="in" id="e6-tags" placeholder="Only these tags: anal, or anal canine…" maxlength="300" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <button type="submit" class="secondary">Filter</button></form>
     <p class="note" id="f-feeds"></p>
     <div id="f-posts"></div>
     <button type="button" class="secondary more" id="f-more" hidden>More</button>
@@ -1702,23 +1704,22 @@ function usualHours(times) {
   const at = h => new Date(2000, 0, 1, h % 24).toLocaleTimeString([], { hour: "numeric" });
   return `usually live ${at(best.h)}–${at(best.h + best.n)}`;
 }
-const fp = { source: "all", mode: "following", cursor: "", more: false, loading: false, gen: 0, shown: 0 };
+const fp = { source: "all", mode: "following", tags: "", cursor: "", more: false, loading: false, gen: 0, shown: 0 };
 document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
   fp.mode = b.dataset.m;
   document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-  $("f-source").classList.toggle("no-e621", fp.mode === "foryou");     // For you is X and Reddit only
-  if (fp.mode === "foryou" && fp.source === "e621") {
-    fp.source = "all"; document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === "all")));
-  }
   loadPosts(true);
 });
 document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
   fp.source = b.dataset.s;
   $("br-form").hidden = fp.source !== "reddit"; if (fp.source === "reddit") loadRecentBrowses();
+  $("e6-tags-form").hidden = fp.source !== "e621";
   document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
 $("f-more").onclick = () => loadPosts(false);
+// e621's tag filter: only posts with these tags (Following: newest; For you: top today)
+$("e6-tags-form").onsubmit = e => { e.preventDefault(); fp.tags = $("e6-tags").value.trim().split(/\s+/).join(" "); loadPosts(true); };
 async function loadPosts(reset) {
   if (reset) {
     fp.cursor = ""; fp.shown = 0; fp.gen++; $("f-posts").replaceChildren();
@@ -1728,7 +1729,8 @@ async function loadPosts(reset) {
   const gen = fp.gen; fp.loading = true; $("f-more").hidden = true;
   $("f-feeds").textContent = "Reading the sites…";
   try {
-    const d = await api(`api/following/posts?mode=${fp.mode}&source=${fp.source}&cursor=${encodeURIComponent(fp.cursor)}`);
+    const d = await api(`api/following/posts?mode=${fp.mode}&source=${fp.source}&cursor=${encodeURIComponent(fp.cursor)}`
+      + (fp.source === "e621" && fp.tags ? `&tags=${encodeURIComponent(fp.tags)}` : ""));
     if (gen !== fp.gen) return;
     const names = { x: "X", reddit: "Reddit", e621: "e621" };
     $("f-feeds").textContent = Object.entries(d.errors || {}).map(([k, v]) => `${names[k] || k}: ${v}`).join(" · ");

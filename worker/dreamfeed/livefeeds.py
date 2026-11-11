@@ -7,7 +7,9 @@ kept on disk). Used by the web app; standard library plus the gallery-dl command
 - Reddit: its API as you (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_REFRESH_TOKEN): your
   subscriptions and the Dashboard's extras as one listing (Following), your front page (Best,
   For you), any subreddit (Browse now) or user. Saving saves on Reddit.
-- e621: the Dashboard's tag searches.
+- e621: the Dashboard's tag searches, newest first (Following), or its best rated of the last
+  24 hours (For you); or, either way, only the tags you filter by. Pictures show e621's 850px
+  copy; Save keeps the original.
 
 What's still left out, by the rules alone (instant, no models): e621 posts with a tag dreamfeed
 never allows (e621.NEVER: the youth tags, feral, bestiality; e621 hosts those, so they aren't
@@ -404,11 +406,16 @@ def _e621_full(p: dict, kind: str) -> str | None:
     return (p.get("file") or {}).get("url")
 
 
-def e621_page(search: str, before: int | None) -> tuple[list[dict], int | None]:
+TOP_TODAY = "order:score date:day"      # For you: the best rated of the last 24 hours
+
+
+def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict], int | None]:
+    """A page of an e621 tag search: the newest (at: the post id the page starts below), or
+    with top, the best rated of the last 24 hours (at: the page number)."""
     def fetch():
-        params = {"tags": e621.query(search), "limit": E621_PAGE}
-        if before:
-            params["page"] = f"b{before}"
+        params = {"tags": e621.query(f"{search} {TOP_TODAY}" if top else search), "limit": E621_PAGE}
+        if at:
+            params["page"] = str(at) if top else f"b{at}"
         found = e621.get("/posts.json", params).get("posts") or []
         out = []
         for p in found:
@@ -417,14 +424,22 @@ def e621_page(search: str, before: int | None) -> tuple[list[dict], int | None]:
                 continue
             d = e621.details(p)
             kind = "video" if got[1] in ("mp4", "webm") else "image"
-            prev = (p.get("sample") or {}).get("url") or (p.get("preview") or {}).get("url")
-            out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"], "place": search,
-                        "text": d["title"], "posted_at": d["date"], "link": d["link"], "via": "following", "saved": False,
-                        "media": [{"kind": kind, "url": got[0], "full": _e621_full(p, kind) or got[0],
+            sample = p.get("sample") or {}
+            prev = sample.get("url") or (p.get("preview") or {}).get("url")
+            # a picture shows e621's 850px copy (the original is often 5-20 MB): the original is
+            # what Save keeps. A GIF's copy is a still, so it shows itself.
+            shown = sample["url"] if kind == "image" and got[1] != "gif" and sample.get("has") and sample.get("url") else got[0]
+            out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"],
+                        "place": search or "top today", "text": d["title"], "posted_at": d["date"], "link": d["link"],
+                        "via": "foryou" if top else "following", "saved": False,
+                        "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
                                    "poster": prev if kind == "video" else None}]})
-        last = min((int(p["id"]) for p in found if str(p.get("id", "")).isdigit()), default=None)
-        return out, last if len(found) >= E621_PAGE else None
-    return _cached(f"e621:{search}:{before}", fetch)
+        if len(found) < E621_PAGE:
+            return out, None
+        if top:
+            return out, (at or 1) + 1
+        return out, min((int(p["id"]) for p in found if str(p.get("id", "")).isdigit()), default=None)
+    return _cached(f"e621:{top}:{search}:{at}", fetch)
 
 
 # ---- the Feed ----
@@ -438,12 +453,14 @@ def _merge(lists: list[list[dict]], by_time: bool) -> list[dict]:
     return out
 
 
-def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searches: list[str]) -> dict:
+def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searches: list[str], tags: str = "") -> dict:
     """A page of the Feed. mode: following (your X Following, your subscriptions and the
-    Dashboard's subreddits, its e621 searches) or foryou (X's For you, Reddit's Best).
+    Dashboard's subreddits, its e621 searches, newest first) or foryou (X's For you, Reddit's
+    Best, e621's best rated of the last 24 hours). tags: e621 shows only posts with these
+    (instead of the Dashboard's searches).
     cursor: where each site's next page starts ({} for the first); None in it: that site's done.
     {"posts", "users", "cursor", "more", "errors"}."""
-    sources = [s for s in (("x", "reddit", "e621") if mode == "following" else ("x", "reddit")) if source in ("all", s)]
+    sources = [s for s in ("x", "reddit", "e621") if source in ("all", s)]
     first = not cursor
     cursor = dict(cursor or {})
     def one(s: str) -> tuple[list[list[dict]], list[dict], object, str | None]:
@@ -483,15 +500,22 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
                         elif err:
                             error = err[:200]
                 return lists, [], after, error
-            state = cursor.get("e621") or {q: None for q in searches}
-            more, got = {}, []
-            for q in searches:
+            top = mode == "foryou"
+            qs = [tags] if tags else [""] if top else searches
+            state = cursor.get("e621") or {q: None for q in qs}
+            more, got, refused = {}, [], []
+            for q in qs:
                 if not first and state.get(q) is None:
                     continue
-                posts, last = e621_page(q, state.get(q))
+                try:
+                    posts, last = e621_page(q, state.get(q), top)
+                except ValueError as e:         # a search dreamfeed won't run: the others still do
+                    refused.append(f"{q}: {e}")
+                    continue
                 got += posts
                 more[q] = last
-            return [got] if searches else [], [], more if any(v is not None for v in more.values()) else None, None
+            return ([got] if qs else [], [], more if any(v is not None for v in more.values()) else None,
+                    "; ".join(refused)[:200] or None)
         except (LookupError, ValueError, OSError) as e:
             return lists, [], None, str(e)[:200]
 

@@ -26,7 +26,8 @@ GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
 POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
                         {"e621": {"searches": ["tag tag", ...], "top": N}} change them
-GET  /api/following/posts  ?mode=following|foryou&source=all|x|reddit|e621&cursor=C  the Feed, live from the sites
+GET  /api/following/posts  ?mode=following|foryou&source=all|x|reddit|e621&cursor=C&tags=T  the Feed, live from the sites
+                           (tags: e621 only shows posts with them)
                         (its pictures and videos load from them); what you save is in Saved (/api/feed?view=liked)
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
@@ -594,12 +595,16 @@ def _mark_saved(posts: list[dict]) -> list[dict]:
     return posts
 
 
-def follow_posts(source: str, cursor: str, mode: str = "following") -> dict:
-    """A page of the Feed, live from the sites (livefeeds), or what you saved."""
+def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = "") -> dict:
+    """A page of the Feed, live from the sites (livefeeds). tags: e621 only shows posts with
+    these tags (e.g. "anal" or "anal canine")."""
     if source not in ("all", *FEED_SOURCES) or mode not in FEED_MODES:
         raise ValueError("bad source")
+    tags = " ".join(tags.split())
+    if tags:
+        e621.query(tags)            # a search e621 and dreamfeed take (raises ValueError)
     s = follow_settings(subscribed=False)
-    d = livefeeds.feed(mode, source, _cursor(cursor), s["reddit"]["follow"], s["e621"]["searches"])
+    d = livefeeds.feed(mode, source, _cursor(cursor), s["reddit"]["follow"], s["e621"]["searches"], tags)
     _seen(d["posts"], d["users"])
     nxt = base64.urlsafe_b64encode(json.dumps(d["cursor"]).encode()).decode().rstrip("=") if d["more"] else None
     return {"posts": _mark_saved(d["posts"]), "more": d["more"], "cursor": nxt, "errors": d["errors"]}
@@ -2124,7 +2129,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/following/posts":
             q = self.query()
             try:
-                return self.send(200, follow_posts(q.get("source", "all"), q.get("cursor", ""), q.get("mode", "following")))
+                return self.send(200, follow_posts(q.get("source", "all"), q.get("cursor", ""), q.get("mode", "following"),
+                                                   q.get("tags", "")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
         if path == "/api/saved/import":
