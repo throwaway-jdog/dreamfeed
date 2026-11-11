@@ -7,7 +7,7 @@ kept on disk). Used by the web app; standard library plus the gallery-dl command
 - Reddit: its API as you (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_REFRESH_TOKEN): your
   subscriptions and the Dashboard's extras as one listing (Following), your front page (Best,
   For you), any subreddit (Browse now) or user. Saving saves on Reddit.
-- e621: the Dashboard's tag searches, newest first (Following), or its best rated of the last
+- e621: the Dashboard's tag searches, newest first (Following), or their best rated of the last
   24 hours (For you); or, either way, only the tags you filter by. Pictures show e621's 850px
   copy; Save keeps the original.
 
@@ -430,8 +430,9 @@ def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict
             # what Save keeps. A GIF's copy is a still, so it shows itself.
             shown = sample["url"] if kind == "image" and got[1] != "gif" and sample.get("has") and sample.get("url") else got[0]
             out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"],
-                        "place": search or "top today", "text": d["title"], "posted_at": d["date"], "link": d["link"],
+                        "place": search, "text": d["title"], "posted_at": d["date"], "link": d["link"],
                         "via": "foryou" if top else "following", "saved": False,
+                        "score": ((p.get("score") or {}).get("total") or 0),
                         "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
                                    "poster": prev if kind == "video" else None}]})
         if len(found) < E621_PAGE:
@@ -456,8 +457,8 @@ def _merge(lists: list[list[dict]], by_time: bool) -> list[dict]:
 def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searches: list[str], tags: str = "") -> dict:
     """A page of the Feed. mode: following (your X Following, your subscriptions and the
     Dashboard's subreddits, its e621 searches, newest first) or foryou (X's For you, Reddit's
-    Best, e621's best rated of the last 24 hours). tags: e621 shows only posts with these
-    (instead of the Dashboard's searches).
+    Best, the best rated of the last 24 hours of the Dashboard's e621 searches). tags: e621
+    shows only posts with these (instead of the Dashboard's searches).
     cursor: where each site's next page starts ({} for the first); None in it: that site's done.
     {"posts", "users", "cursor", "more", "errors"}."""
     sources = [s for s in ("x", "reddit", "e621") if source in ("all", s)]
@@ -501,7 +502,7 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
                             error = err[:200]
                 return lists, [], after, error
             top = mode == "foryou"
-            qs = [tags] if tags else [""] if top else searches
+            qs = [tags] if tags else searches
             state = cursor.get("e621") or {q: None for q in qs}
             more, got, refused = {}, [], []
             for q in qs:
@@ -514,6 +515,8 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
                     continue
                 got += posts
                 more[q] = last
+            if top:                             # your searches' best of the day, together
+                got.sort(key=lambda p: p["score"], reverse=True)
             return ([got] if qs else [], [], more if any(v is not None for v in more.values()) else None,
                     "; ".join(refused)[:200] or None)
         except (LookupError, ValueError, OSError) as e:
