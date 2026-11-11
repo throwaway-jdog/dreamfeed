@@ -344,6 +344,7 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .pf-chip small { color: var(--muted); }
 .pf-chip button { background: none; border: 0; color: var(--muted); font-size: 18px; width: 30px; height: 30px; cursor: pointer; }
 .pf-link-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }
+.pf-link-form[hidden] { display: none; }
 .pf-link-form .secondary { width: auto; padding: 0 14px; }
 .pf-prev { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .pf-prev .secondary { width: auto; padding: 0 14px; }
@@ -1801,13 +1802,13 @@ function postCard(p) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
   const av = el("span", "av sm", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
   if (p.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = p.avatar; av.append(im); }
-  if (p.author && (p.source === "x" || p.source === "reddit")) {
-    av.style.cursor = "pointer"; av.onclick = () => openPerson(p.source === "x" ? { x: p.author } : { reddit: p.author });
-  }
+  // whose profile the name opens: X's and Reddit's author, e621's (first) artist
+  const person = p.source === "x" && p.author ? { x: p.author } : p.source === "reddit" && p.author ? { reddit: p.author }
+    : p.source === "e621" && (p.artists || []).length ? { e621: p.artists[0] } : null;
+  if (p.source === "reddit" && p.avatar && p.place) { av.style.cursor = "pointer"; av.onclick = () => openBrowse(p.place, "hot"); }
+  else if (person) { av.style.cursor = "pointer"; av.onclick = () => openPerson(person); }
   const who = el("span", "name", p.author || "?");
-  if (p.author && (p.source === "x" || p.source === "reddit")) {
-    who.classList.add("who"); who.onclick = () => openPerson(p.source === "x" ? { x: p.author } : { reddit: p.author });
-  }
+  if (person) { who.classList.add("who"); who.onclick = () => openPerson(person); }
   head.append(who,
               (() => { const w = el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : "X");
                        if (p.source === "reddit" && p.place) { w.classList.add("go"); w.onclick = () => openBrowse(p.place, "hot"); }
@@ -1956,7 +1957,7 @@ async function openPerson(key) {
   clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); pf.toldFail = false;
   pf.key = key; pf.videos = []; pf.data = null; pf.posts = null; pf.room = key.room ? { name: key.room } : null;
   if (!key.room) pf.card = null;
-  $("pf-title").textContent = key.room || (key.x ? "@" + key.x : "u/" + key.reddit);
+  $("pf-title").textContent = key.room || (key.x ? "@" + key.x : key.e621 ? key.e621.replace(/_/g, " ") : "u/" + key.reddit);
   $("pf-info").textContent = "Loading…"; $("pf-about").hidden = true; $("pf-head").hidden = true;
   for (const id of ["pf-links", "pf-grid", "pf-posts"]) $(id).replaceChildren();
   for (const id of ["pf-prev-sec", "pf-vid-sec", "pf-post-sec"]) $(id).hidden = true;
@@ -1965,7 +1966,8 @@ async function openPerson(key) {
   await loadPerson(gen);
 }
 async function loadPerson(gen) {
-  const k = pf.key, q = k.room ? `room=${encodeURIComponent(k.room)}` : k.x ? `x=${encodeURIComponent(k.x)}` : `reddit=${encodeURIComponent(k.reddit)}`;
+  const k = pf.key, q = k.room ? `room=${encodeURIComponent(k.room)}` : k.x ? `x=${encodeURIComponent(k.x)}`
+    : k.e621 ? `e621=${encodeURIComponent(k.e621)}` : `reddit=${encodeURIComponent(k.reddit)}`;
   let d;
   try { d = await api(`api/profile?${q}`); } catch (err) { if (gen === pf.gen) $("pf-info").textContent = err.message; return; }
   if (gen !== pf.gen) return;
@@ -1991,7 +1993,7 @@ async function loadPerson(gen) {
   $("pf-about").textContent = b.about || ""; $("pf-about").hidden = !b.about;
   renderLinks(d);
   renderXHead(d);
-  const who = [...d.x, ...d.reddit.map(h => "u/" + h)].join(" ");
+  const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...d.reddit.map(h => "u/" + h)].join(" ");
   if (!pf.posts || pf.posts.gen !== gen || pf.posts.who !== who) startPersonPosts(d, gen, who);
   if (room && d.followed && d.videos) {
     try { const v = await api(`api/live/videos?name=${encodeURIComponent(room)}`); if (gen !== pf.gen) return; pf.videos = v.videos; } catch {}
@@ -2019,11 +2021,17 @@ function renderLinks(d) {
     chips.push(chip(label, href, l.state === "bio" ? "their bio" : "", () => linkAccount(d.room, l.source, l.handle, true)));
   }
   if (!d.room) {
+    for (const a of d.e621 || []) chips.push(chip("e621", `https://e621.net/artists/show_or_new?name=${encodeURIComponent(a)}`));
     for (const h of d.x) chips.push(chip("@" + h, `https://x.com/${h}`));
     for (const h of d.reddit) chips.push(chip("u/" + h, `https://www.reddit.com/user/${h}`));
+    for (const u of (d.artist || {}).links || []) {     // an e621 artist's pages elsewhere, as e621 lists them
+      let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch { continue; }
+      if (!/^(x|twitter)\.com$/.test(host)) chips.push(chip(host, u));
+    }
   }
   if (!chips.length) chips.push(el("small", "note", "None linked yet."));
   $("pf-links").replaceChildren(...chips);
+  $("pf-link-form").hidden = !!pf.key.e621;            // (rooms are linked to X and Reddit accounts)
   // With a room: link its accounts. Without: link this account to a room.
   const src = $("pf-link-src"), was = src.value;
   src.replaceChildren(...(d.room ? [["x", "X"], ["reddit", "Reddit"]] : [["room", "Chaturbate"]]).map(([v, t]) => {
@@ -2050,7 +2058,7 @@ async function linkAccount(room, source, handle, remove, quiet) {
 function renderXHead(d) {
   const users = d.xusers || {}, h = (pf.key.x || "").toLowerCase(), u = users[h] || Object.values(users)[0];
   const head = $("pf-head");
-  if (!u) { head.hidden = true; return; }
+  if (!u) return renderOtherHead(d);
   const av = el("span", "av lg", u.avatar ? null : (u.handle || "?").slice(0, 1).toUpperCase()), info = el("div");
   if (u.avatar) { const im = el("img"); im.alt = ""; im.src = u.avatar; av.append(im); }
   const n = x => x == null ? null : Number(x).toLocaleString();
@@ -2061,9 +2069,24 @@ function renderXHead(d) {
   head.replaceChildren(av, info); head.hidden = false;
   if (!d.room) $("pf-title").textContent = u.nick || "@" + u.handle;
 }
-// Their latest posts, live from X (their media) and Reddit (what they posted), each a page at a time.
+// Without an X account: a Reddit user's picture and karma, or an e621 artist's names and post count.
+function renderOtherHead(d) {
+  const head = $("pf-head"), r = d.reddituser, a = d.artist;
+  if (!r && !a) { head.hidden = true; return; }
+  const name = r ? "u/" + r.name : a.name.replace(/_/g, " ");
+  const av = el("span", "av lg", r && r.avatar ? null : name.replace(/^u\//, "").slice(0, 1).toUpperCase()), info = el("div");
+  if (r && r.avatar) { const im = el("img"); im.alt = ""; im.src = r.avatar; av.append(im); }
+  info.append(el("b", null, name));
+  if (r) info.append(el("small", null, ["Reddit", r.karma != null && `${Number(r.karma).toLocaleString()} karma`,
+                                         r.since && `since ${new Date(r.since.replace(" ", "T") + "Z").getFullYear()}`].filter(Boolean).join(" · ")));
+  else info.append(el("small", null, ["e621 artist", a.posts != null && `${Number(a.posts).toLocaleString()} posts`].filter(Boolean).join(" · ")),
+                   ...(a.other_names.length ? [el("small", null, "also " + a.other_names.slice(0, 4).join(", ").replace(/_/g, " "))] : []));
+  head.replaceChildren(av, info); head.hidden = false;
+}
+// Their latest posts, live from X (their media), Reddit (what they posted) and e621 (what they drew), each a page at a time.
 function startPersonPosts(d, gen, who) {
-  const feeds = [...d.x.map(h => ({ source: "x", handle: h, cursor: "" })), ...d.reddit.map(h => ({ source: "reddit", handle: h, cursor: "" }))];
+  const feeds = [...(d.e621 || []).map(h => ({ source: "e621", handle: h, cursor: "" })),
+                 ...d.x.map(h => ({ source: "x", handle: h, cursor: "" })), ...d.reddit.map(h => ({ source: "reddit", handle: h, cursor: "" }))];
   pf.posts = { gen, feeds, who, loading: false };
   $("pf-posts").replaceChildren(); $("pf-more").hidden = true;
   $("pf-post-sec").hidden = !feeds.length;
@@ -2082,7 +2105,7 @@ async function morePersonPosts() {
     try {
       const r = await api(`api/person/posts?source=${f.source}&handle=${encodeURIComponent(f.handle)}&cursor=${encodeURIComponent(f.cursor)}`);
       f.cursor = r.cursor; return r.posts;
-    } catch (err) { f.cursor = null; return [el("p", "note", `${f.source === "x" ? "@" : "u/"}${f.handle}: ${err.message}`)]; }
+    } catch (err) { f.cursor = null; return [el("p", "note", `${{ x: "@", reddit: "u/", e621: "e621 " }[f.source]}${f.handle}: ${err.message}`)]; }
   }));
   if (gen !== pf.gen || pf.posts !== st) return;
   wait.remove();
@@ -2091,7 +2114,8 @@ async function morePersonPosts() {
   if (!$("pf-posts").children.length) $("pf-posts").append(el("p", "note", "No pictures or videos lately."));
   st.loading = false; $("pf-more").hidden = !st.feeds.some(f => f.cursor !== null);
   if (st.feeds.some(f => f.source === "x") && pf.data) {   // X said who they are with their posts: the header, filled in
-    const k = pf.key, q = k.room ? `room=${encodeURIComponent(k.room)}` : k.x ? `x=${encodeURIComponent(k.x)}` : "";
+    const k = pf.key, q = k.room ? `room=${encodeURIComponent(k.room)}` : k.x ? `x=${encodeURIComponent(k.x)}`
+      : k.e621 ? `e621=${encodeURIComponent(k.e621)}` : "";
     try { if (q) { const d = await api(`api/profile?${q}`); if (gen === pf.gen && pf.data) { pf.data.xusers = d.xusers; renderXHead(pf.data); } } } catch {}
   }
 }

@@ -9,6 +9,7 @@ E621_USERNAME (optional) puts your name in the user agent, as e621 asks.
 import datetime as dt
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -23,6 +24,8 @@ NEVER = ({t.replace(" ", "_") for t in safety.YOUTH_TAGS | safety.FERAL_TAGS}
          | {"young", "cub", "child", "loli", "shota", "toddler", "baby", "infant", "teen", "adolescent",
             "feral", "bestiality", "zoophilia", "underage"})
 SEARCH_NOT = "-young -feral -bestiality"
+ARTIST = re.compile(r"^[a-z0-9_()\-.'!~]{1,100}$")     # an artist's tag
+NOT_ARTISTS = ("conditional_dnp", "sound_warning", "unknown_artist", "anonymous_artist", "avoid_posting", "third-party_edit")
 MAX_TERMS = 30                # e621 takes 40 tags a search; SEARCH_NOT and the date and order take some
 _lock, _last = threading.Lock(), [0.0]
 
@@ -99,14 +102,13 @@ def media(post: dict) -> tuple[str, str] | None:
 
 
 def details(post: dict) -> dict:
-    """What the Feed shows of a post: who drew it, its description, when, the link."""
-    artists = [a for a in (post.get("tags") or {}).get("artist") or []
-               if a not in ("conditional_dnp", "sound_warning", "unknown_artist", "anonymous_artist")]
+    """What the Feed shows of a post: who drew it (artists: their tags), its description, when, the link."""
+    artists = [a for a in (post.get("tags") or {}).get("artist") or [] if a not in NOT_ARTISTS]
     try:
         when = dt.datetime.fromisoformat(post["created_at"]).astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     except (KeyError, ValueError):
         when = ""
-    return {"id": str(post["id"]), "author": ", ".join(artists[:3]).replace("_", " "),
+    return {"id": str(post["id"]), "author": ", ".join(artists[:3]).replace("_", " "), "artists": artists[:3],
             "title": (post.get("description") or "")[:500], "date": when, "link": f"{API}/posts/{post['id']}"}
 
 

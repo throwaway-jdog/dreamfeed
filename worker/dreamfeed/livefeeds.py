@@ -47,7 +47,8 @@ MAX_GALLERY = 20
 MAX_USERS = 10         # Reddit people (u/name) read for Following, each one's newest page
 CACHE_TTL = 120        # seconds a page is reused (switching tabs, coming back)
 _lock = threading.Lock()
-_cache: dict[str, tuple[float, object]] = {}
+_cache: dict[str, tuple[float, object, float]] = {}     # key: (when, value, seconds it's good for)
+WHO_TTL = 86400        # who someone is (a Reddit user's picture, an e621 artist's links)
 _token = {"value": "", "until": 0.0}
 _redgifs = {"value": "", "until": 0.0}
 _clips: dict[str, tuple[float, dict | None]] = {}
@@ -59,16 +60,16 @@ def x_cookies() -> str | None:
     return path if path and os.path.isfile(path) else None
 
 
-def _cached(key: str, fetch):
+def _cached(key: str, fetch, ttl: float = CACHE_TTL):
     with _lock:
         hit = _cache.get(key)
-        if hit and time.time() - hit[0] < CACHE_TTL:
+        if hit and time.time() - hit[0] < hit[2]:
             return hit[1]
     value = fetch()
     with _lock:
-        for k in [k for k, (t, _) in _cache.items() if time.time() - t > CACHE_TTL]:
+        for k in [k for k, (t, _, good) in _cache.items() if time.time() - t > good]:
             _cache.pop(k, None)
-        _cache[key] = (time.time(), value)
+        _cache[key] = (time.time(), value, ttl)
     return value
 
 
@@ -240,7 +241,10 @@ def _reddit_listing(d: dict, via: str) -> tuple[list[dict], str | None]:
     for p, media in zip(found, medias):
         if not media:
             continue
+        sr = p.get("sr_detail") or {}         # (sr_detail=1: the subreddit, with its icon)
+        icon = sr.get("community_icon") or sr.get("icon_img") or None
         posts.append({"id": f"reddit:{p['id']}", "source": "reddit", "author": p.get("author") or "",
+                      "avatar": icon if icon and icon.startswith("https://") else None,
                       "place": p.get("subreddit"), "text": p.get("title") or "", "posted_at": _utc(p.get("created_utc")),
                       "link": "https://www.reddit.com" + (p.get("permalink") or ""), "via": via,
                       "saved": bool(p.get("saved")), "media": media})
@@ -256,8 +260,20 @@ def user_path(name: str) -> str:
 def reddit_page(path: str, after: str | None, via: str) -> tuple[list[dict], str | None]:
     """A Reddit listing (path like /best or /r/a+b/new), REDDIT_PAGE posts from `after`."""
     sep = "&" if "?" in path else "?"
-    q = f"{path}{sep}limit={REDDIT_PAGE}&raw_json=1" + (f"&after={urllib.parse.quote(after)}" if after else "")
+    q = f"{path}{sep}limit={REDDIT_PAGE}&raw_json=1&sr_detail=1" + (f"&after={urllib.parse.quote(after)}" if after else "")
     return _cached("reddit:" + q, lambda: _reddit_listing(_reddit(q), via))
+
+
+def reddit_user(name: str) -> dict:
+    """Who a Reddit user is, for their profile: {"name", "avatar", "karma", "since"}."""
+    if not REDDIT_USER.match(name):
+        raise ValueError("bad Reddit username")
+    def fetch():
+        u = (_reddit(f"/user/{name}/about?raw_json=1") or {}).get("data") or {}
+        icon = u.get("icon_img") or u.get("snoovatar_img") or ""     # (icon_img: the head shot)
+        return {"name": u.get("name") or name, "avatar": icon if icon.startswith("https://") else None,
+                "karma": u.get("total_karma"), "since": _utc(u["created_utc"]) if u.get("created_utc") else None}
+    return _cached(f"reddit-user:{name.lower()}", fetch, WHO_TTL)
 
 
 def subscriptions() -> list[str]:
@@ -273,14 +289,7 @@ def subscriptions() -> list[str]:
             if not after:
                 break
         return sorted(set(out), key=str.lower)
-    with _lock:
-        hit = _cache.get("subs")
-        if hit and time.time() - hit[0] < SUBS_TTL:
-            return hit[1]
-    subs = fetch()
-    with _lock:
-        _cache["subs"] = (time.time(), subs)
-    return subs
+    return _cached("subs", fetch, SUBS_TTL)
 
 
 def reddit_save(post_id: str, save: bool) -> None:
@@ -429,7 +438,7 @@ def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict
             # a picture shows e621's 850px copy (the original is often 5-20 MB): the original is
             # what Save keeps. A GIF's copy is a still, so it shows itself.
             shown = sample["url"] if kind == "image" and got[1] != "gif" and sample.get("has") and sample.get("url") else got[0]
-            out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"],
+            out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"], "artists": d["artists"],
                         "place": search, "text": d["title"], "posted_at": d["date"], "link": d["link"],
                         "via": "foryou" if top else "following", "saved": False,
                         "score": ((p.get("score") or {}).get("total") or 0),
@@ -441,6 +450,27 @@ def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict
             return out, (at or 1) + 1
         return out, min((int(p["id"]) for p in found if str(p.get("id", "")).isdigit()), default=None)
     return _cached(f"e621:{top}:{search}:{at}", fetch)
+
+
+def e621_artist(name: str) -> dict:
+    """Who an e621 artist is, for their profile: {"name", "posts", "other_names", "links"
+    (their pages elsewhere, as e621 lists them), "x" (their X handles among those)}."""
+    name = name.strip().lower()
+    if not e621.ARTIST.match(name):
+        raise ValueError("bad e621 artist")
+    def fetch():
+        found = e621.get("/artists.json", {"search[name]": name, "limit": 1}) or []
+        a = found[0] if isinstance(found, list) and found and found[0].get("name") == name else {}
+        tag = e621.get("/tags.json", {"search[name]": name, "limit": 1}) or []
+        links = [u["url"] for u in a.get("urls") or [] if u.get("is_active") and str(u.get("url", "")).startswith("https://")]
+        xs = []
+        for u in links:
+            m = re.match(r"https://(?:www\.|mobile\.)?(?:twitter|x)\.com/([A-Za-z0-9_]{1,15})/?$", u)
+            if m and m.group(1).lower() not in ("home", "i", "intent", "search") and m.group(1).lower() not in xs:
+                xs.append(m.group(1).lower())
+        return {"name": name, "posts": tag[0].get("post_count") if isinstance(tag, list) and tag else None,
+                "other_names": (a.get("other_names") or [])[:10], "links": links[:20], "x": xs[:3]}
+    return _cached(f"e621-artist:{name}", fetch, WHO_TTL)
 
 
 # ---- the Feed ----

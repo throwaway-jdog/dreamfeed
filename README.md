@@ -399,7 +399,10 @@ as it is now: Hot, New or the day's Top, 25 posts a page, More for the next.
 
 **Profiles.** Tap an X name or picture (Following, For you, anywhere) for their profile: their
 picture, name, bio and counts, and their latest media posts, read as you open it (More for
-older ones). A Reddit name gives their latest posts the same way (Reddit's search by author).
+older ones). A Reddit name gives their latest posts the same way (Reddit's search by author),
+with their picture and karma; a Reddit post's picture is its subreddit's icon (tap it for the
+subreddit). An e621 artist's name gives what they drew, newest first, their pages elsewhere as
+e621 lists them, and their X posts too when one of those is an X account.
 
 **Signing in to Reddit.** Make your own app, a "personal use script" at reddit.com/prefs/apps,
 with the redirect uri `http://localhost:6414/`; its id and secret go in `REDDIT_CLIENT_ID` and

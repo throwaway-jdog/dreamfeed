@@ -17,9 +17,9 @@ GET  /api/discover/cb   ?mode=foryou|top|search&q=WORDS&gender=f|m|c|t&offset=N 
 GET  /api/discover/x    X accounts you might like: linked from your rooms, mentioned by your follows
 GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subreddit as it is now (live)
 GET  /api/reddit/browses   the last few subreddits browsed
-GET  /api/person/posts  ?source=x|reddit&handle=H&cursor=C  someone's latest posts, live (their profile)
+GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
-GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME  one profile across sites
+GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
 GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, link, cover), to import
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
@@ -108,6 +108,7 @@ LIVE_VIDEO = "https://*.live.mmcdn.com"
 LIVE_INFO = "https://chaturbate.com/api/chatvideocontext/{}/"
 # And the live Feed's pictures and videos, straight from the sites (livefeeds; no referrer is sent).
 FEED_IMAGES = ("https://pbs.twimg.com https://i.redd.it https://preview.redd.it https://external-preview.redd.it"
+               " https://styles.redditmedia.com https://a.thumbs.redditmedia.com https://b.thumbs.redditmedia.com"
                " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
 FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it https://i.imgur.com"
               " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
@@ -639,7 +640,7 @@ def recent_browses() -> dict:
 
 
 def person_posts(source: str, handle: str, cursor: str) -> dict:
-    """An X account's latest media or a Reddit user's latest posts, live (their profile)."""
+    """An X account's latest media, a Reddit user's latest posts or an e621 artist's, live (their profile)."""
     if source == "x":
         m = X_HANDLE.match(handle.strip())
         if not m:
@@ -653,6 +654,14 @@ def person_posts(source: str, handle: str, cursor: str) -> dict:
         if not m:
             raise ValueError("bad Reddit username")
         posts, nxt = livefeeds.reddit_page(livefeeds.user_path(m.group(1)), cursor or None, "profile")
+    elif source == "e621":
+        name = handle.strip().lower()
+        if not e621.ARTIST.match(name):
+            raise ValueError("bad e621 artist")
+        try:
+            posts, nxt = livefeeds.e621_page(name, int(cursor) if cursor.isdigit() else None)
+        except OSError as e:
+            raise LookupError(f"e621 didn't answer ({e})")
     else:
         raise ValueError("bad source")
     return {"posts": _mark_saved(posts), "cursor": str(nxt) if nxt else None}
@@ -897,10 +906,17 @@ def _bio(name: str) -> dict:
     return _cached("bio:" + name, 3600, fetch) or {}
 
 
-def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
+def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = "") -> dict:
     """One profile across sites: a Chaturbate room (or the room an X or Reddit account is linked
-    to), its linked accounts (who they are on X) and your videos of it. Their posts are read live
-    (person_posts)."""
+    to), its linked accounts (who they are on X and Reddit) and your videos of it; or an e621
+    artist (their pages elsewhere, and their X account's posts when e621 lists one). Their
+    posts are read live (person_posts)."""
+    artist = None
+    if e621_artist:
+        try:
+            artist = livefeeds.e621_artist(e621_artist)
+        except OSError as e:
+            raise LookupError(f"e621 didn't answer ({e})")
     with db() as conn:
         if not room and (x or reddit):
             src, h = ("x", x) if x else ("reddit", reddit)
@@ -909,7 +925,8 @@ def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
             room = hit["room"] if hit else ""
         if room and not ROOM.match(room):
             raise ValueError("bad room")
-        out = {"room": room or None, "followed": False, "bio": {}, "links": [], "xusers": {}, "following_x": [], "videos": 0}
+        out = {"room": room or None, "followed": False, "bio": {}, "links": [], "xusers": {}, "following_x": [], "videos": 0,
+               "e621": [artist["name"]] if artist else [], "artist": artist, "reddituser": None}
         if room:
             bio = _bio(room)
             if bio.get("links"):
@@ -929,9 +946,15 @@ def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
             out["action"] = dict(act) if act else None
             out["links"] = [{"source": l["source"], "handle": l["handle"], "state": l["state"]} for l in conn.execute(
                 "SELECT * FROM links WHERE room = ? AND state != 'removed' ORDER BY source, handle", (room,))]
-        xs = {l["handle"].lower() for l in out["links"] if l["source"] == "x"} | ({x.lower()} if x else set())
+        xs = ({l["handle"].lower() for l in out["links"] if l["source"] == "x"} | ({x.lower()} if x else set())
+              | set(artist["x"] if artist else []))
         rs = {l["handle"].lower() for l in out["links"] if l["source"] == "reddit"} | ({reddit.lower()} if reddit else set())
         out["x"], out["reddit"] = sorted(xs), sorted(rs)
+        if rs and not xs and livefeeds.reddit_ready():      # their picture (X's own is in xusers)
+            try:
+                out["reddituser"] = livefeeds.reddit_user(sorted(rs)[0])
+            except (LookupError, ValueError, OSError):
+                pass
         if xs:
             marks = ",".join("?" * len(xs))
             following = {h.lower() for (h,) in conn.execute(
@@ -2080,9 +2103,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/profile":
             q = self.query()
             try:
-                return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", "")))
+                return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", ""), q.get("e621", "")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path.startswith("/cb-thumb/"):
             name = path[len("/cb-thumb/"):].removesuffix(".jpg")
             data = cb_thumb(name) if ROOM.match(name) else None
