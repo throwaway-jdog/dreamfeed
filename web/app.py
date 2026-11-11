@@ -333,11 +333,12 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         raise LookupError(f"multporn didn't answer ({e})")
     out = []
     for row in re.split(r'<div class="masonry-item views-row', page_html)[1:]:
-        link = re.search(r'views-field-title.*?<a href="([^"]+)">([^<]+)</a>', row, re.S)
+        # the title's own link; its text can have the searched words in <strong>
+        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="([^"]+)">(.*?)</a>', row, re.S)
         img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"', row)
         if not link or not link.group(1).startswith(COMIC_PATHS):
             continue
-        title = html.unescape(link.group(2)).strip()
+        title = html.unescape(re.sub(r"<[^>]+>", "", link.group(2))).strip()
         if safety.story_blocked(title):     # what Import would refuse isn't offered
             continue
         out.append({"title": title, "url": MULTPORN + link.group(1),
