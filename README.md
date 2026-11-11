@@ -377,10 +377,14 @@ The Feed has three parts, each with All, X, Reddit (and e621) to pick from:
   each site's own order, taken in turns; never mixed into Following. Above it, people you might
   like: X accounts you don't follow, from your rooms' bios, mentions by people you follow and
   X's For you (from the last 30 days of your timelines, `x_seen`).
-- **Saved:** what you tapped Save on (as it was shown; its pictures still load from the site, so
-  one the poster deleted is gone). A Reddit post is saved on Reddit too, as you, at once. An X
-  post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client, so use
-  Open on X for that.
+- **Saved:** what you tapped Save on, kept: the follow service downloads its pictures and
+  videos in full quality (X's original pictures and biggest video, e621's original or its
+  full-size MP4, Reddit's own videos with sound through ffmpeg, redgifs' HD) into
+  `data/saved/<site>/<post>/`, which is backed up like `liked/`. Saved shows those copies once
+  they're in (the post says "keeping a full-quality copy…" until then), so a post deleted on
+  the site stays. Unsaving deletes them. A Reddit post is saved on Reddit too, as you, at once.
+  An X post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client,
+  so use Open on X for that.
 
 **Browse now (Reddit).** With Reddit picked, type a subreddit (or tap one on a post) to see it
 as it is now: Hot, New or the day's Top, 25 posts a page, More for the next.

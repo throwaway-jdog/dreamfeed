@@ -37,6 +37,7 @@ from .db import connect
 POLL = 120                   # seconds between looks
 TICK = 5                     # seconds between checks for highlight requests
 HIGHLIGHT_LIMIT = 6 * 3600   # a cut taking longer than this is stopped
+SAVE_LIMIT = 3600            # so is a saved post's download
 BIOS_PER_ROUND = 3           # rooms whose bios are read each round (each once a day)
 EVERYONE = 3600              # seconds between listing every room followed (offline ones too)
 GAP = 600                    # live again within this many seconds: the same session
@@ -154,6 +155,9 @@ def main(argv: list[str]) -> None:
     if argv[:1] == ["highlight"] and len(argv) == 2:
         from .cbhighlights import run
         return run(int(argv[1]))
+    if argv[:1] == ["save"] and len(argv) == 2:
+        from .savedposts import run as save
+        return save(argv[1])
     if argv[:1] == ["reddit-login"]:
         from .redditlogin import login
         return login(argv[1:])
@@ -167,12 +171,15 @@ def main(argv: list[str]) -> None:
     status = folder / "status.json"
     last_everyone = 0.0
     cutting = None         # the highlights' child: (process, job, started)
+    saving = None          # a saved post's download (savedposts): (process, post, started)
     with conn:             # cut off by a restart: again from the start
         conn.execute("UPDATE highlights SET status = 'queued', progress = NULL WHERE status = 'running'")
+        conn.execute("UPDATE saved_posts SET status = 'queued' WHERE status = 'running'")
     print("follow: watching the rooms you follow on Chaturbate", flush=True)
     next_look = 0.0
     while True:
         cutting = _highlights(conn, cutting)
+        saving = _saving(conn, saving)
         try:
             _cb_actions(conn)
         except SignedOut as e:
@@ -264,6 +271,28 @@ def _bios(conn) -> None:
         with conn:
             cbprofile.save_links(conn, name, links)
             conn.execute("UPDATE follows SET bio_at = datetime('now') WHERE source = 'chaturbate' AND name = ?", (name,))
+
+
+def _saving(conn, saving):
+    """Starts downloading the next saved post (savedposts) when none is; notices when one ends."""
+    import subprocess
+    if saving:
+        proc, post, started = saving
+        if proc.poll() is None:
+            if time.time() - started < SAVE_LIMIT:
+                return saving
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+        with conn:
+            conn.execute("UPDATE saved_posts SET status = 'failed', error = coalesce(error, 'stopped (took too long or crashed)')"
+                         " WHERE id = ? AND status = 'running'", (post,))
+    row = conn.execute("SELECT id FROM saved_posts WHERE status = 'queued' ORDER BY saved_at LIMIT 1").fetchone()
+    if not row:
+        return None
+    with conn:
+        conn.execute("UPDATE saved_posts SET status = 'running' WHERE id = ?", (row[0],))
+    proc = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "save", row[0]], start_new_session=True)
+    return proc, row[0], time.time()
 
 
 def _highlights(conn, cutting):

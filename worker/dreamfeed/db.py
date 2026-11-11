@@ -121,7 +121,10 @@ CREATE TABLE IF NOT EXISTS saved_posts (     -- posts saved in the live Feed (Sa
     id          TEXT PRIMARY KEY,            -- x:<id> | reddit:<id> | e621:<id>
     source      TEXT NOT NULL,
     data        TEXT NOT NULL,               -- JSON: the post (its media are the sites' own addresses)
-    saved_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    saved_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    status      TEXT NOT NULL DEFAULT 'queued',   -- its files: queued | running | done | failed (savedposts)
+    files       TEXT,                        -- JSON: [{"kind", "file", "poster"}] in data/saved/<source>/<post>/
+    error       TEXT
 );
 CREATE TABLE IF NOT EXISTS x_seen (          -- X accounts in your timelines, for Discover (kept X_SEEN_DAYS)
     handle      TEXT NOT NULL COLLATE NOCASE,
@@ -145,6 +148,11 @@ def connect(path: Path) -> sqlite3.Connection:
     # The Feed went live: posts aren't downloaded or checked here any more.
     conn.executescript("DROP TABLE IF EXISTS browse_posts; DROP TABLE IF EXISTS previews;"
                        " DROP TABLE IF EXISTS save_actions; DROP TABLE IF EXISTS follow_posts;")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(saved_posts)")}
+    if "status" not in cols:      # saved posts' files kept (savedposts)
+        conn.execute("ALTER TABLE saved_posts ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'")
+        conn.execute("ALTER TABLE saved_posts ADD COLUMN files TEXT")
+        conn.execute("ALTER TABLE saved_posts ADD COLUMN error TEXT")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(follows)")}
     if "bio_at" not in cols:      # when the room's bio was last read for its links
         conn.execute("ALTER TABLE follows ADD COLUMN bio_at TEXT")

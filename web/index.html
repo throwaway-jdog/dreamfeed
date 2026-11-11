@@ -1797,13 +1797,15 @@ function postCard(p) {
     const sv = el("button", "save"), note = el("small"); sv.type = "button";
     const show = () => {
       sv.textContent = p.saved ? "★ Saved" : "☆ Save"; sv.setAttribute("aria-pressed", String(p.saved));
-      const y = p.sync || {};
-      note.textContent = y.status === "failed" ? y.error || "Reddit didn't take it"
-        : p.saved ? (p.source === "reddit" ? (y.status === "done" ? "saved on Reddit too" : "") : "kept in dreamfeed") : "";
+      const y = p.sync || {}, k = p.keep || {};
+      const kept = !p.saved ? "" : k.status === "done" ? "kept in full quality" : k.status === "failed" ? `not kept: ${k.error || "?"}`
+        : k.status ? "keeping a full-quality copy…" : "";
+      note.textContent = [y.status === "failed" ? y.error || "Reddit didn't take it" : p.saved && y.status === "done" ? "saved on Reddit too" : "",
+                          kept].filter(Boolean).join(" · ");
     };
     sv.onclick = async () => {
       sv.disabled = true;
-      try { const d = await api("api/following/save", { post: p, save: !p.saved }); p.saved = d.saved; p.sync = d.sync; }
+      try { const d = await api("api/following/save", { post: p, save: !p.saved }); p.saved = d.saved; p.sync = d.sync; p.keep = d.keep; }
       catch (err) { toast(err.message); }
       finally { sv.disabled = false; }
       show();

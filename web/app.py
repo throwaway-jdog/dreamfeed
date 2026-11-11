@@ -46,7 +46,9 @@ POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of 
 POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
 POST /api/live/restore  {"undo": token} put it back
 POST /api/profile/link  {"room", "source": "x"|"reddit", "handle", "remove": bool} link or unlink an account
-POST /api/following/save {"post": {...}, "save": bool} keep a post in Saved (and save it on Reddit, for Reddit's)
+POST /api/following/save {"post": {...}, "save": bool} keep a post in Saved, its files downloaded in full quality
+                        (the follow service; and saved on Reddit too, for Reddit's)
+GET  /saved-media/<source>/<post>/<file>  a saved post's kept picture or video
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
                         {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
@@ -68,7 +70,7 @@ from pathlib import Path
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, cbprofile, cbvideos, e621, livefeeds, personas as people, safety   # the worker's own rules (see Dockerfile)
+from dreamfeed import acts, cbprofile, cbvideos, e621, livefeeds, personas as people, safety, savedposts   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -126,7 +128,7 @@ def db() -> sqlite3.Connection:
         created_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT)""")
     # and these, so the live Feed's Saved and Discover work before it too (as in the worker's db.py)
     conn.execute("""CREATE TABLE IF NOT EXISTS saved_posts (id TEXT PRIMARY KEY, source TEXT NOT NULL, data TEXT NOT NULL,
-        saved_at TEXT NOT NULL DEFAULT (datetime('now')))""")
+        saved_at TEXT NOT NULL DEFAULT (datetime('now')), status TEXT NOT NULL DEFAULT 'queued', files TEXT, error TEXT)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS x_seen (handle TEXT NOT NULL COLLATE NOCASE, kind TEXT NOT NULL, post TEXT NOT NULL,
         by TEXT, at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (handle, kind, post))""")
     return conn
@@ -554,9 +556,9 @@ def follow_posts(source: str, cursor: str, mode: str = "following") -> dict:
         offset = int(cursor or 0)
         with db() as conn:
             where, args = ("", []) if source == "all" else (" WHERE source = ?", [source])
-            rows = conn.execute(f"SELECT data FROM saved_posts{where} ORDER BY saved_at DESC LIMIT ? OFFSET ?",
+            rows = conn.execute(f"SELECT * FROM saved_posts{where} ORDER BY saved_at DESC LIMIT ? OFFSET ?",
                                 [*args, PAGE_SIZE + 1, offset]).fetchall()
-        posts = [{**json.loads(r["data"]), "saved": True} for r in rows[:PAGE_SIZE]]
+        posts = [_saved_json(r) for r in rows[:PAGE_SIZE]]
         more = len(rows) > PAGE_SIZE
         return {"posts": posts, "more": more, "cursor": str(offset + len(posts)) if more else None, "errors": {}}
     s = follow_settings(subscribed=False)
@@ -629,14 +631,42 @@ def save_post(req: dict) -> dict:
             sync = {"status": "done"}
         except (LookupError, ValueError) as e:
             sync = {"status": "failed", "error": str(e)}
-    keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link", "media")}
+    media = []
+    for x in p["media"][:livefeeds.MAX_GALLERY]:
+        if not isinstance(x, dict) or x.get("kind") not in ("image", "video", "hls"):
+            raise ValueError("bad post")
+        item = {k: x[k] for k in ("kind", "url", "full", "poster", "fallback") if isinstance(x.get(k), str) and x[k]}
+        if any(not savedposts.allowed(item[k]) for k in ("url", "full", "poster", "fallback") if k in item) or "url" not in item:
+            raise ValueError("not a site's media address")
+        media.append(item)
+    keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link")}
+    keep["media"] = media
     with db() as conn:
-        if save:
-            conn.execute("INSERT OR REPLACE INTO saved_posts(id, source, data) VALUES (?, ?, ?)",
+        if save:      # (saved again: kept as it is)
+            conn.execute("INSERT INTO saved_posts(id, source, data) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
                          (pid, m.group(1), json.dumps(keep)[:200_000]))
         else:
             conn.execute("DELETE FROM saved_posts WHERE id = ?", (pid,))
-    return {"saved": save, "sync": sync}
+            shutil.rmtree(savedposts.folder(DATA, pid), ignore_errors=True)
+        r = conn.execute("SELECT status, error FROM saved_posts WHERE id = ?", (pid,)).fetchone()
+    return {"saved": save, "sync": sync, "keep": dict(r) if r else None}
+
+
+def _saved_json(r) -> dict:
+    """A saved post as Saved shows it: from its kept files once they're downloaded."""
+    p = {**json.loads(r["data"]), "saved": True, "keep": {"status": r["status"], "error": r["error"]}}
+    if r["status"] == "done" and r["files"]:
+        base = "saved-media/" + "/".join(savedposts.folder(Path("."), r["id"]).parts[1:]) + "/"
+        p["media"] = [{"kind": f["kind"], "url": base + f["file"], "poster": base + f["poster"] if f.get("poster") else None}
+                      for f in json.loads(r["files"])]
+    return p
+
+
+def saved_file(rel: str) -> Path | None:
+    from urllib.parse import unquote
+    root = (DATA / "saved").resolve()
+    path = (root / unquote(rel)).resolve()
+    return path if path.is_relative_to(root) and path.is_file() and not path.name.startswith(".") else None
 
 
 def _xuser(u) -> dict:
@@ -2010,6 +2040,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, follow_posts(q.get("source", "all"), q.get("cursor", ""), q.get("mode", "following")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
+        if path.startswith("/saved-media/"):
+            file = saved_file(path[len("/saved-media/"):])
+            if not file:
+                return self.send(404, {"error": "not found"})
+            return self.send_file(file)
         if path.startswith("/follow/thumb/"):
             parts = path.split("/")
             file = follow_thumb(parts[3], parts[4]) if len(parts) == 5 else None

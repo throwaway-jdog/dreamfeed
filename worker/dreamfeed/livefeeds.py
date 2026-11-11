@@ -366,9 +366,9 @@ def _x_posts(items: list, via: str) -> tuple[list[dict], list[dict], int]:
         if not str(url).startswith("https://"):
             continue
         if ext in ("mp4", "webm", "mov", "m4v"):
-            p["media"].append({"kind": "video", "url": _x_video(url, md), "poster": md.get("poster_url") or None})
+            p["media"].append({"kind": "video", "url": _x_video(url, md), "full": url, "poster": md.get("poster_url") or None})
         elif ext in ("jpg", "jpeg", "png", "webp", "gif"):
-            p["media"].append({"kind": "image", "url": url.replace("name=orig", "name=large")})
+            p["media"].append({"kind": "image", "url": url.replace("name=orig", "name=large"), "full": url})
     kept = [p for p in posts.values() if p["media"] and not text_blocked(p["text"])]
     return kept, list(users.values()), files
 
@@ -392,6 +392,16 @@ def x_page(kind: str, start: int) -> dict:
 
 
 # ---- e621 ----
+def _e621_full(p: dict, kind: str) -> str | None:
+    """The original file (a video's full-size MP4 when e621 has one: originals are often WebM,
+    which iPhones don't play)."""
+    if kind == "video":
+        mp4 = ((((p.get("sample") or {}).get("alternates") or {}).get("variants") or {}).get("mp4") or {}).get("url")
+        if mp4:
+            return mp4
+    return (p.get("file") or {}).get("url")
+
+
 def e621_page(search: str, before: int | None) -> tuple[list[dict], int | None]:
     def fetch():
         params = {"tags": e621.query(search), "limit": E621_PAGE}
@@ -408,7 +418,8 @@ def e621_page(search: str, before: int | None) -> tuple[list[dict], int | None]:
             prev = (p.get("sample") or {}).get("url") or (p.get("preview") or {}).get("url")
             out.append({"id": f"e621:{d['id']}", "source": "e621", "author": d["author"], "place": search,
                         "text": d["title"], "posted_at": d["date"], "link": d["link"], "via": "following", "saved": False,
-                        "media": [{"kind": kind, "url": got[0], "poster": prev if kind == "video" else None}]})
+                        "media": [{"kind": kind, "url": got[0], "full": _e621_full(p, kind) or got[0],
+                                   "poster": prev if kind == "video" else None}]})
         last = min((int(p["id"]) for p in found if str(p.get("id", "")).isdigit()), default=None)
         return out, last if len(found) >= E621_PAGE else None
     return _cached(f"e621:{search}:{before}", fetch)

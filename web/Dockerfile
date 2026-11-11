@@ -8,7 +8,7 @@ COPY vendor /app/vendor
 COPY --from=formlogin formlogin /app/formlogin
 # The worker's persona and safety rules, so the persona editor checks edits exactly as the
 # worker will (the worker build context). Pure Python, no other worker code.
-COPY --from=worker dreamfeed/personas.py dreamfeed/safety.py dreamfeed/acts.py dreamfeed/e621.py dreamfeed/cbvideos.py dreamfeed/cbprofile.py dreamfeed/livefeeds.py /app/dreamfeed/
+COPY --from=worker dreamfeed/personas.py dreamfeed/safety.py dreamfeed/acts.py dreamfeed/e621.py dreamfeed/cbvideos.py dreamfeed/cbprofile.py dreamfeed/livefeeds.py dreamfeed/savedposts.py /app/dreamfeed/
 RUN touch /app/dreamfeed/__init__.py
 ENV PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp
 CMD ["python", "/app/app.py"]
