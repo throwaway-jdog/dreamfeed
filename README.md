@@ -438,6 +438,14 @@ and nothing of a stream is kept: only who you follow, when they were live and ea
 thumbnail (`data/generated/follow/`). A room Chaturbate doesn't list as age verified is left
 out.
 
+**Your recorder, from here.** With `STREAMONITOR_URL` set (streamonitor's web address as the web
+service reaches it, e.g. `http://streamonitor:5000` on a Docker network they share; and
+`STREAMONITOR_PASSWORD` if it has one), Live shows what it does for each room you follow: ● REC
+on a live room it's recording, "Records when they go live", "Recording paused". Record on a live
+card (or a profile) adds the room to its list or starts it again; Pause stops it but keeps it
+listed; Remove (on the profile) takes it off the list, and the recordings you have stay. Free disk
+space shows on the profile. Its recordings show up on the room's profile (below).
+
 **Your own videos of them.** Videos you have of the rooms you follow go in the folder
 `CB_VIDEOS_DIR` (mounted into the web and follow services; dreamfeed writes there only for
 highlights and deletes, below): a folder per room, named after it (`<room>/...`, subfolders too;

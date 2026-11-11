@@ -328,6 +328,12 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .live-item .vids { justify-self: start; width: auto; min-height: 36px; padding: 0 12px; font-size: 13px; }
 button.off-row { width: 100%; background: none; border: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .off-row .has { color: var(--accent); }
+.live-card .rec { position: absolute; right: 8px; top: 8px; background: #000a; color: #ff4d4d; font-size: 11px; font-weight: 700;
+  padding: 2px 6px; border-radius: 6px; }
+.secondary.vids[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.pf-dvr-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pf-dvr-row .secondary { width: auto; padding: 0 14px; }
+.pf-dvr-row small { color: var(--muted); flex-basis: 100%; }
 .profile { position: fixed; inset: 0; z-index: 29; background: var(--bg); overflow-y: auto; }
 .profile[hidden] { display: none; }
 .profile .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
@@ -800,6 +806,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="pf-head" id="pf-head" hidden></div>
       <p class="note" id="pf-info"></p>
       <p class="pf-about" id="pf-about" hidden></p>
+      <div class="pf-sec" id="pf-dvr-sec" hidden><h3>Recording</h3><div class="pf-dvr-row" id="pf-dvr"></div></div>
       <div class="pf-sec"><h3>Accounts</h3><div class="pf-links" id="pf-links"></div>
         <form class="pf-link-form" id="pf-link-form">
           <select class="in" id="pf-link-src" aria-label="Site"></select>
@@ -1574,6 +1581,7 @@ async function refreshFollowing() {
   let d;
   try { d = await api("api/following"); } catch (err) { $("f-status").textContent = err.message; return; }
   const live = d.rooms.filter(r => r.live), off = d.rooms.filter(r => !r.live), st = d.status || {};
+  follow.dvr = d.dvr || {};
   $("live-n").textContent = live.length || "";
   $("f-status").textContent = st.error ? st.error
     : !st.at ? "Waiting for the first look at Chaturbate (the follow service)."
@@ -1590,6 +1598,7 @@ function liveCard(r, list) {
   const i = r.info || {}, b = el("button", "live-card"), shot = el("span", "shot"), img = el("img");
   b.type = "button"; img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
   shot.append(img, el("span", "on", "LIVE"));
+  if (r.dvr && r.dvr.state === "recording") shot.append(el("span", "rec", "● REC"));
   const row = el("span", "who-row"); row.append(el("b", null, r.name), el("small", null, [
     i.age ? String(i.age) : "", `${(i.viewers || 0).toLocaleString()} watching`, i.since ? `live ${relTime(i.since)}` : "",
     i.show && i.show !== "public" ? i.show : ""].filter(Boolean).join(" · ")));
@@ -1610,6 +1619,17 @@ function liveCard(r, list) {
   const item = el("div", "live-item"), acts = el("div", "acts"), pfb = el("button", "secondary vids",
     r.videos ? `Profile · ${r.videos} video${r.videos === 1 ? "" : "s"}` : "Profile");
   pfb.type = "button"; pfb.onclick = () => openProfile(r); acts.append(pfb);
+  if ((follow.dvr || {}).on && r.dvr !== undefined) {      // (rooms you follow: your recorder's say on each)
+    const on = !!(r.dvr && r.dvr.running), rb = el("button", "secondary vids", on ? "● Recording" : "Record");
+    rb.type = "button"; rb.setAttribute("aria-pressed", String(on));
+    rb.title = r.dvr ? r.dvr.status : "Not on your recorder's list";
+    rb.onclick = async () => {
+      rb.disabled = true;
+      try { r.dvr = (await api("api/dvr", { name: r.name, action: on ? "pause" : "record" })).dvr; refreshFollowing(); }
+      catch (err) { toast(err.message); rb.disabled = false; }
+    };
+    acts.append(rb);
+  }
   if (r.discovered && !r.followed) {
     const fb = el("button", "secondary vids", "Follow"); fb.type = "button";
     fb.onclick = async () => {
@@ -1622,6 +1642,12 @@ function liveCard(r, list) {
   item.append(b, acts);
   return item;
 }
+// Your recorder (streamonitor) on a room, in words.
+function dvrWords(st) {
+  if (!st) return "Not recorded";
+  return { recording: "● Recording now", waiting: "Records when they go live", paused: "Recording paused" }[st.state]
+    || `Recorder: ${st.status || "a problem"}`;
+}
 function offRow(r) {
   const li = el("li"), row = el("button", "off-row"), d = el("div");
   row.type = "button"; row.onclick = () => openProfile(r); li.append(row);
@@ -1630,6 +1656,7 @@ function offRow(r) {
   const last = r.last_live ? `last live ${relTime(new Date(r.last_live * 1000).toISOString())} ago` : "not seen live yet";
   d.append(el("b", null, r.name), el("small", null, [last, usualHours(r.times)].filter(Boolean).join(" · ")));
   if (r.videos) d.append(el("small", "has", `${r.videos} video${r.videos === 1 ? "" : "s"}`));
+  if (r.dvr) d.append(el("small", r.dvr.running ? "has" : null, dvrWords(r.dvr)));
   row.append(d);
   return li;
 }
@@ -2085,6 +2112,7 @@ async function loadPerson(gen) {
   $("pf-info").textContent = [when, usualHours(times), b.age ? `${b.age}` : "", b.location,
     b.followers ? `${Number(b.followers).toLocaleString()} followers` : "", room && !d.followed ? "not followed" : ""].filter(Boolean).join(" · ");
   $("pf-about").textContent = b.about || ""; $("pf-about").hidden = !b.about;
+  renderDvr(d, gen);
   renderLinks(d);
   renderXHead(d);
   const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...d.reddit.map(h => "u/" + h)].join(" ");
@@ -2095,6 +2123,32 @@ async function loadPerson(gen) {
   renderProfile(gen);
 }
 $("pf-about").onclick = () => $("pf-about").classList.toggle("open");
+// The room on your recorder: what it's doing, Record / Pause, Remove (from its list).
+function renderDvr(d, gen) {
+  const rec = d.dvr || {}, sec = $("pf-dvr-sec");
+  sec.hidden = !(d.room && rec.on);
+  if (sec.hidden) return;
+  const st = rec.room, row = $("pf-dvr"), out = [];
+  const act = (label, action, ask) => {
+    const b = el("button", "secondary", label); b.type = "button";
+    b.onclick = async () => {
+      if (ask && !confirm(ask)) return;
+      b.disabled = true;
+      try { rec.room = (await api("api/dvr", { name: d.room, action })).dvr; if (gen === pf.gen) renderDvr(d, gen); refreshFollowing(); }
+      catch (err) { toast(err.message); b.disabled = false; }
+    };
+    return b;
+  };
+  if (rec.error) out.push(el("small", null, rec.error));
+  else {
+    out.push(el("b", null, dvrWords(st)));
+    out.push(st && st.running ? act("Pause", "pause") : act("Record", "record"));
+    if (st) out.push(act("Remove", "remove", `Take ${d.room} off your recorder's list? Recordings you have stay.`));
+    out.push(el("small", null, [st && st.status && st.state === "waiting" ? st.status : "", rec.free ? `${rec.free} free` : ""]
+      .filter(Boolean).join(" · ")));
+  }
+  row.replaceChildren(...out);
+}
 $("pf-follow").onclick = async () => {
   const d = pf.data; if (!d || !d.room) return;
   if (d.followed && !confirm(`Unfollow ${d.room} on Chaturbate?`)) return;

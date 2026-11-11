@@ -2,7 +2,7 @@ FROM python:3.12-alpine
 WORKDIR /app
 # The live Feed reads X with gallery-dl (its metadata only: nothing is downloaded).
 RUN pip install --no-cache-dir gallery-dl==1.32.19
-COPY app.py index.html /app/
+COPY app.py dvr.py index.html /app/
 COPY vendor /app/vendor
 # Shared sign-in library (the formlogin build context, see docker-compose.yml).
 COPY --from=formlogin formlogin /app/formlogin

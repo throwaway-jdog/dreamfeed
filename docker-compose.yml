@@ -224,6 +224,8 @@ services:
       STATE_DIR: /state
       LORA_DIR: /loras      # trained styles the persona editor can offer
       GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env}   # shown on the dashboard
+      STREAMONITOR_URL: ${STREAMONITOR_URL:-}            # your recorder, run from the Live tab (empty: off)
+      STREAMONITOR_PASSWORD: ${STREAMONITOR_PASSWORD:-}
       TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
       E621_USERNAME: ${E621_USERNAME-}        # optional: named in e621's user agent (the Feed, the Comics search)

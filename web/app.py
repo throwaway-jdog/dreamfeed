@@ -19,6 +19,7 @@ GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subre
 GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
+POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
@@ -71,6 +72,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import dvr
 import formlogin
 import formlogin.httpserver
 
@@ -295,7 +297,27 @@ def following() -> dict:
     except sqlite3.OperationalError:    # the follow service hasn't started yet
         pass
     rooms.sort(key=lambda r: (not r["live"], -(r["info"].get("viewers") or 0) if r["live"] else -(r["last_live"] or 0)))
-    return {"rooms": rooms, "status": read_json(FOLLOW / "status.json"), "feeds": read_json(FOLLOW / "feeds.json")}
+    rec = _dvr()
+    for r in rooms:
+        r["dvr"] = rec.get("rooms", {}).get(r["name"]) if r["source"] == "chaturbate" else None
+    return {"rooms": rooms, "status": read_json(FOLLOW / "status.json"), "feeds": read_json(FOLLOW / "feeds.json"),
+            "dvr": {"on": dvr.enabled(), "free": rec.get("free"), "error": rec.get("error")}}
+
+
+def _dvr() -> dict:
+    """Your recorder's list (dvr.py), or {"error"} when it doesn't answer; {} when it's off."""
+    try:
+        return dvr.rooms()
+    except (LookupError, ValueError) as e:
+        return {"error": str(e)[:200]}
+
+
+def dvr_action(req: dict) -> dict:
+    """{"name": ROOM, "action": "record" | "pause" | "remove"}: tell your recorder (streamonitor)."""
+    name = str(req.get("name", ""))
+    if not ROOM.match(name):
+        raise ValueError("bad room")
+    return dvr.act(name, str(req.get("action", "")))
 
 
 MULTPORN = "https://multporn.net"
@@ -945,6 +967,9 @@ def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = ""
             act = conn.execute("SELECT action, status, error FROM cb_actions WHERE room = ? AND created_at >= datetime('now', '-10 minutes')"
                                " ORDER BY id DESC LIMIT 1", (room,)).fetchone()
             out["action"] = dict(act) if act else None
+            rec = _dvr()
+            out["dvr"] = {"on": dvr.enabled(), "room": rec.get("rooms", {}).get(room), "free": rec.get("free"),
+                          "error": rec.get("error")}
             out["links"] = [{"source": l["source"], "handle": l["handle"], "state": l["state"]} for l in conn.execute(
                 "SELECT * FROM links WHERE room = ? AND state != 'removed' ORDER BY source, handle", (room,))]
         xs = ({l["handle"].lower() for l in out["links"] if l["source"] == "x"} | ({x.lower()} if x else set())
@@ -2203,7 +2228,8 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings,
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
-                   "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved}
+                   "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
+                   "/api/dvr": dvr_action}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
