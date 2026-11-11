@@ -29,6 +29,7 @@ MAX_FETCHES = 14          # pages read for one room
 DEPTH = 2                 # steps out from what the room links
 GAP = 1.0                 # seconds between pages read
 NAME = re.compile(r"^[a-z0-9_.-]{3,40}$")
+GROUP = 2                 # more accounts than this on one site, on one link page: a group's page
 
 
 def _get(url: str, limit: int = 2 << 20) -> str:
@@ -112,7 +113,16 @@ def find(room: str, known: list[tuple[str, str]]) -> list[tuple[str, str, str, s
     todo = [(s, h, 0, "") for s, h in known]
     seen = set(have)
 
-    def add(found: list, via: str, depth: int) -> None:
+    def add(found: list, via: str, depth: int, from_page: bool = False) -> None:
+        if from_page:
+            # A link page is one person's. Link pages listed on it are other people's (a studio's
+            # or a friend's), and several accounts on one site make it a group's page: neither
+            # is taken from it.
+            found = [(s, h) for s, h in found if s != "linkpage"]
+            per = {}
+            for s, h in dict.fromkeys((s, h.lower()) for s, h in found):
+                per[s] = per.get(s, 0) + 1
+            found = [(s, h) for s, h in found if per.get(s, 0) <= GROUP]
         for s, h in found:
             k = (s, h.lower())
             if k in seen:
@@ -131,7 +141,7 @@ def find(room: str, known: list[tuple[str, str]]) -> list[tuple[str, str, str, s
             if s == "linkpage":
                 fetches += 1
                 host = urllib.parse.urlparse(h).hostname or ""
-                add(cbprofile._handles(_link_page(h)), "their Linktree" if "linktr" in host else "their AllMyLinks", depth + 1)
+                add(cbprofile._handles(_link_page(h)), "their Linktree" if "linktr" in host else "their AllMyLinks", depth + 1, True)
             elif s == "redgifs":
                 fetches += 1
                 u = redgifs_user(h)

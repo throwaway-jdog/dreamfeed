@@ -23,7 +23,8 @@ FANSLY_LINK = re.compile(r"https?://(?:www\.)?fansly\.com/([A-Za-z0-9_.-]{3,40})
 # pages that list a creator's accounts (followed for more links: linking.py)
 LINK_PAGE = re.compile(r"https?://(?:www\.)?(?:linktr\.ee|allmylinks\.com)/([A-Za-z0-9_.-]{2,40})(?:[/?#\"'<\s]|$)")
 NOT_NAMES = {"my", "action", "api", "explore", "login", "signup", "terms", "privacy", "help", "search", "home", "about",
-             "s", "admin", "settings", "legal", "dmca", "support", "features", "templates", "marketplace", "trial"}
+             "s", "admin", "settings", "legal", "dmca", "support", "features", "templates", "marketplace", "trial",
+             "subscriptions", "live", "post", "posts", "messages", "notifications", "collections", "creators", "tos"}
 REDDIT_LINK = re.compile(r"https?://(?:www\.|old\.)?reddit\.com/(?:u|user)/([A-Za-z0-9_-]{3,20})(?:[/?\"'<\s]|$)")
 NOT_ACCOUNTS = {"chaturbate", "home", "intent", "share", "i", "search", "hashtag", "explore", "settings", "login"}
 GAP = 1.5                     # seconds between requests
@@ -37,6 +38,12 @@ def _get(path: str, json_=True):
     return json.loads(data) if json_ else data.decode("utf-8", "replace")
 
 
+def _page_address(url: str) -> str:
+    """A link page's address, one way: https, no www, lower case, nothing after the name."""
+    u = urllib.parse.urlparse(url.rstrip("/?#\"'< \t\n"))
+    return f"https://{(u.hostname or '').removeprefix('www.')}{u.path.rstrip('/')}".lower()
+
+
 def _handles(text: str) -> list[tuple[str, str]]:
     found = [("x", h) for h in X_LINK.findall(text) if h.lower() not in NOT_ACCOUNTS]
     found += [("reddit", h) for h in REDDIT_LINK.findall(text)]
@@ -44,8 +51,7 @@ def _handles(text: str) -> list[tuple[str, str]]:
     found += [("redgifs", h.lower()) for h in REDGIFS_LINK.findall(text)]
     found += [("onlyfans", h.lower()) for h in ONLYFANS_LINK.findall(text) if h.lower() not in NOT_NAMES]
     found += [("fansly", h.lower()) for h in FANSLY_LINK.findall(text) if h.lower() not in NOT_NAMES]
-    found += [("linkpage", m.group(0).rstrip("/?#\"'< \t\n")) for m in LINK_PAGE.finditer(text)
-              if m.group(1).lower() not in NOT_NAMES]
+    found += [("linkpage", _page_address(m.group(0))) for m in LINK_PAGE.finditer(text) if m.group(1).lower() not in NOT_NAMES]
     return found
 
 
