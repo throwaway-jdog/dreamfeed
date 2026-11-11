@@ -367,6 +367,33 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .xv-card .len { position: absolute; right: 6px; bottom: 6px; background: #000b; color: #fff; font-size: 11px; padding: 1px 5px; border-radius: 5px; }
 .xv-card b { font-size: 13px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .xv-card small { color: var(--muted); font-size: 12px; }
+/* More videos: X's swipe-up feed, one video a screen */
+.vfeed { position: fixed; inset: 0; z-index: 30; background: #000; color: #fff; }
+.vfeed[hidden] { display: none; }
+.vf-track { height: 100%; overflow-y: auto; scroll-snap-type: y mandatory; overscroll-behavior: contain; scrollbar-width: none; }
+.vf-track::-webkit-scrollbar { display: none; }
+.vf-slide { position: relative; height: 100%; scroll-snap-align: start; scroll-snap-stop: always; display: grid; place-items: center; }
+.vf-slide video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.vf-info { position: absolute; left: 12px; right: 76px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px;
+  text-shadow: 0 1px 3px #000c; pointer-events: none; }
+.vf-info > * { pointer-events: auto; }
+.vf-who { display: flex; gap: 8px; align-items: center; font-weight: 700; cursor: pointer; width: fit-content; }
+.vf-who .av { width: 36px; height: 36px; font-size: 14px; }
+.vf-text { margin: 0; font-size: 14px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.vf-text.open { -webkit-line-clamp: unset; }
+.vf-nums { font-size: 12px; opacity: .85; }
+.vf-acts { position: absolute; right: 10px; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 16px; justify-items: center; }
+.vf-acts button, .vf-acts a { display: grid; justify-items: center; gap: 2px; color: #fff; text-decoration: none; font-size: 24px;
+  text-shadow: 0 1px 3px #000c; background: none; border: 0; min-width: 48px; }
+.vf-acts small { font-size: 11px; font-weight: 600; }
+.vf-acts [aria-pressed="true"] { color: var(--accent); }
+.vf-top { position: absolute; left: 0; right: 0; top: 0; padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px; display: flex;
+  justify-content: space-between; pointer-events: none; }
+.vf-top button { pointer-events: auto; background: rgb(0 0 0 / .5); color: #fff; border: 0; border-radius: 999px; min-height: 38px;
+  padding: 0 14px; font-size: 14px; font-weight: 600; }
+.vf-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 0 24px; font-size: 14px; opacity: .85; }
+.vf-msg:empty { display: none; }
 .xv-player { position: fixed; inset: 0; z-index: 32; background: #000; display: flex; flex-direction: column; }
 .xv-player[hidden] { display: none; }
 .xv-player iframe, .xv-player video { flex: 1; width: 100%; min-height: 0; border: 0; background: #000; }
@@ -897,6 +924,11 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   </div>
   <div class="mv-bar" id="mv-bar" hidden><span id="mv-count">Pick up to 4 rooms</span>
     <button type="button" class="primary" id="mv-go" disabled>Watch</button><button type="button" class="secondary" id="mv-cancel">Cancel</button></div>
+  <div class="vfeed" id="vfeed" hidden role="dialog" aria-modal="true" aria-label="More videos">
+    <div class="vf-track" id="vf-track"></div>
+    <div class="vf-top"><button type="button" id="vf-close" aria-label="Close">✕</button>
+      <button type="button" id="vf-sound">🔇 Tap for sound</button></div>
+  </div>
   <div class="xv-player" id="xv-player" hidden role="dialog" aria-modal="true" aria-label="xvideos video">
     <div class="reader-bar"><span id="xv-title"></span>
       <a class="secondary" id="xv-open" target="_blank" rel="noreferrer noopener">xvideos</a>
@@ -1714,6 +1746,7 @@ function closePages() {
   if (!$("multi").hidden) closeMulti();
   if (!$("xv-player").hidden) closeXvideo();
   if (!$("reader").hidden) closeComic();
+  if (!$("vfeed").hidden) closeVideos();
 }
 function route() {
   const rel = here(), [a = "", b = "", c = "", ...rest] = segs(rel);
@@ -1768,6 +1801,7 @@ function route() {
     case "post": if (b && c) return showPostId(`${b}:${c}`); break;
     case "xvideos": if (b) return showXvideo(nav.xv.get(b) || { id: b, title: "xvideos" }); break;
     case "redgifs": if (/^[a-z]{3,80}$/.test(b)) return showClip(b); break;
+    case "videos": if (/^\d{5,25}$/.test(b)) return showVideos(b, c); break;
   }
   go("", true);
 }
@@ -1807,6 +1841,114 @@ async function showComicId(id) {
   let d; try { d = await api("api/comics"); } catch (err) { return toast(err.message); }
   const c = d.comics.find(x => String(x.id) === String(id));
   if (c && here() === `comics/${enc(id)}`) showComic(c); else if (!c) go("comics", true);
+}
+
+
+/* More videos: X's own swipe-up feed (what its full-screen player shows next), from one video.
+   One video a screen; the one on screen plays, with sound once you've asked for it. */
+const vf = { gen: 0, posts: [], cursor: null, loading: false, muted: true, seed: null, cur: -1, obs: null };
+function openVideos(p) { nav.posts.set(p.id, p); go(`videos/${p.id.split(":")[1]}/${enc(p.author)}`); }
+async function showVideos(tid, handle) {
+  const gen = ++vf.gen;
+  Object.assign(vf, { posts: [], cursor: null, loading: false, seed: { tid, handle: handle || "" }, cur: -1 });
+  $("vf-track").replaceChildren(); $("vfeed").hidden = false;
+  vfSoundLabel();
+  vf.obs = vf.obs || new IntersectionObserver(es => {
+    for (const e of es) {
+      const v = e.target.querySelector("video");
+      if (e.isIntersecting && e.intersectionRatio > .6) {
+        vf.cur = vf.posts.findIndex(x => x.el === e.target);
+        v.muted = vf.muted; v.play().catch(() => { v.muted = true; vf.muted = true; vfSoundLabel(); v.play().catch(() => {}); });
+        const p = vf.posts[vf.cur];
+        if (p) setUrl(`videos/${p.id.split(":")[1]}/${enc(p.author)}`);
+        // the next two start buffering now, so swiping up plays at once
+        for (const x of vf.posts.slice(vf.cur + 1, vf.cur + 3)) {
+          const nv = x.el.querySelector("video");
+          if (!nv.dataset.warm) { nv.dataset.warm = "1"; nv.preload = "auto"; nv.load(); }
+        }
+        if (vf.cur >= vf.posts.length - 4) vfMore();
+      } else { v.pause(); }
+    }
+  }, { root: $("vf-track"), threshold: [0, .6, 1] });
+  // back from a video's comments (or its author): the same list, at that video
+  const last = vf.last;
+  if (last && last.posts.some(x => x.id === `x:${tid}`)) {
+    vf.seed = last.seed; vf.cursor = last.cursor; vfAdd(last.posts);
+    const at = vf.posts.find(x => x.id === `x:${tid}`);
+    requestAnimationFrame(() => { $("vf-track").scrollTop = at.el.offsetTop; });
+    return;
+  }
+  let seed = nav.posts.get(`x:${tid}`);
+  if (!seed) { try { seed = (await api(`api/post?id=${enc("x:" + tid)}`)).post; } catch {} }
+  if (gen !== vf.gen) return;
+  if (seed && seed.media.some(m => m.kind === "video")) vfAdd([seed]);
+  vfMore();
+}
+function vfAdd(posts) {
+  for (const p of posts) {
+    if (vf.posts.some(x => x.id === p.id)) continue;
+    const m = p.media.find(x => x.kind === "video");
+    const slide = el("section", "vf-slide"), v = el("video");
+    v.playsInline = v.loop = true; v.muted = vf.muted; v.preload = vf.posts.length < 2 ? "auto" : "metadata";
+    if (vf.posts.length < 2) v.dataset.warm = "1";
+    if (m.poster) v.poster = m.poster; v.src = m.url;
+    v.onclick = () => { if (v.paused) v.play().catch(() => {}); else v.pause(); };
+    const info = el("div", "vf-info"), who = el("span", "vf-who"), av = el("span", "av", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
+    if (p.avatar) { const im = el("img"); im.alt = ""; im.src = p.avatar; av.append(im); }
+    who.append(av, el("span", null, "@" + p.author)); who.onclick = () => openPerson({ x: p.author });
+    info.append(who);
+    if (p.text) { const t = el("p", "vf-text", p.text); t.onclick = () => t.classList.toggle("open"); info.append(t); }
+    const nums = [p.likes != null && `♥ ${Number(p.likes).toLocaleString()}`, p.views != null && `${Number(p.views).toLocaleString()} views`,
+                  relTime(p.posted_at)].filter(Boolean).join(" · ");
+    if (nums) info.append(el("small", "vf-nums", nums));
+    const acts = el("div", "vf-acts");
+    const cm = el("button"); cm.type = "button"; cm.append("💬", el("small", null, p.comments ? Number(p.comments).toLocaleString() : ""));
+    cm.onclick = () => openPost(p);
+    const sv = el("button"); sv.type = "button";
+    const showSave = () => { sv.replaceChildren(p.saved ? "★" : "☆", el("small", null, p.saved ? "Saved" : "Save")); sv.setAttribute("aria-pressed", String(!!p.saved)); };
+    sv.onclick = async () => {
+      sv.disabled = true;
+      try { const d = await api("api/following/save", { post: p, save: !p.saved }); p.saved = d.saved; } catch (err) { toast(err.message); }
+      sv.disabled = false; showSave();
+    };
+    showSave();
+    const out = el("a"); out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; out.append("↗", el("small", null, "X"));
+    acts.append(cm, sv, out);
+    slide.append(v, info, acts);
+    p.el = slide; vf.posts.push(p);
+    $("vf-track").append(slide); vf.obs.observe(slide);
+  }
+}
+async function vfMore() {
+  if (vf.loading || (vf.cursor === null && vf.posts.length > 1)) return;
+  const gen = vf.gen, s = vf.seed; vf.loading = true;
+  const msg = el("p", "vf-msg", vf.posts.length ? "" : "Reading X's videos…");
+  if (!vf.posts.length) $("vf-track").append(msg);
+  try {
+    const d = await api(`api/x/related?id=${s.tid}&handle=${enc(s.handle)}&cursor=${enc(vf.cursor || "")}`);
+    if (gen !== vf.gen) return;
+    msg.remove(); vf.cursor = d.cursor || null;
+    vfAdd(d.posts);
+    if (!vf.posts.length) $("vf-track").append(el("p", "vf-msg", "X has no more videos for this one."));
+  } catch (err) { if (gen === vf.gen) { msg.textContent = err.message; if (!msg.isConnected) toast(err.message); } }
+  finally { if (gen === vf.gen) vf.loading = false; }
+}
+function vfStep(d) {
+  const t = $("vf-track"), i = Math.max(0, Math.min(vf.posts.length - 1, (vf.cur < 0 ? 0 : vf.cur) + d));
+  if (vf.posts[i]) t.scrollTo({ top: vf.posts[i].el.offsetTop, behavior: "smooth" });
+}
+function vfSoundLabel() { $("vf-sound").textContent = vf.muted ? "🔇 Tap for sound" : "🔊 Sound on"; }
+function vfSound(on) {
+  vf.muted = !on; vfSoundLabel();
+  const p = vf.posts[vf.cur]; if (p) { const v = p.el.querySelector("video"); v.muted = vf.muted; v.play().catch(() => {}); }
+}
+$("vf-sound").onclick = () => vfSound(vf.muted);
+$("vf-close").onclick = () => leave();
+function closeVideos() {
+  vf.gen++;
+  if (vf.posts.length) vf.last = { posts: vf.posts.map(({ el, ...p }) => p), cursor: vf.cursor, seed: vf.seed };
+  for (const p of vf.posts) { const v = p.el && p.el.querySelector("video"); if (v) { v.pause(); v.removeAttribute("src"); v.load(); } if (vf.obs && p.el) vf.obs.unobserve(p.el); }
+  vf.posts = []; $("vf-track").replaceChildren(); $("vfeed").hidden = true;
 }
 
 /* ---------- following ---------- */
@@ -2304,6 +2446,9 @@ function postCard(p, opened) {
   if (canOpen) {
     const c = el("button", "comments-btn", p.comments ? `💬 ${Number(p.comments).toLocaleString()}` : "💬 Comments");
     c.type = "button"; c.onclick = () => openPost(p); acts.append(c);
+  }
+  if (p.source === "x" && p.media.some(m => m.kind === "video")) {      // X's swipe-up feed, from this one
+    const mv = el("button", "comments-btn", "▶ More videos"); mv.type = "button"; mv.onclick = () => openVideos(p); acts.append(mv);
   }
   if (p.link) {
     const out = el("a", "out", { reddit: "Open on Reddit", e621: "Open on e621" }[p.source] || "Open on X");
@@ -2849,6 +2994,13 @@ function closeRoom() { pl.gen++; clearTimeout(pl.timer); stopVideo(); $("player"
 $("pl-close").onclick = leave;
 document.addEventListener("keydown", e => {
   if ($("player").hidden) {
+    if (!$("vfeed").hidden) {
+      if (e.key === "Escape") leave();
+      else if (["ArrowDown", "j", "PageDown"].includes(e.key)) { e.preventDefault(); vfStep(1); }
+      else if (["ArrowUp", "k", "PageUp"].includes(e.key)) { e.preventDefault(); vfStep(-1); }
+      else if (e.key === "m") vfSound(vf.muted);
+      return;
+    }
     if (e.key === "Escape") {
       if (!$("pic-view").hidden) closePicture(); else if (!$("mv-picker").hidden) $("mv-picker").hidden = true;
       else if (["xv-player", "multi", "post-view", "browse", "profile"].some(id => !$(id).hidden)) leave();

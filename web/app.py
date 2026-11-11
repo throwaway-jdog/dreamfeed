@@ -20,6 +20,7 @@ GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
+GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after that one (its full-screen player's swipe-up feed)
 GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
 POST /api/profile/relink {"room"}  look for the room's accounts across sites again (linking.py)
 GET  /api/xvideos      ?name=PROFILE&page=N  an xvideos profile's videos (a room's linked one), live
@@ -98,7 +99,7 @@ DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
 # Each part of the page has its own address (the page reads it and opens that part):
 PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
-         "x", "u", "r", "e621", "post", "xvideos", "redgifs"}
+         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos"}
 # Where the page is served from, as the reverse proxy says (X-Forwarded-Prefix: e.g. Caddy's
 # handle_path strips it, so the page needs it for its own links); none: the site's root.
 PREFIX = re.compile(r"^(?:/[A-Za-z0-9._~-]+)*$")
@@ -2274,6 +2275,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(404, {"error": str(e)[:200]})
+        if path == "/api/x/related":
+            q = self.query()
+            try:
+                d = livefeeds.x_related(q.get("id", ""), q.get("handle", ""), q.get("cursor", ""))
+                _seen(d["posts"], [])
+                return self.send(200, {"posts": _mark_saved(d["posts"]), "cursor": d["cursor"]})
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path == "/api/redgifs":
             q = self.query()
             try:
