@@ -20,6 +20,7 @@ GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
+GET  /api/xvideos      ?name=PROFILE&page=N  an xvideos profile's videos (a room's linked one), live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
@@ -112,11 +113,13 @@ LIVE_INFO = "https://chaturbate.com/api/chatvideocontext/{}/"
 # And the live Feed's pictures and videos, straight from the sites (livefeeds; no referrer is sent).
 FEED_IMAGES = ("https://pbs.twimg.com https://i.redd.it https://preview.redd.it https://external-preview.redd.it"
                " https://styles.redditmedia.com https://a.thumbs.redditmedia.com https://b.thumbs.redditmedia.com"
+               " https://*.xvideos-cdn.com"
                " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
+FEED_FRAMES = "https://www.xvideos.com"     # xvideos' own player, for a profile's xvideos tab
 FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it https://i.imgur.com"
               " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
 CSP = (f"default-src 'self'; img-src 'self' data: {FEED_IMAGES}; style-src 'self' 'unsafe-inline'; "
-       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it; worker-src 'self' blob:; "
+       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it; worker-src 'self' blob:; frame-src {FEED_FRAMES}; "
        "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -396,7 +399,7 @@ def comic_cover(u: str) -> bytes | None:
 
 
 def live_stream(name: str) -> dict:
-    """{"status", "hls"}: hls is the room's video while it's a public show, else None."""
+    """{"status", "hls", "title", "viewers"}: hls is the room's video while it's a public show, else None."""
     import urllib.parse
     import urllib.request
     if not ROOM.match(name):     # any room (Discover too); only public, age-verified shows play
@@ -410,7 +413,8 @@ def live_stream(name: str) -> dict:
     u = urllib.parse.urlparse(hls)
     ok = (d.get("room_status") == "public" and d.get("is_age_verified") and u.scheme == "https"
           and (u.hostname or "").endswith(".live.mmcdn.com"))
-    return {"status": d.get("room_status") or "offline", "hls": hls if ok else None}
+    return {"status": d.get("room_status") or "offline", "hls": hls if ok else None,
+            "title": str(d.get("room_title") or "")[:300], "viewers": d.get("num_viewers")}
 
 
 def _followed() -> list[str]:
@@ -976,6 +980,7 @@ def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = ""
               | set(artist["x"] if artist else []))
         rs = {l["handle"].lower() for l in out["links"] if l["source"] == "reddit"} | ({reddit.lower()} if reddit else set())
         out["x"], out["reddit"] = sorted(xs), sorted(rs)
+        out["xvideos"] = sorted({l["handle"].lower() for l in out["links"] if l["source"] == "xvideos"})
         if rs and not xs and livefeeds.reddit_ready():      # their picture (X's own is in xusers)
             try:
                 out["reddituser"] = livefeeds.reddit_user(sorted(rs)[0])
@@ -1004,15 +1009,22 @@ def follow_room(req: dict) -> dict:
 
 
 def save_link(req: dict) -> dict:
-    """{"room", "source": "x"|"reddit", "handle", "remove": bool}: link an account to a room, or unlink it."""
+    """{"room", "source": "x"|"reddit"|"xvideos", "handle", "remove": bool}: link an account to a
+    room, or unlink it. An xvideos profile can be given as its address."""
     room, source, handle = str(req.get("room", "")), str(req.get("source", "")), str(req.get("handle", "")).strip()
     if not ROOM.match(room):
         raise ValueError("bad room")
-    m = (X_HANDLE if source == "x" else REDDIT_USER if source == "reddit" else None)
-    m = m.match(handle) if m else None
-    if not m:
-        raise ValueError("an X handle (letters, numbers, _) or a Reddit username")
-    handle = m.group(1)
+    if source == "xvideos":
+        found = cbprofile.XVIDEOS_LINK.findall(handle + " ")
+        handle = (found[0] if found else handle).lower()
+        if not livefeeds.XVIDEOS_NAME.match(handle):
+            raise ValueError("an xvideos profile's name or address (xvideos.com/profiles/NAME)")
+    else:
+        m = (X_HANDLE if source == "x" else REDDIT_USER if source == "reddit" else None)
+        m = m.match(handle) if m else None
+        if not m:
+            raise ValueError("an X handle (letters, numbers, _) or a Reddit username")
+        handle = m.group(1)
     with db() as conn:
         conn.execute("DELETE FROM links WHERE room = ? AND source = ? AND lower(handle) = lower(?)", (room, source, handle))
         conn.execute("INSERT INTO links(room, source, handle, state) VALUES (?, ?, ?, ?)",
@@ -2126,6 +2138,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, recent_browses())
         if path == "/api/discover/x":
             return self.send(200, discover_x())
+        if path == "/api/xvideos":
+            q = self.query()
+            try:
+                return self.send(200, livefeeds.xvideos_page(q.get("name", ""), int(q.get("page", "0") or 0)))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path == "/api/post/comments":
             try:
                 return self.send(200, {"comments": livefeeds.comments(self.query().get("id", ""))})

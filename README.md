@@ -484,7 +484,9 @@ usually live, their bio, the X and Reddit accounts linked to the room, their lat
 (read live), and your videos of them. Accounts get linked by themselves when the performer links them
 for free in their Chaturbate bio (the follow service reads a few bios each round, each once a
 day; links that cost tokens are left alone), or by you on the profile; × unlinks one (it isn't
-linked again). Tapping a poster's name in the Feed opens their profile too, the room's if
+linked again). An xvideos profile works the same way (its address in their bio, or linked by you
+as its name or address): the profile then has an xvideos tab next to Posts with their videos,
+newest first, played in xvideos' own player inside dreamfeed (nothing is downloaded). Tapping a poster's name in the Feed opens their profile too, the room's if
 they're linked to one.
 
 **Discover, on Live** (its own page next to Following, which has who you follow, live and not): live rooms you don't follow. For you has rooms sharing the most common
@@ -505,8 +507,12 @@ reply to and those in X's For you, twice or more (from the Feed pages you've loo
 last 30 days). Their profile shows their latest posts, read live.
 
 **Watch several:** on Live, pick up to 4 live rooms (yours or from Discover) and watch them
-together, each in its own tile at a quality to fit. All are muted but the one you tap;
-Full opens one in the player, ✕ drops one.
+together, each in its own tile at a quality to fit, with its title and viewers (asked again
+every minute). All are muted but the one you tap (Mute all mutes that one too); Full opens one in
+the player, ✕ drops one (the others keep playing), + Add brings in another live room (yours, then
+Discover's) up to 4. A tile whose stream stops tries again 10 seconds later. In the player,
++ Several starts this with the room you're watching; Follow follows a room you don't yet, and the
+title under the video stays current while you watch.
 
 ## Backup
 

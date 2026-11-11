@@ -1,4 +1,4 @@
-"""A Chaturbate room's public bio, and the X and Reddit accounts its performer links there for
+"""A Chaturbate room's public bio, and the X, Reddit and xvideos accounts its performer links there for
 free (the follow service reads the rooms you follow once a day; the web app reads a room you
 open from Discover). Links that cost tokens are left alone. Standard library only: the web app
 uses it too.
@@ -13,6 +13,10 @@ SITE = "https://chaturbate.com"
 AGENT = "dreamfeed (personal follow list)"
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
 X_LINK = re.compile(r"https?://(?:www\.|mobile\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})(?:[/?\"'<\s]|$)")
+# an xvideos profile (model, channel or amateur: they all list their videos at /profiles/NAME)
+XVIDEOS_LINK = re.compile(r"https?://(?:[a-z]{2,3}\.|www\.)?xvideos\d*\.(?:com|red|es)/"
+                          r"(?:profiles|models|pornstars|channels|amateur-channels|model-channels|pornstar-channels)/"
+                          r"([A-Za-z0-9_-]{2,60})(?:[/?#\"'<\s]|$)")
 REDDIT_LINK = re.compile(r"https?://(?:www\.|old\.)?reddit\.com/(?:u|user)/([A-Za-z0-9_-]{3,20})(?:[/?\"'<\s]|$)")
 NOT_ACCOUNTS = {"chaturbate", "home", "intent", "share", "i", "search", "hashtag", "explore", "settings", "login"}
 GAP = 1.5                     # seconds between requests
@@ -29,6 +33,7 @@ def _get(path: str, json_=True):
 def _handles(text: str) -> list[tuple[str, str]]:
     found = [("x", h) for h in X_LINK.findall(text) if h.lower() not in NOT_ACCOUNTS]
     found += [("reddit", h) for h in REDDIT_LINK.findall(text)]
+    found += [("xvideos", h.lower()) for h in XVIDEOS_LINK.findall(text)]
     return found
 
 
@@ -41,7 +46,7 @@ def bio(name: str) -> dict:
     for s in d.get("social_medias") or []:
         title = str(s.get("title_name") or "").lower()
         link = str(s.get("link") or "")
-        if not s.get("is_free") or not title.startswith(("x ", "twitter", "reddit")):
+        if not s.get("is_free") or not title.startswith(("x ", "twitter", "reddit", "xvideos")):
             continue
         if link.startswith("/external_link/"):        # the address is in the link itself
             target = urllib.parse.parse_qs(urllib.parse.urlparse(link).query).get("url", [""])[0]
