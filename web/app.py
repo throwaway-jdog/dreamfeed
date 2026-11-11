@@ -20,6 +20,7 @@ GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
+GET  /api/videos/more  ?id=reddit:ID|e621:ID&cursor=C  more videos after that one: its subreddit, your subscriptions (Reddit); its search, yours (e621)
 GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after that one (its full-screen player's swipe-up feed)
 GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
 POST /api/profile/relink {"room"}  look for the room's accounts across sites again (linking.py)
@@ -814,6 +815,72 @@ def _saved_json(r) -> dict:
         p["media"] = [{"kind": f["kind"], "url": base + f["file"], "poster": base + f["poster"] if f.get("poster") else None}
                       for f in json.loads(r["files"])]
     return p
+
+
+VIDEO_KINDS = ("video", "hls")
+MORE_VIDEOS = 8            # videos a page of More videos (several listing pages read for them, at most MORE_READS)
+MORE_READS = 4
+
+
+def more_videos(post_id: str, cursor: str) -> dict:
+    """More videos after a Reddit or e621 post (the Reddit app's swipe-up feed, rebuilt from the
+    public API): Reddit, more from its subreddit (hot, then the week's top), then from your
+    subscriptions and the Dashboard's subreddits, newest first; e621, more of the search it came
+    from (or its artist), then the Dashboard's searches. Videos only. {"posts", "cursor"}."""
+    m = re.fullmatch(r"(reddit|e621):([A-Za-z0-9_]{1,30})", post_id or "")
+    if not m:
+        raise ValueError("bad post")
+    site = m.group(1)
+    c = _cursor(cursor) or {}
+    if not c:                                  # the first page: what the post itself says where to look
+        p = one_post(post_id)["post"]
+        if site == "reddit":
+            sub = p.get("place") or ""
+            stages = ([["sub", f"/r/{sub}/hot"], ["sub", f"/r/{sub}/top?t=week"]] if SUBREDDIT.match(sub) else []) + [["subs", ""]]
+        else:
+            first = p.get("place") or ((p.get("artists") or [""])[0])
+            stages = [["e621", q] for q in dict.fromkeys([first] + follow_settings(subscribed=False)["e621"]["searches"]) if q]
+        c = {"stages": stages, "i": 0, "at": None, "seen": [post_id]}
+    stages = c.get("stages") or []
+    ok = {"sub": re.compile(r"^/r/[A-Za-z0-9_]{2,21}/(?:hot|top\?t=week)$"), "subs": re.compile(r"^$"), "e621": re.compile(r"^.{1,300}$")}
+    if (not isinstance(stages, list) or len(stages) > 40 or not isinstance(c.get("i"), int)
+            or any(not (isinstance(x, list) and len(x) == 2 and x[0] in ok and isinstance(x[1], str) and ok[x[0]].match(x[1]))
+                   for x in stages)
+            or (site == "e621") != all(x[0] == "e621" for x in stages)):
+        raise ValueError("bad cursor")      # (it comes back from the page: only what this made)
+    at = c.get("at")
+    if at is not None and not (isinstance(at, int) if site == "e621" else isinstance(at, str) and re.fullmatch(r"t3_\w{1,20}", at)):
+        raise ValueError("bad cursor")
+    out, reads, seen = [], 0, set(str(x) for x in (c.get("seen") or [])[:300])
+    while c["i"] < len(stages) and len(out) < MORE_VIDEOS and reads < MORE_READS:
+        kind, where = stages[c["i"]]
+        reads += 1
+        try:
+            if kind == "e621":
+                posts, nxt = livefeeds.e621_page(f"{where} ~type:webm ~type:mp4", c["at"])
+            else:
+                if kind == "subs":
+                    s = follow_settings()
+                    subs = set(s["reddit"]["subscribed"]) | set(s["reddit"]["follow"])
+                    rs = sorted({w[2:] for w in subs if w.startswith("r/") and not livefeeds.place_blocked(w[2:])}, key=str.lower)
+                    if not rs:
+                        c.update(i=c["i"] + 1, at=None); continue
+                    where = "/r/" + "+".join(rs[:250]) + "/new"
+                posts, nxt = livefeeds.reddit_page(where, c["at"], "videos")
+        except ValueError:               # (a search dreamfeed won't run)
+            posts, nxt = [], None
+        for p in posts:
+            if p["id"] not in seen and any(x.get("kind") in VIDEO_KINDS for x in p["media"]):
+                if kind == "e621":
+                    p = {**p, "place": where}
+                seen.add(p["id"]); out.append(p)
+        if nxt:
+            c["at"] = nxt
+        else:
+            c.update(i=c["i"] + 1, at=None)
+    c["seen"] = list(seen)[-300:]
+    more = c["i"] < len(stages)
+    return {"posts": _mark_saved(out), "cursor": base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("=") if more else None}
 
 
 def one_post(post_id: str) -> dict:
@@ -2275,6 +2342,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except LookupError as e:
                 return self.send(404, {"error": str(e)[:200]})
+        if path == "/api/videos/more":
+            q = self.query()
+            try:
+                return self.send(200, more_videos(q.get("id", ""), q.get("cursor", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except (LookupError, OSError) as e:
+                return self.send(502, {"error": str(e)[:200]})
         if path == "/api/x/related":
             q = self.query()
             try:

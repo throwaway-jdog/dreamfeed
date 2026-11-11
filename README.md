@@ -403,13 +403,17 @@ post shows its pictures in full quality; tap one to see it full screen. A site t
 answer says so at the top, with Try again. The Feed's mode and site, and Saved's filter, stay as
 you left them (in this browser).
 
-**More videos** (on an X video post): X's own swipe-up feed, the videos its full-screen player
+**More videos** (on an X, Reddit or e621 video post). On X, it's X's own swipe-up feed, the videos its full-screen player
 shows after that one (X's ImmersiveMedia call, read as you through gallery-dl's connection). One
 video a screen: swipe or scroll up for the next (↑ ↓ or j k on a keyboard); the one on screen
 plays, and Tap for sound keeps sound on for the rest. The next two load while you watch. Each
 shows who posted it (tap for their profile), its text, likes and views, 💬 for its replies, Save,
 and ↗ to open it on X; Back from those returns to the same place. Its address is
-`/videos/POST/HANDLE`. X changes that call's id now and then: `X_RELATED_QUERY` in .env overrides
+`/videos/POST/HANDLE`. On Reddit (whose own feed only its app can read) it's rebuilt the way the
+app does it: more videos from that subreddit (hot, then the week's top), then from your
+subscriptions and the Dashboard's subreddits, newest first; Reddit's own videos, RedGifs and
+Imgur all play. On e621: more by its artist and the search it came from, then your Dashboard
+searches. Their addresses are `/videos/reddit/ID` and `/videos/e621/ID`. X changes that call's id now and then: `X_RELATED_QUERY` in .env overrides
 the one that works now.
 
 **Comments.** Tap a post's text or picture, or 💬 (with how many it has), to open it with its

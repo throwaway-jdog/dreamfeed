@@ -1801,7 +1801,10 @@ function route() {
     case "post": if (b && c) return showPostId(`${b}:${c}`); break;
     case "xvideos": if (b) return showXvideo(nav.xv.get(b) || { id: b, title: "xvideos" }); break;
     case "redgifs": if (/^[a-z]{3,80}$/.test(b)) return showClip(b); break;
-    case "videos": if (/^\d{5,25}$/.test(b)) return showVideos(b, c); break;
+    case "videos":
+      if (/^\d{5,25}$/.test(b)) return showVideos(b, c);
+      if (["reddit", "e621"].includes(b) && /^[A-Za-z0-9_]{1,30}$/.test(c)) return showVideos(c, "", b);
+      break;
   }
   go("", true);
 }
@@ -1847,10 +1850,12 @@ async function showComicId(id) {
 /* More videos: X's own swipe-up feed (what its full-screen player shows next), from one video.
    One video a screen; the one on screen plays, with sound once you've asked for it. */
 const vf = { gen: 0, posts: [], cursor: null, loading: false, muted: true, seed: null, cur: -1, obs: null };
-function openVideos(p) { nav.posts.set(p.id, p); go(`videos/${p.id.split(":")[1]}/${enc(p.author)}`); }
-async function showVideos(tid, handle) {
-  const gen = ++vf.gen;
-  Object.assign(vf, { posts: [], cursor: null, loading: false, seed: { tid, handle: handle || "" }, cur: -1 });
+// X: X's own feed. Reddit and e621: more from where it came from (its subreddit or search, then yours).
+function vfPath(p) { return p.source === "x" ? `videos/${p.id.split(":")[1]}/${enc(p.author)}` : `videos/${p.source}/${enc(p.id.split(":")[1])}`; }
+function openVideos(p) { nav.posts.set(p.id, p); go(vfPath(p)); }
+async function showVideos(tid, handle, site = "x") {
+  const gen = ++vf.gen, pid = `${site}:${tid}`;
+  Object.assign(vf, { posts: [], cursor: null, loading: false, seed: { tid, handle: handle || "", site, pid }, cur: -1 });
   $("vf-track").replaceChildren(); $("vfeed").hidden = false;
   vfSoundLabel();
   vf.obs = vf.obs || new IntersectionObserver(es => {
@@ -1860,7 +1865,7 @@ async function showVideos(tid, handle) {
         vf.cur = vf.posts.findIndex(x => x.el === e.target);
         v.muted = vf.muted; v.play().catch(() => { v.muted = true; vf.muted = true; vfSoundLabel(); v.play().catch(() => {}); });
         const p = vf.posts[vf.cur];
-        if (p) setUrl(`videos/${p.id.split(":")[1]}/${enc(p.author)}`);
+        if (p && vf.seed.site === "x") setUrl(vfPath(p));
         // the next two start buffering now, so swiping up plays at once
         for (const x of vf.posts.slice(vf.cur + 1, vf.cur + 3)) {
           const nv = x.el.querySelector("video");
@@ -1872,30 +1877,35 @@ async function showVideos(tid, handle) {
   }, { root: $("vf-track"), threshold: [0, .6, 1] });
   // back from a video's comments (or its author): the same list, at that video
   const last = vf.last;
-  if (last && last.posts.some(x => x.id === `x:${tid}`)) {
+  const back = last && (last.seed.pid === pid ? last.curId : last.posts.some(x => x.id === pid) && pid);
+  if (back) {
     vf.seed = last.seed; vf.cursor = last.cursor; vfAdd(last.posts);
-    const at = vf.posts.find(x => x.id === `x:${tid}`);
+    const at = vf.posts.find(x => x.id === back) || vf.posts[0];
     requestAnimationFrame(() => { $("vf-track").scrollTop = at.el.offsetTop; });
     return;
   }
-  let seed = nav.posts.get(`x:${tid}`);
-  if (!seed) { try { seed = (await api(`api/post?id=${enc("x:" + tid)}`)).post; } catch {} }
+  let seed = nav.posts.get(pid);
+  if (!seed) { try { seed = (await api(`api/post?id=${enc(pid)}`)).post; } catch {} }
   if (gen !== vf.gen) return;
-  if (seed && seed.media.some(m => m.kind === "video")) vfAdd([seed]);
+  if (seed && seed.media.some(m => m.kind === "video" || m.kind === "hls")) vfAdd([seed]);
   vfMore();
 }
 function vfAdd(posts) {
   for (const p of posts) {
     if (vf.posts.some(x => x.id === p.id)) continue;
-    const m = p.media.find(x => x.kind === "video");
+    const m = p.media.find(x => x.kind === "video" || x.kind === "hls");
+    if (!m) continue;
     const slide = el("section", "vf-slide"), v = el("video");
     v.playsInline = v.loop = true; v.muted = vf.muted; v.preload = vf.posts.length < 2 ? "auto" : "metadata";
     if (vf.posts.length < 2) v.dataset.warm = "1";
-    if (m.poster) v.poster = m.poster; v.src = m.url;
+    if (m.poster) v.poster = m.poster;
+    if (m.kind === "hls") feedHls(v, m); else v.src = m.url;
     v.onclick = () => { if (v.paused) v.play().catch(() => {}); else v.pause(); };
     const info = el("div", "vf-info"), who = el("span", "vf-who"), av = el("span", "av", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
     if (p.avatar) { const im = el("img"); im.alt = ""; im.src = p.avatar; av.append(im); }
-    who.append(av, el("span", null, "@" + p.author)); who.onclick = () => openPerson({ x: p.author });
+    const person = p.source === "x" ? { x: p.author } : p.source === "reddit" ? { reddit: p.author } : (p.artists || []).length ? { e621: p.artists[0] } : null;
+    who.append(av, el("span", null, p.source === "x" ? "@" + p.author : p.source === "reddit" ? `u/${p.author} · r/${p.place}` : p.author || "e621"));
+    if (person) who.onclick = () => openPerson(person);
     info.append(who);
     if (p.text) { const t = el("p", "vf-text", p.text); t.onclick = () => t.classList.toggle("open"); info.append(t); }
     const nums = [p.likes != null && `♥ ${Number(p.likes).toLocaleString()}`, p.views != null && `${Number(p.views).toLocaleString()} views`,
@@ -1912,7 +1922,8 @@ function vfAdd(posts) {
       sv.disabled = false; showSave();
     };
     showSave();
-    const out = el("a"); out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; out.append("↗", el("small", null, "X"));
+    const out = el("a"); out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener";
+    out.append("↗", el("small", null, { x: "X", reddit: "Reddit", e621: "e621" }[p.source]));
     acts.append(cm, sv, out);
     slide.append(v, info, acts);
     p.el = slide; vf.posts.push(p);
@@ -1925,7 +1936,8 @@ async function vfMore() {
   const msg = el("p", "vf-msg", vf.posts.length ? "" : "Reading X's videos…");
   if (!vf.posts.length) $("vf-track").append(msg);
   try {
-    const d = await api(`api/x/related?id=${s.tid}&handle=${enc(s.handle)}&cursor=${enc(vf.cursor || "")}`);
+    const d = await api(s.site === "x" ? `api/x/related?id=${s.tid}&handle=${enc(s.handle)}&cursor=${enc(vf.cursor || "")}`
+                                       : `api/videos/more?id=${enc(s.pid)}&cursor=${enc(vf.cursor || "")}`);
     if (gen !== vf.gen) return;
     msg.remove(); vf.cursor = d.cursor || null;
     vfAdd(d.posts);
@@ -1946,7 +1958,8 @@ $("vf-sound").onclick = () => vfSound(vf.muted);
 $("vf-close").onclick = () => leave();
 function closeVideos() {
   vf.gen++;
-  if (vf.posts.length) vf.last = { posts: vf.posts.map(({ el, ...p }) => p), cursor: vf.cursor, seed: vf.seed };
+  if (vf.posts.length) vf.last = { posts: vf.posts.map(({ el, ...p }) => p), cursor: vf.cursor, seed: vf.seed,
+                                   curId: (vf.posts[vf.cur] || vf.posts[0]).id };
   for (const p of vf.posts) { const v = p.el && p.el.querySelector("video"); if (v) { v.pause(); v.removeAttribute("src"); v.load(); } if (vf.obs && p.el) vf.obs.unobserve(p.el); }
   vf.posts = []; $("vf-track").replaceChildren(); $("vfeed").hidden = true;
 }
@@ -2447,7 +2460,7 @@ function postCard(p, opened) {
     const c = el("button", "comments-btn", p.comments ? `💬 ${Number(p.comments).toLocaleString()}` : "💬 Comments");
     c.type = "button"; c.onclick = () => openPost(p); acts.append(c);
   }
-  if (p.source === "x" && p.media.some(m => m.kind === "video")) {      // X's swipe-up feed, from this one
+  if (["x", "reddit", "e621"].includes(p.source) && p.media.some(m => m.kind === "video" || m.kind === "hls")) {   // a swipe-up feed, from this one
     const mv = el("button", "comments-btn", "▶ More videos"); mv.type = "button"; mv.onclick = () => openVideos(p); acts.append(mv);
   }
   if (p.link) {
