@@ -705,11 +705,13 @@ def _run_import() -> None:
                 continue
             added = 0
             with db() as conn:
-                # newest first: each one a second older than the one before, so they keep their order
+                # saved when you saved it on the site (X bookmarks say when); else (Reddit doesn't) now,
+                # each a second older than the one before, so they keep the site's order
                 for n, p in enumerate(posts):
                     keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link", "media")}
-                    added += conn.execute("INSERT INTO saved_posts(id, source, data, saved_at) VALUES (?, ?, ?, datetime('now', ?))"
-                                          " ON CONFLICT(id) DO NOTHING", (p["id"], source, json.dumps(keep)[:200_000], f"-{n} seconds")).rowcount
+                    when = p.get("saved_at") if re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", str(p.get("saved_at") or "")) else None
+                    added += conn.execute("INSERT INTO saved_posts(id, source, data, saved_at) VALUES (?, ?, ?, coalesce(?, datetime('now', ?)))"
+                                          " ON CONFLICT(id) DO NOTHING", (p["id"], source, json.dumps(keep)[:200_000], when, f"-{n} seconds")).rowcount
             _import[source] = {"found": len(posts), "added": added}
     finally:
         _import.update(running=False, at=time.strftime("%Y-%m-%d %H:%M:%S"))

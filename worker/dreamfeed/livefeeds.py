@@ -362,6 +362,8 @@ def _x_posts(items: list, via: str) -> tuple[list[dict], list[dict], int]:
                               "posted_at": str(md.get("date") or ""), "link": f"https://x.com/{a['name']}/status/{tid}",
                               "via": via, "saved": False, "media": [],
                               "mentions": sorted({n for n in named if n and n.lower() != a["name"].lower()})}
+            if md.get("date_bookmarked"):           # your bookmarks: when you bookmarked it (UTC)
+                p["saved_at"] = str(md["date_bookmarked"])[:19]
         ext = str(md.get("extension") or "").lower()
         if not str(url).startswith("https://"):
             continue
