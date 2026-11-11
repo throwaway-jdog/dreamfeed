@@ -316,13 +316,13 @@ def _x_video(url: str, md: dict) -> str:
     return pick["url"] if pick else url
 
 
-def _x(url: str, start: int, count: int) -> list:
+def _x(url: str, start: int, count: int, timeout: int = 90) -> list:
     if not x_cookies():
         raise LookupError("X isn't signed in (X_COOKIES_FILE)")
     try:
         out = subprocess.run([sys.executable, "-c", X_RUNNER, "--config-ignore", "--cookies", x_cookies(), "-o", "cookies-update=false",
                               "--range", f"{start}-{start + count - 1}", "-j", url],
-                             capture_output=True, text=True, timeout=90)
+                             capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
         raise LookupError("X took too long") from e
     try:
@@ -508,3 +508,29 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
         if p["id"] not in seen:
             seen.add(p["id"]); out.append(p)
     return {"posts": out, "users": users, "cursor": nxt, "more": any(v is not None for v in nxt.values()), "errors": errors}
+
+
+# ---- what you saved on the sites (Saved's import) ----
+def x_bookmarks() -> list[dict]:
+    """Your X bookmarks with pictures or videos, newest first (all of them)."""
+    posts, _, _ = _x_posts(_x("https://x.com/i/bookmarks", 1, 20000, timeout=1800), "saved")
+    return posts
+
+
+def reddit_saved() -> list[dict]:
+    """The posts you saved on Reddit with pictures or videos, newest first (Reddit keeps the last
+    1000). Needs the sign-in's history permission."""
+    me = _reddit("/api/v1/me").get("name")
+    if not me:
+        raise LookupError("Reddit didn't say who you are")
+    out, after = [], None
+    for _ in range(10):
+        q = f"/user/{me}/saved?type=links&limit=100&raw_json=1" + (f"&after={after}" if after else "")
+        try:
+            posts, after = _reddit_listing(_reddit(q), "saved")
+        except LookupError as e:
+            raise LookupError(f"{e}; Reddit's saved posts need the history permission: sign in again") from e
+        out += posts
+        if not after:
+            break
+    return out

@@ -370,14 +370,16 @@ posts never go to training, styles, comics or generation. Open on X/Reddit goes 
   search asks e621 to leave them out too (`e621.NEVER`: the youth tags such as `young` and
   `cub`, `feral`, `bestiality`). `E621_USERNAME` (optional) names you in the user agent.
 
-The Feed has three parts, each with All, X, Reddit (and e621) to pick from:
+The Feed has two parts, each with All, X, Reddit (and e621) to pick from (what you save goes to
+the **Saved** tab, below):
 - **Following:** your X Following timeline, your subreddits and Reddit people, e621, newest
   first.
 - **For you:** the sites' own picks: X's For you timeline and your Reddit front page (Best), in
   each site's own order, taken in turns; never mixed into Following. Above it, people you might
   like: X accounts you don't follow, from your rooms' bios, mentions by people you follow and
   X's For you (from the last 30 days of your timelines, `x_seen`).
-- **Saved:** what you tapped Save on, kept: the follow service downloads its pictures and
+- **Saved** (its own tab, with the persona posts you liked, newest first): what you tapped Save
+  on, kept: the follow service downloads its pictures and
   videos in full quality (X's original pictures and biggest video, e621's original or its
   full-size MP4, Reddit's own videos with sound through ffmpeg, redgifs' HD) into
   `data/saved/<site>/<post>/`, which is backed up like `liked/`. Saved shows those copies once
@@ -385,6 +387,12 @@ The Feed has three parts, each with All, X, Reddit (and e621) to pick from:
   the site stays. Unsaving deletes them. A Reddit post is saved on Reddit too, as you, at once.
   An X post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client,
   so use Open on X for that.
+  **Bring in what you saved on X and Reddit** (at the top of Saved) adds your X bookmarks and
+  your Reddit saved posts (the last 1000 Reddit keeps) with pictures or videos, kept the same
+  way; the same word rules leave some out, and ones you unsaved here stay out. Run it again any
+  time for new ones. Reddit's saved list needs the sign-in's `history` permission (signed in
+  before it was added: sign in again, below). Unsaving an imported X post doesn't remove the
+  bookmark on X.
 
 **Browse now (Reddit).** With Reddit picked, type a subreddit (or tap one on a post) to see it
 as it is now: Hot, New or the day's Top, 25 posts a page, More for the next.

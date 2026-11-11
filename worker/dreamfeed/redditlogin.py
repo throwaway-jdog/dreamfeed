@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-LOGIN_SCOPES = "identity read mysubreddits save"     # save: the Feed's Save button
+LOGIN_SCOPES = "identity read mysubreddits save history"     # save: the Save button; history: your saved posts (Saved import)
 LOGIN_REDIRECT = "http://localhost:6414/"
 AGENT = "linux:dreamfeed:1.0 (personal feed reader)"
 

@@ -26,8 +26,8 @@ GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
 POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
                         {"e621": {"searches": ["tag tag", ...], "top": N}} change them
-GET  /api/following/posts  ?mode=following|foryou|saved&source=all|x|reddit|e621&cursor=C  the Feed, live from the sites
-                        (its pictures and videos load from them), or what you saved
+GET  /api/following/posts  ?mode=following|foryou&source=all|x|reddit|e621&cursor=C  the Feed, live from the sites
+                        (its pictures and videos load from them); what you save is in Saved (/api/feed?view=liked)
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
 POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
@@ -49,6 +49,8 @@ POST /api/profile/link  {"room", "source": "x"|"reddit", "handle", "remove": boo
 POST /api/following/save {"post": {...}, "save": bool} keep a post in Saved, its files downloaded in full quality
                         (the follow service; and saved on Reddit too, for Reddit's)
 GET  /saved-media/<source>/<post>/<file>  a saved post's kept picture or video
+POST /api/saved/import  {} bring your X bookmarks and Reddit saved posts into Saved (in the background)
+GET  /api/saved/import  how that went, and how many saved posts' files are kept
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
                         {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
@@ -96,7 +98,7 @@ MEDIUMS = ("anime", "furry")
 HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 FOLLOW = GENERATED / "follow"
 FEED_SOURCES = ("x", "reddit", "e621")
-FEED_MODES = ("following", "foryou", "saved")   # your follows; X's For you and Reddit's Best; what you saved
+FEED_MODES = ("following", "foryou")   # your follows; X's For you and Reddit's Best; what you saved
 LIVE_DAYS = 28         # live times this far back give a room's usual hours
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
 # The one thing from elsewhere a page may load: a live room's video, straight from Chaturbate's
@@ -159,8 +161,7 @@ def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
         where.append("g.persona = ?")
         args.append(persona)
     if view == "liked":
-        where.append("f.action = 'like'")
-        order = "f.at DESC"
+        return saved_view(medium, offset)
     else:   # the timeline: persona posts only (v1 images stay reachable from Liked)
         where.append("g.status = 'feed' AND p.active = 1 AND (f.action IS NULL OR f.action = 'like')")
         order = "coalesce(g.posted_at, g.created_at) DESC, g.id DESC"
@@ -177,6 +178,37 @@ def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
     except sqlite3.OperationalError:   # worker hasn't created its tables yet
         return {"items": [], "more": False}
     return {"items": [item(r) for r in rows[:PAGE_SIZE]], "more": len(rows) > PAGE_SIZE}
+
+
+def saved_view(medium: str, offset: int) -> dict:
+    """Saved: the persona posts you liked and the Feed posts you saved, newest first, as
+    {"items": [an item, or {"post": a Feed post}]} (posts only with every medium)."""
+    gen_where, args = "f.action = 'like'", []
+    if medium in MEDIUMS:
+        gen_where += " AND g.medium = ?"
+        args.append(medium)
+    posts = "" if medium in MEDIUMS else " UNION ALL SELECT 'post', id, saved_at FROM saved_posts WHERE status != 'removed'"
+    try:
+        with db() as conn:
+            keys = conn.execute(f"SELECT 'gen' AS k, CAST(g.id AS TEXT) AS key, f.at AS at FROM feedback f JOIN generations g"
+                                f" ON g.id = f.generation_id WHERE {gen_where}{posts} ORDER BY at DESC LIMIT ? OFFSET ?",
+                                (*args, PAGE_SIZE + 1, offset)).fetchall()
+            more, keys = len(keys) > PAGE_SIZE, keys[:PAGE_SIZE]
+            gids = [int(k["key"]) for k in keys if k["k"] == "gen"]
+            gens = {r["id"]: item(r) for r in conn.execute(
+                "SELECT g.id, g.night, g.medium, g.score, g.kind, g.caption, g.persona, g.posted_at, g.created_at, g.checkpoint,"
+                " f.action, p.name, p.avatar,"
+                " EXISTS(SELECT 1 FROM generations v WHERE v.source_generation = g.id AND v.kind = 'video'"
+                "        AND v.status IN ('queued', 'generated', 'feed')) AS animated FROM generations g"
+                " LEFT JOIN feedback f ON f.generation_id = g.id LEFT JOIN personas p ON p.handle = g.persona"
+                f" WHERE g.id IN ({','.join('?' * len(gids)) or 'NULL'})", gids)}
+            pids = [k["key"] for k in keys if k["k"] == "post"]
+            saved = {r["id"]: _saved_json(r) for r in conn.execute(
+                f"SELECT * FROM saved_posts WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", pids)}
+    except sqlite3.OperationalError:   # worker hasn't created its tables yet
+        return {"items": [], "more": False}
+    out = [gens.get(int(k["key"])) if k["k"] == "gen" else ({"post": saved[k["key"]]} if k["key"] in saved else None) for k in keys]
+    return {"items": [x for x in out if x], "more": more}
 
 
 def personas() -> dict:
@@ -539,7 +571,7 @@ def _mark_saved(posts: list[dict]) -> list[dict]:
         return posts
     try:
         with db() as conn:
-            ids = {r[0] for r in conn.execute(f"SELECT id FROM saved_posts WHERE id IN ({','.join('?' * len(posts))})",
+            ids = {r[0] for r in conn.execute(f"SELECT id FROM saved_posts WHERE status != 'removed' AND id IN ({','.join('?' * len(posts))})",
                                               [p["id"] for p in posts])}
     except sqlite3.OperationalError:
         ids = set()
@@ -552,15 +584,6 @@ def follow_posts(source: str, cursor: str, mode: str = "following") -> dict:
     """A page of the Feed, live from the sites (livefeeds), or what you saved."""
     if source not in ("all", *FEED_SOURCES) or mode not in FEED_MODES:
         raise ValueError("bad source")
-    if mode == "saved":
-        offset = int(cursor or 0)
-        with db() as conn:
-            where, args = ("", []) if source == "all" else (" WHERE source = ?", [source])
-            rows = conn.execute(f"SELECT * FROM saved_posts{where} ORDER BY saved_at DESC LIMIT ? OFFSET ?",
-                                [*args, PAGE_SIZE + 1, offset]).fetchall()
-        posts = [_saved_json(r) for r in rows[:PAGE_SIZE]]
-        more = len(rows) > PAGE_SIZE
-        return {"posts": posts, "more": more, "cursor": str(offset + len(posts)) if more else None, "errors": {}}
     s = follow_settings(subscribed=False)
     d = livefeeds.feed(mode, source, _cursor(cursor), s["reddit"]["follow"], s["e621"]["searches"])
     _seen(d["posts"], d["users"])
@@ -642,14 +665,60 @@ def save_post(req: dict) -> dict:
     keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link")}
     keep["media"] = media
     with db() as conn:
-        if save:      # (saved again: kept as it is)
-            conn.execute("INSERT INTO saved_posts(id, source, data) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
-                         (pid, m.group(1), json.dumps(keep)[:200_000]))
-        else:
-            conn.execute("DELETE FROM saved_posts WHERE id = ?", (pid,))
+        if save:      # (saved again while kept: left as it is)
+            conn.execute("INSERT INTO saved_posts(id, source, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET"
+                         " data = excluded.data, status = 'queued', error = NULL, files = NULL, saved_at = datetime('now')"
+                         " WHERE saved_posts.status = 'removed'", (pid, m.group(1), json.dumps(keep)[:200_000]))
+        else:         # kept as removed, so an import of what you saved on the site doesn't bring it back
+            conn.execute("UPDATE saved_posts SET status = 'removed', files = NULL, error = NULL WHERE id = ?", (pid,))
             shutil.rmtree(savedposts.folder(DATA, pid), ignore_errors=True)
-        r = conn.execute("SELECT status, error FROM saved_posts WHERE id = ?", (pid,)).fetchone()
+        r = conn.execute("SELECT status, error FROM saved_posts WHERE id = ? AND status != 'removed'", (pid,)).fetchone()
     return {"saved": save, "sync": sync, "keep": dict(r) if r else None}
+
+
+_import = {"running": False, "at": None, "x": None, "reddit": None}
+_import_lock = threading.Lock()
+
+
+def import_saved(req: dict) -> dict:
+    """Bring what you saved on the sites into Saved: your X bookmarks and your Reddit saved posts
+    (with pictures or videos), their files then kept like any you save here. Ones you unsaved
+    here stay out. In the background; GET /api/saved/import says how it went."""
+    with _import_lock:
+        if _import["running"]:
+            return dict(_import)
+        _import.update(running=True, x=None, reddit=None)
+    threading.Thread(target=_run_import, daemon=True).start()
+    return dict(_import)
+
+
+def _run_import() -> None:
+    try:
+        for source, read in (("x", livefeeds.x_bookmarks), ("reddit", livefeeds.reddit_saved)):
+            if source == "reddit" and not livefeeds.reddit_ready():
+                _import["reddit"] = {"error": "Reddit isn't signed in"}
+                continue
+            try:
+                posts = read()
+            except (LookupError, OSError, ValueError) as e:
+                _import[source] = {"error": str(e)[:300]}
+                continue
+            added = 0
+            with db() as conn:
+                # newest first: each one a second older than the one before, so they keep their order
+                for n, p in enumerate(posts):
+                    keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link", "media")}
+                    added += conn.execute("INSERT INTO saved_posts(id, source, data, saved_at) VALUES (?, ?, ?, datetime('now', ?))"
+                                          " ON CONFLICT(id) DO NOTHING", (p["id"], source, json.dumps(keep)[:200_000], f"-{n} seconds")).rowcount
+            _import[source] = {"found": len(posts), "added": added}
+    finally:
+        _import.update(running=False, at=time.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def import_status() -> dict:
+    with db() as conn:
+        counts = {r["status"]: r["n"] for r in conn.execute("SELECT status, count(*) AS n FROM saved_posts GROUP BY status")}
+    return {**_import, "files": counts}
 
 
 def _saved_json(r) -> dict:
@@ -2040,6 +2109,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, follow_posts(q.get("source", "all"), q.get("cursor", ""), q.get("mode", "following")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
+        if path == "/api/saved/import":
+            return self.send(200, import_status())
         if path.startswith("/saved-media/"):
             file = saved_file(path[len("/saved-media/"):])
             if not file:
@@ -2075,7 +2146,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings,
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
-                   "/api/live/follow": follow_room, "/api/following/save": save_post}
+                   "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

@@ -277,6 +277,8 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 #f-source.no-e621 { grid-template-columns: repeat(3, 1fr); }
 #f-source.no-e621 [data-s="e621"] { display: none; }
 .fposts #f-mode { margin: 10px 14px 0; }
+.saved-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 14px 0; }
+.saved-bar .secondary { width: auto; padding: 0 14px; }
 .br-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin: 10px 14px 0; }
 .br-form[hidden] { display: none; }
 .br-form .secondary { width: auto; padding: 0 14px; }
@@ -734,9 +736,8 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
   </section>
   <section class="timeline fposts" id="posts" hidden aria-label="Feed">
-    <div class="seg three" id="f-mode" role="group" aria-label="Feed">
-      <button type="button" data-m="following" aria-pressed="true">Following</button><button type="button" data-m="foryou" aria-pressed="false">For you</button>
-      <button type="button" data-m="saved" aria-pressed="false">Saved</button></div>
+    <div class="seg" id="f-mode" role="group" aria-label="Feed">
+      <button type="button" data-m="following" aria-pressed="true">Following</button><button type="button" data-m="foryou" aria-pressed="false">For you</button></div>
     <div class="seg" id="f-source" role="group" aria-label="From">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
@@ -843,6 +844,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <div class="mk-row"><button type="button" class="secondary" id="rd-cancel">Cancel</button><button class="primary" type="submit" id="rd-go">Animate</button></div>
     </form>
   </div>
+  <div class="saved-bar" id="saved-bar" hidden>
+    <button type="button" class="secondary" id="saved-import">Bring in what you saved on X and Reddit</button>
+    <small class="note" id="saved-note"></small></div>
   <div class="timeline" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
   <div class="loading" id="loading" hidden>Loading…</div>
@@ -1135,7 +1139,10 @@ async function loadMore() {
     const data = await api(`api/feed?${q}`);
     if (gen !== state.gen) return;
     state.offset += data.items.length; state.more = data.more;
-    for (const it of data.items) addCard(it);
+    for (const it of data.items) {
+      if (it.post) { const w = el("div", "fposts saved-post"); w.append(postCard(it.post)); grid.append(w); }   // a Feed post you saved
+      else addCard(it);
+    }
     showEmpty();
   } catch (e) { if (e.message !== "signed out") toast(e.message); state.more = false; }
   finally { state.loading = false; $("loading").hidden = true; }
@@ -1194,10 +1201,10 @@ function addCard(it) {
 
 function showEmpty() {
   const e = $("empty");
-  if (state.items.length) { e.hidden = true; return; }
+  if (state.items.length || grid.querySelector(".saved-post")) { e.hidden = true; return; }
   e.hidden = false;
   e.innerHTML = state.view === "liked"
-    ? "<strong>No likes yet</strong>Tap the heart on posts you like. They're kept here and make that persona post more like it."
+    ? "<strong>Nothing saved yet</strong>Tap the heart on persona posts and Save on Feed posts: they're kept here."
     : state.persona ? "<strong>No posts yet</strong>Their first posts arrive with the next run, or tap Post now."
     : "<strong>Nothing new</strong>New posts arrive after each night's run. You can also start one from the Dashboard.";
 }
@@ -1458,6 +1465,7 @@ function setView(v) {
   const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", page = dash || com || fol || posts;
   $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("posts").hidden = !posts;
   $("grid").hidden = page; $("sentinel").hidden = page && !posts;
+  $("saved-bar").hidden = v !== "liked"; if (v === "liked") importStatus();
   if (v !== "feed") state.persona = "";
   renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
@@ -1467,6 +1475,23 @@ function setView(v) {
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
   else reset();
 }
+// Saved: bring in your X bookmarks and Reddit saved posts (their files are then kept in full quality).
+let importTimer = null;
+async function importStatus(started) {
+  clearTimeout(importTimer);
+  let d;
+  try { d = started ? await api("api/saved/import", {}) : await api("api/saved/import"); } catch (err) { $("saved-note").textContent = err.message; return; }
+  const one = (name, r) => !r ? "" : r.error ? `${name}: ${r.error}` : `${name}: ${r.added} new of ${r.found}`;
+  const f = d.files || {}, waiting = (f.queued || 0) + (f.running || 0);
+  $("saved-import").disabled = d.running;
+  $("saved-note").textContent = [d.running ? "Reading what you saved…" : "", one("X", d.x), one("Reddit", d.reddit),
+    waiting ? `keeping ${waiting} post${waiting === 1 ? "" : "s"} in full quality…` : "", f.failed ? `${f.failed} couldn't be kept` : ""]
+    .filter(Boolean).join(" · ");
+  if (state.view === "liked" && (d.running || waiting)) importTimer = setTimeout(() => importStatus(), 5000);
+  if (started === undefined && d.running === false && importStatus.was) { importStatus.was = false; reset(); }
+  if (d.running) importStatus.was = true;
+}
+$("saved-import").onclick = () => importStatus(true);
 $("menu-btn").onclick = e => {
   e.stopPropagation(); const s = $("sheet"); s.hidden = !s.hidden;
   $("menu-btn").setAttribute("aria-expanded", String(!s.hidden));
@@ -1690,7 +1715,7 @@ async function loadPosts(reset) {
   }
   else if (fp.loading) return;
   const gen = fp.gen; fp.loading = true; $("f-more").hidden = true;
-  $("f-feeds").textContent = fp.mode === "saved" ? "" : "Reading the sites…";
+  $("f-feeds").textContent = "Reading the sites…";
   try {
     const d = await api(`api/following/posts?mode=${fp.mode}&source=${fp.source}&cursor=${encodeURIComponent(fp.cursor)}`);
     if (gen !== fp.gen) return;
@@ -1698,8 +1723,7 @@ async function loadPosts(reset) {
     $("f-feeds").textContent = Object.entries(d.errors || {}).map(([k, v]) => `${names[k] || k}: ${v}`).join(" · ");
     $("f-posts").append(...d.posts.map(postCard));
     fp.shown += d.posts.length; fp.cursor = d.cursor || ""; fp.more = d.more; $("f-more").hidden = !d.more;
-    if (!fp.shown && !d.more) $("f-posts").append(el("p", "note", {
-      saved: "Nothing saved yet. Save keeps a post here; a Reddit post is saved on Reddit too." }[fp.mode] || "No posts."));
+    if (!fp.shown && !d.more) $("f-posts").append(el("p", "note", "No posts."));
   } catch (err) { if (gen === fp.gen) $("f-feeds").textContent = err.message; }
   finally { if (gen === fp.gen) fp.loading = false; }
 }

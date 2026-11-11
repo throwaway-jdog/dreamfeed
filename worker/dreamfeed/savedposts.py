@@ -86,7 +86,7 @@ def run(post_id: str) -> None:
     from .db import connect          # (here: the web app uses the rest without the worker's db)
     data = Path(os.environ["DATA_DIR"])
     conn = connect(data / "feed.db")
-    row = conn.execute("SELECT data FROM saved_posts WHERE id = ?", (post_id,)).fetchone()
+    row = conn.execute("SELECT data FROM saved_posts WHERE id = ? AND status = 'running'", (post_id,)).fetchone()
     if not row:
         return
     post = json.loads(row[0])
@@ -107,7 +107,7 @@ def run(post_id: str) -> None:
                 except (OSError, ValueError):
                     pass
             files.append(entry)
-        if not conn.execute("SELECT 1 FROM saved_posts WHERE id = ?", (post_id,)).fetchone():
+        if not conn.execute("SELECT 1 FROM saved_posts WHERE id = ? AND status = 'running'", (post_id,)).fetchone():
             shutil.rmtree(tmp, ignore_errors=True)       # unsaved while it downloaded
             return
         shutil.rmtree(out, ignore_errors=True)
@@ -118,5 +118,6 @@ def run(post_id: str) -> None:
     except Exception as e:      # any failure is this post's, shown on it in Saved
         shutil.rmtree(tmp, ignore_errors=True)
         with conn:
-            conn.execute("UPDATE saved_posts SET status = 'failed', error = ? WHERE id = ?", (str(e)[:300], post_id))
+            conn.execute("UPDATE saved_posts SET status = 'failed', error = ? WHERE id = ? AND status = 'running'",
+                         (str(e)[:300], post_id))
         print(f"follow: saving {post_id} failed: {e}", flush=True)
