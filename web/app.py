@@ -180,14 +180,27 @@ def feed(view: str, medium: str, offset: int, persona: str = "") -> dict:
     return {"items": [item(r) for r in rows[:PAGE_SIZE]], "more": len(rows) > PAGE_SIZE}
 
 
-def saved_view(medium: str, offset: int) -> dict:
+SAVED_SOURCES = ("all", "personas", "x", "reddit", "e621")
+
+
+def saved_view(medium: str, offset: int, source: str = "all") -> dict:
     """Saved: the persona posts you liked and the Feed posts you saved, newest first, as
-    {"items": [an item, or {"post": a Feed post}]} (posts only with every medium)."""
+    {"items": [an item, or {"post": a Feed post}]}. source: all, personas (the liked ones) or a
+    site's; a medium (anime, furry) is the personas' only."""
+    if source not in SAVED_SOURCES:
+        raise ValueError("bad source")
     gen_where, args = "f.action = 'like'", []
     if medium in MEDIUMS:
         gen_where += " AND g.medium = ?"
         args.append(medium)
-    posts = "" if medium in MEDIUMS else " UNION ALL SELECT 'post', id, saved_at FROM saved_posts WHERE status != 'removed'"
+    posts = ""
+    if medium not in MEDIUMS and source != "personas":
+        posts = " UNION ALL SELECT 'post', id, saved_at FROM saved_posts WHERE status != 'removed'"
+        if source != "all":
+            posts += " AND source = ?"
+    if source not in ("all", "personas"):
+        gen_where += " AND 0"
+    args += [source] if posts and source != "all" else []
     try:
         with db() as conn:
             keys = conn.execute(f"SELECT 'gen' AS k, CAST(g.id AS TEXT) AS key, f.at AS at FROM feedback f JOIN generations g"
@@ -1982,6 +1995,8 @@ class Handler(BaseHTTPRequestHandler):
             persona = q.get("persona", "")
             if persona and not HANDLE.match(persona):
                 return self.send(400, {"error": "bad persona"})
+            if q.get("view") == "liked":
+                return self.send(200, saved_view(q.get("medium", "all"), offset, q.get("source", "all")))
             return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset, persona))
         if path == "/api/personas":
             return self.send(200, personas())

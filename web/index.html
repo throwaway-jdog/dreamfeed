@@ -279,6 +279,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .fposts #f-mode { margin: 10px 14px 0; }
 .saved-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 14px 0; }
 .saved-bar .secondary { width: auto; padding: 0 14px; }
+.saved-bar #saved-src { flex: 1 1 100%; }
 .br-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin: 10px 14px 0; }
 .br-form[hidden] { display: none; }
 .br-form .secondary { width: auto; padding: 0 14px; }
@@ -845,6 +846,10 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
     </form>
   </div>
   <div class="saved-bar" id="saved-bar" hidden>
+    <div class="seg" id="saved-src" role="group" aria-label="Show">
+      <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="personas" aria-pressed="false">Personas</button>
+      <button type="button" data-s="x" aria-pressed="false">X</button><button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
+      <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
     <button type="button" class="secondary" id="saved-import">Bring in what you saved on X and Reddit</button>
     <small class="note" id="saved-note"></small></div>
   <div class="timeline" id="grid"></div>
@@ -1060,7 +1065,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
 const LABEL = { anime: "Anime", furry: "Furry" };
 const $ = id => document.getElementById(id);
 const grid = $("grid"), tpl = $("card-tpl");
-const state = { view: "feed", medium: "all", persona: "", people: [], items: [], offset: 0, more: true, loading: false, idx: -1, gen: 0 };
+const state = { view: "feed", medium: "all", savedSource: "all", persona: "", people: [], items: [], offset: 0, more: true, loading: false, idx: -1, gen: 0 };
 
 async function api(url, body) {
   const opts = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
@@ -1135,6 +1140,7 @@ async function loadMore() {
   const gen = state.gen;
   try {
     const q = new URLSearchParams({ view: state.view, medium: state.medium, offset: state.offset });
+    if (state.view === "liked") q.set("source", state.savedSource);
     if (state.persona && state.view === "feed") q.set("persona", state.persona);
     const data = await api(`api/feed?${q}`);
     if (gen !== state.gen) return;
@@ -1492,6 +1498,11 @@ async function importStatus(started) {
   if (d.running) importStatus.was = true;
 }
 $("saved-import").onclick = () => importStatus(true);
+document.querySelectorAll("#saved-src button").forEach(b => b.onclick = () => {
+  state.savedSource = b.dataset.s;
+  document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  reset();
+});
 $("menu-btn").onclick = e => {
   e.stopPropagation(); const s = $("sheet"); s.hidden = !s.hidden;
   $("menu-btn").setAttribute("aria-expanded", String(!s.hidden));
