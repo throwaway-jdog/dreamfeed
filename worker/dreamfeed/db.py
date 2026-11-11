@@ -85,17 +85,7 @@ CREATE TABLE IF NOT EXISTS links (            -- a Chaturbate room's accounts el
     state       TEXT NOT NULL,               -- bio (their own Chaturbate bio links it) | yours | removed
     PRIMARY KEY (room, source, handle)
 );
-CREATE TABLE IF NOT EXISTS previews (         -- an X account's recent media, fetched on request (Discover)
-    id          INTEGER PRIMARY KEY,
-    source      TEXT NOT NULL,               -- x
-    handle      TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | failed
-    error       TEXT,
-    kept        INTEGER,
-    dropped     INTEGER,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS x_users (          -- X accounts seen in posts: who they are, for posts and profiles
+CREATE TABLE IF NOT EXISTS x_users (          -- X accounts seen in the live Feed: who they are, for profiles
     handle      TEXT PRIMARY KEY COLLATE NOCASE,
     nick        TEXT,
     bio         TEXT,
@@ -103,11 +93,11 @@ CREATE TABLE IF NOT EXISTS x_users (          -- X accounts seen in posts: who t
     followers   INTEGER,
     following   INTEGER,
     posts       INTEGER,
-    image_url   TEXT,                        -- their profile picture there
-    avatar      INTEGER NOT NULL DEFAULT 0,  -- 1: saved (passed the checks), -1: failed them
+    image_url   TEXT,                        -- their profile picture there (shown from X)
+    avatar      INTEGER NOT NULL DEFAULT 0,  -- unused since the live Feed
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS browses (          -- a subreddit looked at now (Browse now), checked post by post
+CREATE TABLE IF NOT EXISTS browses (          -- subreddits looked at with Browse now (its recent ones)
     id          INTEGER PRIMARY KEY,
     sub         TEXT NOT NULL,
     sort        TEXT NOT NULL,               -- hot | new | top (of the day)
@@ -119,20 +109,6 @@ CREATE TABLE IF NOT EXISTS browses (          -- a subreddit looked at now (Brow
     dropped     INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS browse_posts (
-    browse      INTEGER NOT NULL,
-    post        INTEGER NOT NULL,            -- follow_posts.id
-    n           INTEGER NOT NULL,            -- its place in the listing
-    PRIMARY KEY (browse, post)
-);
-CREATE TABLE IF NOT EXISTS save_actions (     -- save or unsave a Reddit post on Reddit, tapped in dreamfeed
-    id          INTEGER PRIMARY KEY,
-    post        INTEGER NOT NULL,            -- follow_posts.id
-    action      TEXT NOT NULL,               -- save | unsave
-    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | done | failed
-    error       TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
 CREATE TABLE IF NOT EXISTS cb_actions (       -- follow or unfollow a room on Chaturbate, tapped in dreamfeed
     id          INTEGER PRIMARY KEY,
     room        TEXT NOT NULL,
@@ -141,20 +117,20 @@ CREATE TABLE IF NOT EXISTS cb_actions (       -- follow or unfollow a room on Ch
     error       TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS follow_posts (  -- posts from X and Reddit feeds that passed the checks
-    id          INTEGER PRIMARY KEY,
-    source      TEXT NOT NULL,               -- x | reddit
-    post_id     TEXT NOT NULL,               -- the post's id there
-    author      TEXT NOT NULL,
-    place       TEXT,                        -- the subreddit
-    text        TEXT,
-    link        TEXT,
-    posted_at   TEXT,                        -- UTC
-    media       TEXT NOT NULL,               -- JSON: [{"file", "kind", "poster"}], in data/generated/follow/media
-    added_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (source, post_id)
+CREATE TABLE IF NOT EXISTS saved_posts (     -- posts saved in the live Feed (Saved), as they were shown
+    id          TEXT PRIMARY KEY,            -- x:<id> | reddit:<id> | e621:<id>
+    source      TEXT NOT NULL,
+    data        TEXT NOT NULL,               -- JSON: the post (its media are the sites' own addresses)
+    saved_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS follow_posts_time ON follow_posts(posted_at);
+CREATE TABLE IF NOT EXISTS x_seen (          -- X accounts in your timelines, for Discover (kept X_SEEN_DAYS)
+    handle      TEXT NOT NULL COLLATE NOCASE,
+    kind        TEXT NOT NULL,               -- following (posts in your Following) | foryou | mention (named by them)
+    post        TEXT NOT NULL,               -- the post's id there
+    by          TEXT,                        -- who mentioned them
+    at          TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (handle, kind, post)
+);
 """
 
 
@@ -166,16 +142,9 @@ def connect(path: Path) -> sqlite3.Connection:
     # Bookmarks were removed in v2: personas replaced them as the source of posts.
     conn.executescript("DROP TABLE IF EXISTS bookmark_tags; DROP TABLE IF EXISTS bookmarks;"
                        " DROP TABLE IF EXISTS dropped;")
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(follow_posts)")}
-    if "mentions" not in cols:    # added with Discover
-        conn.execute("ALTER TABLE follow_posts ADD COLUMN mentions TEXT")                       # JSON: X handles it names
-        conn.execute("ALTER TABLE follow_posts ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0")   # 1: a preview, not your feed
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(follow_posts)")}
-    if "via" not in cols:         # added with X's For you: foryou | preview (discovered ones)
-        conn.execute("ALTER TABLE follow_posts ADD COLUMN via TEXT")
-        conn.execute("UPDATE follow_posts SET via = 'preview' WHERE discovered = 1")
-    if "saved" not in cols:       # saved posts are kept past KEEP_DAYS
-        conn.execute("ALTER TABLE follow_posts ADD COLUMN saved INTEGER NOT NULL DEFAULT 0")
+    # The Feed went live: posts aren't downloaded or checked here any more.
+    conn.executescript("DROP TABLE IF EXISTS browse_posts; DROP TABLE IF EXISTS previews;"
+                       " DROP TABLE IF EXISTS save_actions; DROP TABLE IF EXISTS follow_posts;")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(follows)")}
     if "bio_at" not in cols:      # when the room's bio was last read for its links
         conn.execute("ALTER TABLE follows ADD COLUMN bio_at TEXT")

@@ -1,12 +1,14 @@
 FROM python:3.12-alpine
 WORKDIR /app
+# The live Feed reads X with gallery-dl (its metadata only: nothing is downloaded).
+RUN pip install --no-cache-dir gallery-dl==1.32.19
 COPY app.py index.html /app/
 COPY vendor /app/vendor
 # Shared sign-in library (the formlogin build context, see docker-compose.yml).
 COPY --from=formlogin formlogin /app/formlogin
 # The worker's persona and safety rules, so the persona editor checks edits exactly as the
 # worker will (the worker build context). Pure Python, no other worker code.
-COPY --from=worker dreamfeed/personas.py dreamfeed/safety.py dreamfeed/acts.py dreamfeed/e621.py dreamfeed/cbvideos.py dreamfeed/cbprofile.py /app/dreamfeed/
+COPY --from=worker dreamfeed/personas.py dreamfeed/safety.py dreamfeed/acts.py dreamfeed/e621.py dreamfeed/cbvideos.py dreamfeed/cbprofile.py dreamfeed/livefeeds.py /app/dreamfeed/
 RUN touch /app/dreamfeed/__init__.py
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp
 CMD ["python", "/app/app.py"]

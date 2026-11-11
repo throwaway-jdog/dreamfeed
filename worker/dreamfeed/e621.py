@@ -1,10 +1,9 @@
-"""e621 (e621.net), through its public API: tag searches for the Feed (followfeeds) and pools,
-its comics, for the Comics page's search (the web app). Standard library only, so the web app
-uses it too.
+"""e621 (e621.net), through its public API: tag searches for the live Feed (livefeeds) and
+pools, its comics, for the Comics page's search (the web app). Standard library only, so the
+web app uses it too.
 
-Before anything is downloaded or shown, a post with a tag dreamfeed never allows is left out
-(NEVER: the youth tags, feral, bestiality); searches also ask e621 to leave those out
-(SEARCH_NOT). What's downloaded then goes through the image checks like every feed's.
+A post with a tag dreamfeed never allows is left out (NEVER: the youth tags, feral,
+bestiality); searches also ask e621 to leave those out (SEARCH_NOT).
 E621_USERNAME (optional) puts your name in the user agent, as e621 asks.
 """
 import datetime as dt

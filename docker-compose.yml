@@ -177,32 +177,20 @@ services:
     restart: unless-stopped
     user: "${PUID}:${PGID}"
     command: ["python", "-m", "dreamfeed", "follow"]
-    # RAM cap with no swap: the checks' models need about 5 GB while the feeds are read.
+    # RAM cap with no swap (highlights' ffmpeg is the most it does).
     mem_limit: ${FOLLOW_MEM_LIMIT:?set FOLLOW_MEM_LIMIT in .env}
     memswap_limit: ${FOLLOW_MEM_LIMIT}
     environment:
       DATA_DIR: /data
-      MODELS_DIR: /models
-      HF_HOME: /models/hf
-      HF_HUB_OFFLINE: "1"                     # the checks' models are already in ./models
-      AGECHECK_URL: http://dreamfeed-agecheck:8080
-      FOLLOW_THREADS: ${FOLLOW_THREADS:?set FOLLOW_THREADS in .env}   # CPU threads for the checks
-      # Your own Reddit app ("personal use script"), for galleries and Reddit's videos; empty:
-      # Reddit's public RSS feeds instead. REDDIT_USERNAME names you in its user agent.
+      FOLLOW_THREADS: ${FOLLOW_THREADS:?set FOLLOW_THREADS in .env}   # CPU threads for highlights
+      # Your own Reddit app, only for `follow reddit-login` here (README: Feed); the web app reads Reddit.
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
       REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET-}
       REDDIT_USERNAME: ${REDDIT_USERNAME-}
-      # Signed in as you (README: Following): your subscriptions are what's read.
-      REDDIT_REFRESH_TOKEN: ${REDDIT_REFRESH_TOKEN-}
-      E621_USERNAME: ${E621_USERNAME-}        # optional: named in e621's user agent, as e621 asks
       CB_VIDEOS: /videos/cb                    # your own videos of the rooms (posters, highlights)
       TZ: ${TZ:?set TZ in .env}
     volumes:
-      - ./data:/data                          # feed.db; thumbnails and posts in data/generated/follow
-      - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora:ro   # only to see when training runs
-      - ./models:/models:ro
-      # X cookies (the same export the worker uses for styles), for your Following timeline.
-      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/x-cookies.txt:ro
+      - ./data:/data                          # feed.db; room thumbnails and video posters in data/generated/follow
       # Your Chaturbate cookies (Netscape cookies.txt) for the rooms you follow. Read on each
       # look, so a fresh export copied over it (cp, not mv: a file moved in isn't seen until a
       # restart) needs no restart.
@@ -210,7 +198,6 @@ services:
       # Your own videos of the rooms you follow, a folder per room (README: Live). Written only
       # for highlights (<room>/highlights/) and deletes (into .trash/, emptied after a week).
       - ${CB_VIDEOS_DIR:?set CB_VIDEOS_DIR in .env}:/videos/cb
-    depends_on: [agecheck]
     logging:
       options: { max-size: 10m, max-file: "3" }
 
@@ -235,8 +222,15 @@ services:
       GENERATE_WINDOW: ${GENERATE_WINDOW:?set GENERATE_WINDOW in .env}   # shown on the dashboard
       TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
-      E621_USERNAME: ${E621_USERNAME-}        # optional, for the Comics page's e621 search
+      E621_USERNAME: ${E621_USERNAME-}        # optional: named in e621's user agent (the Feed, the Comics search)
       CB_VIDEOS: /videos/cb                    # your own videos of the rooms, on their Live profiles
+      # The live Feed (README: Feed): X with your cookies, Reddit as you (your own Reddit app and
+      # the refresh token from `follow reddit-login`). Without them, that site is left out.
+      X_COOKIES: /config/x-cookies.txt
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET-}
+      REDDIT_USERNAME: ${REDDIT_USERNAME-}
+      REDDIT_REFRESH_TOKEN: ${REDDIT_REFRESH_TOKEN-}
       DREAMFEED_PASSWORD_HASH: ${DREAMFEED_PASSWORD_HASH:-}
     volumes:
       - ./data:/data        # feed.db (likes/skips), generated images, liked copies, personas.json
@@ -246,6 +240,8 @@ services:
       # Your own videos of the rooms you follow, a folder per room (README: Live). Written only
       # for highlights (<room>/highlights/) and deletes (into .trash/, emptied after a week).
       - ${CB_VIDEOS_DIR:?set CB_VIDEOS_DIR in .env}:/videos/cb
+      # X cookies (the same export the worker uses for styles), for your X timelines in the Feed.
+      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/x-cookies.txt:ro
     networks: [default, apps]
     logging:
       options: { max-size: 10m, max-file: "3" }

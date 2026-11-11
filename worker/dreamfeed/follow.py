@@ -1,7 +1,6 @@
 """Who you follow on other sites, in one place: `python -m dreamfeed follow` (the follow service).
 
-Posts from X and Reddit: see followfeeds.py (`follow feeds`, run from here every FEEDS_EVERY
-seconds, but not while a job, a nightly run or training is going: its checks need a few GB).
+Posts from X, Reddit and e621 are read live by the web app (livefeeds.py), not here.
 
 Every POLL seconds it asks Chaturbate which of the rooms you follow are live (signed in with
 your cookies, the CHATURBATE_COOKIES_FILE mount) and keeps, in feed.db:
@@ -12,12 +11,9 @@ Live tab plays a room in dreamfeed's own player; nothing of the stream is kept. 
 of the rooms (CB_VIDEOS, see cbvideos.py) get their posters made here too, their highlights
 cut (cbhighlights.py, one at a time, started within TICK seconds of being asked for) and the
 trash emptied. It also reads a few rooms' bios each round (each once a day) for the X and
-Reddit accounts they link for free (cbprofile.py: one profile across sites), and fetches the
-previews asked for in Discover (followfeeds.preview), never alongside the feeds: both need the
-checks' models. Follows and unfollows tapped in dreamfeed are sent to Chaturbate from here
-(signed in as you, one at a time, within TICK seconds), and the list here changes with them;
-so are Reddit saves (followfeeds.reddit_saves). Browse now (followfeeds.browse) starts within
-TICK seconds too: the feeds make way for it between posts.
+Reddit accounts they link for free (cbprofile.py: one profile across sites). Follows and
+unfollows tapped in dreamfeed are sent to Chaturbate from here (signed in as you, one at a
+time, within TICK seconds), and the list here changes with them.
 
 These are real people: nothing here goes to training, styles, comics or generation. A room
 Chaturbate doesn't list as age verified is left out.
@@ -42,10 +38,6 @@ POLL = 120                   # seconds between looks
 TICK = 5                     # seconds between checks for highlight requests
 HIGHLIGHT_LIMIT = 6 * 3600   # a cut taking longer than this is stopped
 BIOS_PER_ROUND = 3           # rooms whose bios are read each round (each once a day)
-PREVIEW_LIMIT = 1800         # a preview taking longer than this is stopped
-BROWSE_LIMIT = 1200          # so is a browse
-FEEDS_EVERY = 900            # seconds between reading the X and Reddit feeds
-TRAINING_STALE = 8 * 3600    # as the worker's: a training lock older than this is left over
 EVERYONE = 3600              # seconds between listing every room followed (offline ones too)
 GAP = 600                    # live again within this many seconds: the same session
 PAGE = 90                    # rooms per request (the site's own page size)
@@ -158,32 +150,12 @@ def chaturbate(conn, thumbs: Path, everyone: bool) -> str:
     return f"{len(verified)} live" + (f", {hidden} not age verified (hidden)" if hidden else "")
 
 
-def busy(conn, data: Path) -> bool:
-    """A job, a nightly run or training is going (the feeds' checks wait for it)."""
-    try:
-        if time.time() - (data / "lora" / ".training").stat().st_mtime < TRAINING_STALE:
-            return True
-    except OSError:
-        pass
-    return bool(conn.execute("SELECT (SELECT count(*) FROM jobs WHERE status = 'running')"
-                             " + (SELECT count(*) FROM runs WHERE status = 'running')").fetchone()[0])
-
-
 def main(argv: list[str]) -> None:
-    if argv == ["feeds"]:
-        from .followfeeds import main as feeds
-        return feeds()
     if argv[:1] == ["highlight"] and len(argv) == 2:
         from .cbhighlights import run
         return run(int(argv[1]))
-    if argv[:1] == ["browse"] and len(argv) == 2:
-        from .followfeeds import browse
-        return browse(int(argv[1]))
-    if argv[:1] == ["preview"] and len(argv) == 2:
-        from .followfeeds import preview
-        return preview(int(argv[1]))
     if argv[:1] == ["reddit-login"]:
-        from .followfeeds import login
+        from .redditlogin import login
         return login(argv[1:])
     data = os.environ.get("DATA_DIR", "").strip()
     if not data:
@@ -193,15 +165,10 @@ def main(argv: list[str]) -> None:
     folder = Path(data) / "generated" / "follow"
     folder.mkdir(parents=True, exist_ok=True)
     status = folder / "status.json"
-    last_everyone = last_feeds = 0.0
-    feeds = None           # the feeds' child while it runs (the live rooms keep being looked at)
+    last_everyone = 0.0
     cutting = None         # the highlights' child: (process, job, started)
-    previewing = None      # the previews' child: (process, job, started)
-    browsing = None        # Browse now's child: (process, job, started)
     with conn:             # cut off by a restart: again from the start
         conn.execute("UPDATE highlights SET status = 'queued', progress = NULL WHERE status = 'running'")
-        conn.execute("UPDATE previews SET status = 'queued' WHERE status = 'running'")
-        conn.execute("UPDATE browses SET status = 'queued' WHERE status = 'running'")
     print("follow: watching the rooms you follow on Chaturbate", flush=True)
     next_look = 0.0
     while True:
@@ -210,18 +177,6 @@ def main(argv: list[str]) -> None:
             _cb_actions(conn)
         except SignedOut as e:
             print(f"follow: {e}", flush=True)
-        if conn.execute("SELECT 1 FROM save_actions WHERE status = 'queued' LIMIT 1").fetchone():
-            from .followfeeds import reddit_saves
-            reddit_saves(conn)
-        if feeds is not None and feeds.poll() is not None:
-            if feeds.returncode:
-                print(f"follow: reading the feeds failed (exit {feeds.returncode}), trying again next time", flush=True)
-            feeds = None
-        # A profile's posts and Browse now don't wait for the feeds (they make way between posts),
-        # only for jobs and training; one at a time (the checks' models: followfeeds.vision_lock).
-        free = not busy(conn, Path(data))
-        browsing = _child(conn, browsing, "browses", "browse", BROWSE_LIMIT, start=free)
-        previewing = _child(conn, previewing, "previews", "preview", PREVIEW_LIMIT, start=free and browsing is None)
         if time.time() < next_look:
             time.sleep(TICK)
             continue
@@ -250,17 +205,10 @@ def main(argv: list[str]) -> None:
         tmp = status.with_suffix(".tmp")
         tmp.write_text(json.dumps(st))
         tmp.replace(status)
-        if feeds is not None and feeds.poll() is None and time.time() - last_feeds > 3600:
-            feeds.kill()
-            print("follow: reading the feeds took over an hour; stopped", flush=True)
         try:
             _bios(conn)
         except (OSError, ValueError) as e:
             print(f"follow: couldn't read a bio ({e})", flush=True)
-        if feeds is None and previewing is None and time.time() - last_feeds >= FEEDS_EVERY and not busy(conn, Path(data)):
-            import subprocess
-            last_feeds = time.time()
-            feeds = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", "feeds"])
 
 
 def _cb_actions(conn) -> None:
@@ -316,31 +264,6 @@ def _bios(conn) -> None:
         with conn:
             cbprofile.save_links(conn, name, links)
             conn.execute("UPDATE follows SET bio_at = datetime('now') WHERE source = 'chaturbate' AND name = ?", (name,))
-
-
-def _child(conn, running, table: str, command: str, limit: float, start: bool):
-    """Starts the next queued request of table (as `follow COMMAND <id>`) when start and none is
-    going; notices when one ends or overstays limit."""
-    import subprocess
-    if running:
-        proc, job, started = running
-        if proc.poll() is None:
-            if time.time() - started < limit:
-                return running
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-        with conn:
-            conn.execute(f"UPDATE {table} SET status = 'failed', error = coalesce(error, 'stopped (took too long or crashed)')"
-                         " WHERE id = ? AND status IN ('queued', 'running')", (job,))
-    if not start:
-        return None
-    row = conn.execute(f"SELECT id FROM {table} WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
-    if not row:
-        return None
-    with conn:
-        conn.execute(f"UPDATE {table} SET status = 'running' WHERE id = ?", (row[0],))
-    proc = subprocess.Popen([sys.executable, "-m", "dreamfeed", "follow", command, str(row[0])], start_new_session=True)
-    return proc, row[0], time.time()
 
 
 def _highlights(conn, cutting):

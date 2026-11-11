@@ -15,9 +15,9 @@ GET  /api/live/videos    ?name=ROOM  your own videos of a room you follow (CB_VI
 GET  /cb-videos/<room>/<path>   one of them;  /cb-videos/poster/<key>.jpg  its poster
 GET  /api/discover/cb   ?mode=foryou|top|search&q=WORDS&gender=f|m|c|t&offset=N  live rooms you don't follow
 GET  /api/discover/x    X accounts you might like: linked from your rooms, mentioned by your follows
-GET  /api/reddit/browse  ?id=N  a Browse now: its posts so far (checked) and how far it's got
+GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subreddit as it is now (live)
 GET  /api/reddit/browses   the last few subreddits browsed
-GET  /follow/avatar/x/<handle>.jpg  an X account's profile picture (checked like posts)
+GET  /api/person/posts  ?source=x|reddit&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME  one profile across sites
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
@@ -26,8 +26,8 @@ GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
 POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
                         {"e621": {"searches": ["tag tag", ...], "top": N}} change them
-GET  /api/following/posts  ?mode=following|foryou|saved&source=all|x|reddit|e621&offset=N  checked posts from your X and Reddit feeds, newest first
-GET  /follow/media/<source>/<post>/<file>  a post's picture, video or video poster
+GET  /api/following/posts  ?mode=following|foryou|saved&source=all|x|reddit|e621&cursor=C  the Feed, live from the sites
+                        (its pictures and videos load from them), or what you saved
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
 POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
 POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
@@ -46,14 +46,13 @@ POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of 
 POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
 POST /api/live/restore  {"undo": token} put it back
 POST /api/profile/link  {"room", "source": "x"|"reddit", "handle", "remove": bool} link or unlink an account
-POST /api/reddit/browse {"sub": "r/name", "sort": "hot"|"new"|"top"} look at a subreddit now ({"id"})
-POST /api/following/save {"id": N, "save": bool} keep a post in Saved (and save it on Reddit, for Reddit's)
+POST /api/following/save {"post": {...}, "save": bool} keep a post in Saved (and save it on Reddit, for Reddit's)
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
-POST /api/discover/preview {"handle": H} fetch an X account's recent media (checked) for its profile
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
                         {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
 (POSTs are JSON only.)
 """
+import base64
 import json
 import os
 import re
@@ -69,7 +68,7 @@ from pathlib import Path
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, cbprofile, cbvideos, e621, personas as people, safety   # the worker's own rules (see Dockerfile)
+from dreamfeed import acts, cbprofile, cbvideos, e621, livefeeds, personas as people, safety   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -94,7 +93,6 @@ PAGE_SIZE = 30
 MEDIUMS = ("anime", "furry")
 HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 FOLLOW = GENERATED / "follow"
-FOLLOW_MEDIA = FOLLOW / "media"
 FEED_SOURCES = ("x", "reddit", "e621")
 FEED_MODES = ("following", "foryou", "saved")   # your follows; X's For you and Reddit's Best; what you saved
 LIVE_DAYS = 28         # live times this far back give a room's usual hours
@@ -103,8 +101,13 @@ ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
 # video servers (the Live tab's player; hls.js, served from here, plays it through blob: URLs).
 LIVE_VIDEO = "https://*.live.mmcdn.com"
 LIVE_INFO = "https://chaturbate.com/api/chatvideocontext/{}/"
-CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-       f"media-src 'self' blob: {LIVE_VIDEO}; connect-src 'self' {LIVE_VIDEO}; worker-src 'self' blob:; "
+# And the live Feed's pictures and videos, straight from the sites (livefeeds; no referrer is sent).
+FEED_IMAGES = ("https://pbs.twimg.com https://i.redd.it https://preview.redd.it https://external-preview.redd.it"
+               " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
+FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it https://i.imgur.com"
+              " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
+CSP = (f"default-src 'self'; img-src 'self' data: {FEED_IMAGES}; style-src 'self' 'unsafe-inline'; "
+       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it; worker-src 'self' blob:; "
        "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -121,6 +124,11 @@ def db() -> sqlite3.Connection:
     conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY, params TEXT NOT NULL, status TEXT NOT NULL, night TEXT, message TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT)""")
+    # and these, so the live Feed's Saved and Discover work before it too (as in the worker's db.py)
+    conn.execute("""CREATE TABLE IF NOT EXISTS saved_posts (id TEXT PRIMARY KEY, source TEXT NOT NULL, data TEXT NOT NULL,
+        saved_at TEXT NOT NULL DEFAULT (datetime('now')))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS x_seen (handle TEXT NOT NULL COLLATE NOCASE, kind TEXT NOT NULL, post TEXT NOT NULL,
+        by TEXT, at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (handle, kind, post))""")
     return conn
 
 
@@ -426,14 +434,16 @@ MAX_FOLLOW = 50
 REDDIT_NAME = re.compile(r"^(?:https?://(?:www\.|old\.)?reddit\.com)?/?(?:(r|u|user)/)?([A-Za-z0-9_-]{2,30})/?$")
 
 
-def follow_settings() -> dict:
-    """The Dashboard's list and top-posts setting, and the subscriptions the follow service last
-    found when signed in to Reddit as you (empty if it isn't)."""
+def follow_settings(subscribed: bool = True) -> dict:
+    """The Dashboard's subreddits and e621 searches, and the subscriptions you have on Reddit
+    (when signed in as you; asked of Reddit, kept 10 minutes)."""
     d = read_json(FOLLOWING).get("reddit") or {}
-    try:
-        subs = json.loads((FOLLOW / "reddit-subs.json").read_text())
-    except (OSError, ValueError):
-        subs = []
+    subs = []
+    if subscribed and livefeeds.reddit_ready():
+        try:
+            subs = livefeeds.subscriptions()
+        except (LookupError, OSError, ValueError):
+            pass
     e = read_json(FOLLOWING).get("e621") or {}
     return {"reddit": {"follow": d.get("follow") or [], "top": d.get("top") or 10,
                        "subscribed": [s for s in subs if isinstance(s, str)] if isinstance(subs, list) else []},
@@ -480,114 +490,158 @@ def save_follow_settings(req: dict) -> dict:
     return follow_settings()
 
 
-def follow_posts(source: str, offset: int, mode: str = "following") -> dict:
-    if source not in ("all", *FEED_SOURCES) or mode not in FEED_MODES:
-        raise ValueError("bad source")
-    where = {"following": "discovered = 0", "foryou": "via = 'foryou'", "saved": "saved = 1"}[mode]
-    args = []
-    if source != "all":
-        where += " AND source = ?"
-        args.append(source)
-    order = "id DESC" if mode == "saved" else "posted_at DESC, id DESC"
+X_SEEN_DAYS = 30       # X accounts in your timelines are remembered this long (Discover)
+
+
+def _cursor(raw: str) -> dict | None:
+    if not raw:
+        return None
+    try:
+        c = json.loads(base64.urlsafe_b64decode(raw.encode() + b"==").decode())
+    except (ValueError, UnicodeDecodeError) as e:
+        raise ValueError("bad cursor") from e
+    if not isinstance(c, dict):
+        raise ValueError("bad cursor")
+    return c
+
+
+def _seen(posts: list[dict], users: list[dict]) -> None:
+    """Remember who's in your X timelines (Discover) and who they are (profiles)."""
+    rows, mentions = [], []
+    for p in posts:
+        if p["source"] != "x" or p.get("via") not in ("following", "foryou"):
+            continue
+        tid = p["id"].split(":", 1)[1]
+        rows.append((p["author"], p["via"], tid, None))
+        if p["via"] == "following":
+            mentions += [(h, "mention", tid, p["author"]) for h in p.get("mentions") or []]
     try:
         with db() as conn:
-            rows = conn.execute(f"SELECT * FROM follow_posts WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
+            conn.executemany("INSERT OR IGNORE INTO x_seen(handle, kind, post, by) VALUES (?, ?, ?, ?)", rows + mentions)
+            for u in users:
+                if u.get("handle"):
+                    conn.execute("INSERT INTO x_users(handle, nick, bio, location, followers, following, posts, image_url, updated_at)"
+                                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) ON CONFLICT(handle) DO UPDATE SET"
+                                 " nick = excluded.nick, bio = excluded.bio, location = excluded.location, followers = excluded.followers,"
+                                 " following = excluded.following, posts = excluded.posts, image_url = excluded.image_url,"
+                                 " updated_at = excluded.updated_at",
+                                 (u["handle"], u.get("nick"), u.get("bio"), u.get("location"), u.get("followers"),
+                                  u.get("following"), u.get("posts"), u.get("image_url")))
+            conn.execute("DELETE FROM x_seen WHERE at < datetime('now', ?)", (f"-{X_SEEN_DAYS} days",))
+    except sqlite3.OperationalError:     # the follow service hasn't made the tables yet
+        pass
+
+
+def _mark_saved(posts: list[dict]) -> list[dict]:
+    if not posts:
+        return posts
+    try:
+        with db() as conn:
+            ids = {r[0] for r in conn.execute(f"SELECT id FROM saved_posts WHERE id IN ({','.join('?' * len(posts))})",
+                                              [p["id"] for p in posts])}
+    except sqlite3.OperationalError:
+        ids = set()
+    for p in posts:
+        p["saved"] = p["id"] in ids or (p["source"] == "reddit" and p.get("saved", False))
+    return posts
+
+
+def follow_posts(source: str, cursor: str, mode: str = "following") -> dict:
+    """A page of the Feed, live from the sites (livefeeds), or what you saved."""
+    if source not in ("all", *FEED_SOURCES) or mode not in FEED_MODES:
+        raise ValueError("bad source")
+    if mode == "saved":
+        offset = int(cursor or 0)
+        with db() as conn:
+            where, args = ("", []) if source == "all" else (" WHERE source = ?", [source])
+            rows = conn.execute(f"SELECT data FROM saved_posts{where} ORDER BY saved_at DESC LIMIT ? OFFSET ?",
                                 [*args, PAGE_SIZE + 1, offset]).fetchall()
-            posts = [_post_json(r, conn) for r in rows[:PAGE_SIZE]]
-    except sqlite3.OperationalError:    # the follow service hasn't started yet
-        rows, posts = [], []
-    return {"posts": posts, "more": len(rows) > PAGE_SIZE, "feeds": read_json(FOLLOW / "feeds.json")}
+        posts = [{**json.loads(r["data"]), "saved": True} for r in rows[:PAGE_SIZE]]
+        more = len(rows) > PAGE_SIZE
+        return {"posts": posts, "more": more, "cursor": str(offset + len(posts)) if more else None, "errors": {}}
+    s = follow_settings(subscribed=False)
+    d = livefeeds.feed(mode, source, _cursor(cursor), s["reddit"]["follow"], s["e621"]["searches"])
+    _seen(d["posts"], d["users"])
+    nxt = base64.urlsafe_b64encode(json.dumps(d["cursor"]).encode()).decode().rstrip("=") if d["more"] else None
+    return {"posts": _mark_saved(d["posts"]), "more": d["more"], "cursor": nxt, "errors": d["errors"]}
 
 
 SUBREDDIT = re.compile(r"^(?:/?r/)?([A-Za-z0-9_]{2,21})/?$")
-BROWSE_SORTS = ("hot", "new", "top")
+BROWSE_SORTS = {"hot": "/hot", "new": "/new", "top": "/top?t=day"}
 
 
-def start_browse(req: dict) -> dict:
-    """{"sub", "sort": hot|new|top}: look at a subreddit now; its posts show as they pass the
-    checks (the follow service). Asked again within 5 minutes, the same browse is shown."""
-    m = SUBREDDIT.match(str(req.get("sub", "")).strip())
-    sort = str(req.get("sort", "hot"))
+def browse(sub: str, sort: str, after: str) -> dict:
+    """Browse now: a subreddit as it is now, REDDIT_PAGE posts at a time (live)."""
+    m = SUBREDDIT.match(sub.strip())
     if not m or sort not in BROWSE_SORTS:
         raise ValueError("a subreddit's name, like r/yiff")
     sub = m.group(1)
-    words = sub.replace("_", " ").lower()
-    if (safety.request_blocked(words) or safety.story_blocked(words)
-            or any(w in words for w in e621.NEVER if len(w) > 3)):
+    if livefeeds.place_blocked(sub):
         raise ValueError("not a subreddit dreamfeed reads")
-    with db() as conn:
-        hit = conn.execute("SELECT id FROM browses WHERE lower(sub) = lower(?) AND sort = ? AND (status IN ('queued', 'running')"
-                           " OR (status = 'done' AND created_at >= datetime('now', '-5 minutes'))) ORDER BY id DESC LIMIT 1",
-                           (sub, sort)).fetchone()
-        if hit:
-            return {"id": hit["id"]}
-        return {"id": conn.execute("INSERT INTO browses(sub, sort) VALUES (?, ?)", (sub, sort)).lastrowid}
-
-
-def browse_status(job: int) -> dict:
-    with db() as conn:
-        b = conn.execute("SELECT * FROM browses WHERE id = ?", (job,)).fetchone()
-        if not b:
-            raise LookupError("no such browse")
-        rows = conn.execute("SELECT p.* FROM browse_posts bp JOIN follow_posts p ON p.id = bp.post WHERE bp.browse = ? ORDER BY bp.n",
-                            (job,)).fetchall()
-        try:                # (as the follow service's busy(): a job, a run or training)
-            training = time.time() - (DATA / "lora" / ".training").stat().st_mtime < 8 * 3600
-        except OSError:
-            training = False
-        waiting = b["status"] == "queued" and (training or bool(conn.execute(
-            "SELECT 1 FROM jobs WHERE status = 'running' UNION SELECT 1 FROM runs WHERE status = 'running'").fetchone()))
-        return {"id": b["id"], "sub": b["sub"], "sort": b["sort"], "status": b["status"], "error": b["error"],
-                "total": b["total"], "checked": b["checked"], "kept": b["kept"], "dropped": b["dropped"], "waiting": waiting,
-                "posts": [_post_json(r, conn) for r in rows]}
+    posts, nxt = livefeeds.reddit_page(f"/r/{sub}{BROWSE_SORTS[sort]}", after or None, "browse")
+    if not after:
+        with db() as conn:
+            conn.execute("DELETE FROM browses WHERE lower(sub) = lower(?) AND sort = ?", (sub, sort))
+            conn.execute("INSERT INTO browses(sub, sort, status) VALUES (?, ?, 'done')", (sub, sort))
+            conn.execute("DELETE FROM browses WHERE id NOT IN (SELECT id FROM browses ORDER BY id DESC LIMIT 30)")
+    return {"sub": sub, "sort": sort, "posts": _mark_saved(posts), "after": nxt}
 
 
 def recent_browses() -> dict:
     with db() as conn:
-        rows = conn.execute("SELECT sub, sort, max(id) AS id, max(created_at) AS at FROM browses WHERE status != 'failed'"
-                            " GROUP BY lower(sub), sort ORDER BY id DESC LIMIT 8").fetchall()
+        rows = conn.execute("SELECT sub, sort, id, created_at AS at FROM browses WHERE status != 'failed'"
+                            " ORDER BY id DESC LIMIT 8").fetchall()
     return {"browses": [dict(r) for r in rows]}
 
 
+def person_posts(source: str, handle: str, cursor: str) -> dict:
+    """An X account's latest media or a Reddit user's latest posts, live (their profile)."""
+    if source == "x":
+        m = X_HANDLE.match(handle.strip())
+        if not m:
+            raise ValueError("bad X handle")
+        page = livefeeds.x_page("@" + m.group(1), int(cursor or 1))
+        _seen([], [u for u in page["users"] if u["handle"].lower() == m.group(1).lower()])
+        posts = [p for p in page["posts"] if p["author"].lower() == m.group(1).lower()]
+        nxt = page["next"]
+    elif source == "reddit":
+        m = REDDIT_USER.match(handle.strip())
+        if not m:
+            raise ValueError("bad Reddit username")
+        posts, nxt = livefeeds.reddit_page(livefeeds.user_path(m.group(1)), cursor or None, "profile")
+    else:
+        raise ValueError("bad source")
+    return {"posts": _mark_saved(posts), "cursor": str(nxt) if nxt else None}
+
+
 def save_post(req: dict) -> dict:
-    """{"id", "save": bool}: keep a post (past the 14 days) in Saved; a Reddit post is saved on
-    Reddit too (sent by the follow service)."""
-    pid, save = int(req.get("id", 0)), bool(req.get("save"))
-    with db() as conn:
-        r = conn.execute("SELECT source FROM follow_posts WHERE id = ?", (pid,)).fetchone()
-        if not r:
-            raise LookupError("that post is gone")
-        conn.execute("UPDATE follow_posts SET saved = ? WHERE id = ?", (int(save), pid))
-        if r["source"] == "reddit":
-            conn.execute("DELETE FROM save_actions WHERE post = ? AND status = 'queued'", (pid,))
-            conn.execute("INSERT INTO save_actions(post, action) VALUES (?, ?)", (pid, "save" if save else "unsave"))
-    return {"saved": save}
-
-
-AVATARS = FOLLOW / "avatars" / "x"
-
-
-def _avatar(handle: str) -> str | None:
-    """An X account's profile picture (kept only if it passed the checks), or None."""
-    f = AVATARS / f"{handle.lower()}.jpg"
-    try:
-        return f"follow/avatar/x/{handle.lower()}.jpg?t={int(f.stat().st_mtime)}"
-    except OSError:
-        return None
-
-
-def _post_json(r, conn=None) -> dict:
+    """{"post": {...}, "save": bool}: keep a post in Saved (as it was shown); a Reddit post is
+    saved on Reddit too."""
+    p, save = req.get("post") or {}, bool(req.get("save"))
+    pid = str(p.get("id") or "")
+    m = re.fullmatch(r"(x|reddit|e621):([A-Za-z0-9_]{1,30})", pid)
+    if not m or p.get("source") != m.group(1) or not isinstance(p.get("media"), list):
+        raise ValueError("bad post")
     sync = None
-    if conn is not None and r["source"] == "reddit":
-        a = conn.execute("SELECT status, error FROM save_actions WHERE post = ? ORDER BY id DESC LIMIT 1", (r["id"],)).fetchone()
-        sync = dict(a) if a else None
-    return {"id": r["id"], "source": r["source"], "author": r["author"], "place": r["place"], "text": r["text"],
-            "link": r["link"], "posted_at": r["posted_at"], "discovered": bool(r["discovered"]),
-            "saved": bool(r["saved"]), "sync": sync,
-            "avatar": _avatar(r["author"]) if r["source"] == "x" and r["author"] else None,
-            "media": [{"kind": m["kind"], "url": "follow/media/" + m["file"],
-                       "poster": "follow/media/" + m["poster"] if m.get("poster") else None}
-                      for m in json.loads(r["media"])]}
+    if m.group(1) == "reddit":
+        try:
+            livefeeds.reddit_save(m.group(2), save)
+            sync = {"status": "done"}
+        except (LookupError, ValueError) as e:
+            sync = {"status": "failed", "error": str(e)}
+    keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link", "media")}
+    with db() as conn:
+        if save:
+            conn.execute("INSERT OR REPLACE INTO saved_posts(id, source, data) VALUES (?, ?, ?)",
+                         (pid, m.group(1), json.dumps(keep)[:200_000]))
+        else:
+            conn.execute("DELETE FROM saved_posts WHERE id = ?", (pid,))
+    return {"saved": save, "sync": sync}
+
+
+def _xuser(u) -> dict:
+    return {"handle": u["handle"], "nick": u["nick"], "bio": u["bio"], "location": u["location"], "followers": u["followers"],
+            "following": u["following"], "posts": u["posts"], "avatar": u["image_url"] or None}
 
 
 # ---- Discover and profiles (one profile across sites) ----
@@ -725,7 +779,8 @@ def _bio(name: str) -> dict:
 
 def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
     """One profile across sites: a Chaturbate room (or the room an X or Reddit account is linked
-    to), its linked accounts, their posts from your Feed and previews, and your videos of it."""
+    to), its linked accounts (who they are on X) and your videos of it. Their posts are read live
+    (person_posts)."""
     with db() as conn:
         if not room and (x or reddit):
             src, h = ("x", x) if x else ("reddit", reddit)
@@ -734,7 +789,7 @@ def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
             room = hit["room"] if hit else ""
         if room and not ROOM.match(room):
             raise ValueError("bad room")
-        out = {"room": room or None, "followed": False, "bio": {}, "links": [], "posts": [], "previews": {}, "videos": 0}
+        out = {"room": room or None, "followed": False, "bio": {}, "links": [], "xusers": {}, "following_x": [], "videos": 0}
         if room:
             bio = _bio(room)
             if bio.get("links"):
@@ -757,22 +812,13 @@ def profile(room: str = "", x: str = "", reddit: str = "") -> dict:
         xs = {l["handle"].lower() for l in out["links"] if l["source"] == "x"} | ({x.lower()} if x else set())
         rs = {l["handle"].lower() for l in out["links"] if l["source"] == "reddit"} | ({reddit.lower()} if reddit else set())
         out["x"], out["reddit"] = sorted(xs), sorted(rs)
-        if xs or rs:
-            marks = lambda n: ",".join("?" * n)
-            rows = conn.execute(f"SELECT * FROM follow_posts WHERE (source = 'x' AND lower(author) IN ({marks(len(xs)) or 'NULL'}))"
-                                f" OR (source = 'reddit' AND lower(author) IN ({marks(len(rs)) or 'NULL'}))"
-                                " ORDER BY posted_at DESC, id DESC LIMIT 60", [*xs, *rs]).fetchall()
-            out["posts"] = [_post_json(r, conn) for r in rows]
-            following = {a.lower() for (a,) in conn.execute(
-                f"SELECT DISTINCT author FROM follow_posts WHERE source = 'x' AND discovered = 0 AND lower(author) IN ({marks(len(xs)) or 'NULL'})", [*xs])}
-            out["xusers"] = {}
-            for u in conn.execute(f"SELECT * FROM x_users WHERE lower(handle) IN ({marks(len(xs)) or 'NULL'})", [*xs]):
-                out["xusers"][u["handle"].lower()] = {"handle": u["handle"], "nick": u["nick"], "bio": u["bio"], "location": u["location"],
-                                                      "followers": u["followers"], "following": u["following"], "posts": u["posts"],
-                                                      "avatar": _avatar(u["handle"])}
-            for h in xs:
-                p = conn.execute("SELECT status, error, kept, dropped, created_at FROM previews WHERE lower(handle) = ? ORDER BY id DESC LIMIT 1", (h,)).fetchone()
-                out["previews"][h] = {"following": h in following, **(dict(p) if p else {})}
+        if xs:
+            marks = ",".join("?" * len(xs))
+            following = {h.lower() for (h,) in conn.execute(
+                f"SELECT DISTINCT handle FROM x_seen WHERE kind = 'following' AND lower(handle) IN ({marks})", [*xs])}
+            out["following_x"] = sorted(following)
+            out["xusers"] = {u["handle"].lower(): _xuser(u) for u in conn.execute(
+                f"SELECT * FROM x_users WHERE lower(handle) IN ({marks})", [*xs])}
     return out
 
 
@@ -805,69 +851,38 @@ def save_link(req: dict) -> dict:
     return {"ok": True}
 
 
-def queue_preview(req: dict) -> dict:
-    """{"handle"}: fetch an X account's recent media (through the checks) for its profile."""
-    m = X_HANDLE.match(str(req.get("handle", "")).strip())
-    if not m:
-        raise ValueError("bad X handle")
-    with db() as conn:
-        if conn.execute("SELECT 1 FROM previews WHERE lower(handle) = lower(?) AND status IN ('queued', 'running')", (m.group(1),)).fetchone():
-            if req.get("auto"):
-                return {"ok": True}
-            raise ValueError("already being fetched")
-        # auto (opening their profile): not again within half an hour
-        if req.get("auto") and conn.execute("SELECT 1 FROM previews WHERE lower(handle) = lower(?) AND status = 'done'"
-                                            " AND created_at >= datetime('now', '-30 minutes')", (m.group(1),)).fetchone():
-            return {"ok": True}
-        conn.execute("INSERT INTO previews(source, handle) VALUES ('x', ?)", (m.group(1),))
-    return {"ok": True}
-
-
 def discover_x() -> dict:
-    """X accounts you might like and don't follow: those the rooms you follow link to, and those
-    the people you follow mention (twice or more)."""
+    """X accounts you might like and don't follow: those the rooms you follow link to, those the
+    people you follow mention (twice or more) and those in X's For you (twice or more), from the
+    last X_SEEN_DAYS of your timelines."""
     with db() as conn:
-        following = {a.lower() for (a,) in conn.execute("SELECT DISTINCT author FROM follow_posts WHERE source = 'x' AND discovered = 0")}
+        following = {h.lower() for (h,) in conn.execute("SELECT DISTINCT handle FROM x_seen WHERE kind = 'following'")}
         people: dict[str, dict] = {}
 
         def person(h: str) -> dict:
-            return people.setdefault(h.lower(), {"handle": h, "rooms": [], "mentions": 0, "by": set()})
+            return people.setdefault(h.lower(), {"handle": h, "rooms": [], "mentions": 0, "by": set(), "foryou": 0})
         for l in conn.execute("SELECT l.room, l.handle FROM links l JOIN follows f ON f.source = 'chaturbate' AND f.name = l.room"
                               " WHERE l.source = 'x' AND l.state != 'removed'"):
             if l["handle"].lower() not in following:
                 person(l["handle"])["rooms"].append(l["room"])
-        for r in conn.execute("SELECT author, mentions FROM follow_posts WHERE source = 'x' AND discovered = 0 AND mentions IS NOT NULL"):
-            for h in json.loads(r["mentions"] or "[]"):
-                if h.lower() not in following and X_HANDLE.match(h):
-                    p = person(h)
-                    p["mentions"] += 1
-                    p["by"].add(r["author"])
-        for r in conn.execute("SELECT author, count(*) AS n FROM follow_posts WHERE source = 'x' AND via = 'foryou' GROUP BY lower(author)"):
-            if r["author"].lower() not in following:
-                person(r["author"])["foryou"] = r["n"]
+        for r in conn.execute("SELECT handle, by FROM x_seen WHERE kind = 'mention'"):
+            if r["handle"].lower() not in following and X_HANDLE.match(r["handle"]):
+                p = person(r["handle"])
+                p["mentions"] += 1
+                p["by"].add(r["by"])
+        for r in conn.execute("SELECT handle, count(*) AS n FROM x_seen WHERE kind = 'foryou' GROUP BY lower(handle)"):
+            if r["handle"].lower() not in following:
+                person(r["handle"])["foryou"] = r["n"]
+        users = {u["handle"].lower(): u for u in conn.execute("SELECT handle, image_url FROM x_users")}
         out = []
         for key, p in people.items():
-            if not p["rooms"] and p["mentions"] < 2 and p.get("foryou", 0) < 2:
+            if not p["rooms"] and p["mentions"] < 2 and p["foryou"] < 2:
                 continue
-            prev = conn.execute("SELECT status, error, kept FROM previews WHERE lower(handle) = ? ORDER BY id DESC LIMIT 1", (key,)).fetchone()
-            first = conn.execute("SELECT media FROM follow_posts WHERE source = 'x' AND lower(author) = ? ORDER BY posted_at DESC LIMIT 1", (key,)).fetchone()
-            thumb = None
-            if first:
-                m = (json.loads(first["media"]) or [{}])[0]
-                thumb = "follow/media/" + (m.get("poster") or m.get("file")) if m else None
-                if m and m.get("kind") == "video" and not m.get("poster"):
-                    thumb = None
+            u = users.get(key)
             out.append({"handle": p["handle"], "rooms": p["rooms"], "mentions": p["mentions"], "by": sorted(p["by"])[:3],
-                        "foryou": p.get("foryou", 0),
-                        "preview": dict(prev) if prev else None, "thumb": thumb})
+                        "foryou": p["foryou"], "thumb": (u["image_url"] if u else None) or None})
     out.sort(key=lambda p: (-len(p["rooms"]), -(p["mentions"] + p["foryou"]), p["handle"].lower()))
     return {"people": out[:80]}
-
-
-def follow_media(rel: str) -> Path | None:
-    from urllib.parse import unquote
-    path = (FOLLOW_MEDIA / unquote(rel)).resolve()
-    return path if path.is_relative_to(FOLLOW_MEDIA.resolve()) and path.is_file() else None
 
 
 def _unix(utc: str) -> int:
@@ -1921,10 +1936,21 @@ class Handler(BaseHTTPRequestHandler):
             except LookupError as e:
                 return self.send(502, {"error": str(e)})
         if path == "/api/reddit/browse":
+            q = self.query()
             try:
-                return self.send(200, browse_status(int(self.query().get("id", "0") or 0)))
-            except (ValueError, LookupError) as e:
-                return self.send(404, {"error": str(e)})
+                return self.send(200, browse(q.get("sub", ""), q.get("sort", "hot"), q.get("after", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
+        if path == "/api/person/posts":
+            q = self.query()
+            try:
+                return self.send(200, person_posts(q.get("source", ""), q.get("handle", ""), q.get("cursor", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path == "/api/reddit/browses":
             return self.send(200, recent_browses())
         if path == "/api/discover/x":
@@ -1935,12 +1961,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", "")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
-        if path.startswith("/follow/avatar/x/"):
-            name = path[len("/follow/avatar/x/"):].removesuffix(".jpg")
-            file = AVATARS / f"{name}.jpg"
-            if not re.fullmatch(r"[a-z0-9_]{1,15}", name) or not file.is_file():
-                return self.send(404, {"error": "no picture"})
-            return self.send_file(file)
         if path.startswith("/cb-thumb/"):
             name = path[len("/cb-thumb/"):].removesuffix(".jpg")
             data = cb_thumb(name) if ROOM.match(name) else None
@@ -1987,14 +2007,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/following/posts":
             q = self.query()
             try:
-                return self.send(200, follow_posts(q.get("source", "all"), max(0, int(q.get("offset", "0"))), q.get("mode", "following")))
+                return self.send(200, follow_posts(q.get("source", "all"), q.get("cursor", ""), q.get("mode", "following")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
-        if path.startswith("/follow/media/"):
-            file = follow_media(path[len("/follow/media/"):])
-            if not file:
-                return self.send(404, {"error": "not found"})
-            return self.send_file(file)
         if path.startswith("/follow/thumb/"):
             parts = path.split("/")
             file = follow_thumb(parts[3], parts[4]) if len(parts) == 5 else None
@@ -2025,9 +2040,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings,
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
-                   "/api/discover/preview": queue_preview,
-                   "/api/live/follow": follow_room, "/api/following/save": save_post,
-                   "/api/reddit/browse": start_browse}
+                   "/api/live/follow": follow_room, "/api/following/save": save_post}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

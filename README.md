@@ -3,7 +3,7 @@
 A private, phone-first page for who you follow and for comics:
 
 - **Feed:** posts from your X Following timeline, your Reddit subscriptions and e621 tag
-  searches, every file through the adults-only checks before it shows (see Following).
+  searches, read live from the sites when you look (see Following).
 - **Live:** the Chaturbate rooms you follow, played in dreamfeed's own player.
 - **Comics:** comics made here from **fictional personas** (each with a name, a fixed look and
   a trained style), and comics imported from a link or found with multporn's search, with
@@ -342,75 +342,61 @@ finds the panels (and makes the thumbnails) of comics saved before they were kep
 
 ## Following
 
-Who you follow elsewhere, in one place: the **Feed** has posts from your X Following timeline
-and your Reddit front page (the subreddits you're subscribed to), and **Live** the Chaturbate
-rooms you follow.
+Who you follow elsewhere, in one place: the **Feed** has posts from your X Following timeline,
+the subreddits you're subscribed to and your e621 searches, and **Live** the Chaturbate rooms
+you follow.
 
-### Feed: X and Reddit
+### Feed: X, Reddit and e621
 
-Every 15 minutes the `follow` service reads both, X with your cookies (`X_COOKIES_FILE`, the
-same export styles use: your Following timeline) and Reddit from the public RSS feeds of the
-subreddits and users on the Dashboard's **Reddit** panel (`r/name` or `u/name`, kept in
-`data/following.json`; no account, since Reddit's API now needs an approved app): each once a
-day, its top posts of the day, as many as the panel says (5 to 50). It downloads the pictures, videos and
-GIFs of new posts (text-only posts and reposts are left out). **Every file goes through the
-adults-only checks before it shows**, strict, as for imported comics: a video's 4 frames spread
-over it, and the age estimate for faces in photos and in drawings close to photos. A post with
-any file that fails is deleted, all of it. The checks run on the CPU (`FOLLOW_THREADS`, about 3
-seconds a picture, up to about 5 GB of RAM: `FOLLOW_MEM_LIMIT`) in a child that exits when
-done, and wait while a job, a nightly run or training is going. Posts are kept 14 days in
-`data/generated/follow/media/`. Open on X/Reddit goes to the post.
+The Feed is read live: when you open it (or tap More), the web app asks the sites for their
+newest posts and shows them; their pictures and videos load straight from the sites' own
+servers (no referrer is sent). Nothing of them is downloaded or kept, and the pictures aren't
+looked at by the checks. A page is reused for 2 minutes (switching tabs, coming back). What's
+still left out, by the rules alone: e621 posts with a tag dreamfeed never allows (e621 hosts
+those on purpose, so its own moderation doesn't remove them), subreddits whose names have words
+dreamfeed never takes (young, feral and the like) and posts whose text does. Real people's
+posts never go to training, styles, comics or generation. Open on X/Reddit goes to the post.
+
+- **X:** with your cookies (`X_COOKIES_FILE`, the same export styles use), through gallery-dl's
+  metadata (`-j`: what a post is and where its files are, nothing downloaded), 30 media files
+  a page.
+- **Reddit:** through Reddit's API, signed in as you (below): your subscriptions and the
+  Dashboard's **Reddit** panel (`r/name`, `u/name`, kept in `data/following.json`) as one
+  listing, newest first; pictures, galleries (up to 20 pictures), Reddit's own videos (HLS,
+  with sound: Safari plays it itself, other browsers through hls.js) and redgifs clips (asked
+  of redgifs' API). Text-only posts are left out.
+- **e621:** the Dashboard's **e621** panel's tag searches (an artist, a character,
+  `wolf solo`), newest first. A search with one of the never-allowed tags is refused, and every
+  search asks e621 to leave them out too (`e621.NEVER`: the youth tags such as `young` and
+  `cub`, `feral`, `bestiality`). `E621_USERNAME` (optional) names you in the user agent.
 
 The Feed has three parts, each with All, X, Reddit (and e621) to pick from:
-- **Following:** your X Following timeline, your subreddits' top posts of the day, e621.
-- **For you:** the sites' own picks. X's For you timeline (up to 60 files a round) and, signed
-  in to Reddit, your front page as Reddit sorts it (Best: its newest 50 each round, only new
-  ones fetched). Same checks; never mixed into Following. Above it, people you might like:
-  X accounts you don't follow, from your rooms' bios, mentions by people you follow and
-  X's For you.
-- **Saved:** what you tapped Save on, kept past the 14 days. A Reddit post is saved on Reddit
-  too, as you (that needs the `save` permission: if you signed in before it was added, run the
-  sign-in below again and replace `REDDIT_REFRESH_TOKEN`; the post says so until then). An X
-  post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client,
-  so use Open on X for that.
-
-A Reddit post from a subreddit whose name has words dreamfeed never takes (young, feral and
-the like) isn't fetched at all.
+- **Following:** your X Following timeline, your subreddits and Reddit people, e621, newest
+  first.
+- **For you:** the sites' own picks: X's For you timeline and your Reddit front page (Best), in
+  each site's own order, taken in turns; never mixed into Following. Above it, people you might
+  like: X accounts you don't follow, from your rooms' bios, mentions by people you follow and
+  X's For you (from the last 30 days of your timelines, `x_seen`).
+- **Saved:** what you tapped Save on (as it was shown; its pictures still load from the site, so
+  one the poster deleted is gone). A Reddit post is saved on Reddit too, as you, at once. An X
+  post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client, so use
+  Open on X for that.
 
 **Browse now (Reddit).** With Reddit picked, type a subreddit (or tap one on a post) to see it
-as it is now: Hot, New or the day's Top. Its 25 posts are fetched and checked one by one and
-each shows as soon as it passes (the first within seconds, all in a minute or two); posts
-already here show at once. The follow service runs it straight away: the feeds make way
-between posts, and only a job or training makes it wait (the checks' models are loaded by one
-thing at a time). Browsed posts aren't added to Following or For you; they expire like the rest.
+as it is now: Hot, New or the day's Top, 25 posts a page, More for the next.
 
-**X profiles.** Tap an X name or picture (Following, For you, anywhere) for their profile:
-their picture, name, bio and counts, and their latest posts, fetched as you open it (30 media
-files, the first 6 checked and shown in seconds, then the rest; not again within half an
-hour, Fetch again for more). Profile pictures come with their posts and are checked like
-them: one that fails isn't shown (`data/generated/follow/avatars/`).
+**Profiles.** Tap an X name or picture (Following, For you, anywhere) for their profile: their
+picture, name, bio and counts, and their latest media posts, read as you open it (More for
+older ones). A Reddit name gives their latest posts the same way (Reddit's search by author).
 
-From Reddit it takes pictures, galleries (up to 20 pictures), Reddit's own videos (with sound)
-and redgifs clips, through Reddit's API with your own app: a "personal use script" at
-reddit.com/prefs/apps, its id and secret in `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`
-(and your username in `REDDIT_USERNAME`, for its user agent). It reads as the app itself, with
-no account, unless you sign in: then the subreddits you're subscribed to are read (plus any on
-the Dashboard), and the Dashboard lists them. To sign in once, give the app the redirect uri
-`http://localhost:6414/`, run `docker compose exec follow python -m dreamfeed follow
-reddit-login`, open the address it prints and allow it, then run the same with the address your
-browser lands on (it won't load) in quotes after it. The token it prints goes in
-`REDDIT_REFRESH_TOKEN` (your password is never stored; revoke it under Reddit's authorized
-apps). Without the app it falls back to the subreddits' public RSS feeds: pictures and
-redgifs only (galleries and Reddit's videos aren't in them), and one request every 11 seconds.
-
-### e621
-
-The Dashboard's **e621** panel takes tag searches (an artist, a character, `wolf solo`); each is
-read once a day through e621's API for its top-scored posts of the day, as many as the panel
-says. A post with a tag dreamfeed never allows (the youth tags such as `young` and `cub`, and
-`feral` and `bestiality`: `e621.NEVER`) is left out before anything is downloaded, searches ask
-e621 to leave those out too, and a search using one is refused; the rest get the checks.
-Videos come as e621's 720p MP4. `E621_USERNAME` (optional) names you in the user agent.
+**Signing in to Reddit.** Make your own app, a "personal use script" at reddit.com/prefs/apps,
+with the redirect uri `http://localhost:6414/`; its id and secret go in `REDDIT_CLIENT_ID` and
+`REDDIT_CLIENT_SECRET` (and your username in `REDDIT_USERNAME`, for its user agent). Run
+`docker compose exec follow python -m dreamfeed follow reddit-login`, open the address it prints
+and allow it, then run the same with the address your browser lands on (it won't load) in quotes
+after it. The token it prints goes in `REDDIT_REFRESH_TOKEN` (your password is never stored;
+revoke it under Reddit's authorized apps), and `docker compose up -d web`. Without it, Reddit is
+left out of the Feed.
 
 ### Live: Chaturbate
 
@@ -463,8 +449,8 @@ Under each video:
 ### One profile across sites, Discover, Watch several
 
 **Profiles.** Every room has a Profile (under its card, or tap it in Not live): when they're
-usually live, their bio, the X and Reddit accounts linked to the room, their posts from your
-Feed, and your videos of them. Accounts get linked by themselves when the performer links them
+usually live, their bio, the X and Reddit accounts linked to the room, their latest posts there
+(read live), and your videos of them. Accounts get linked by themselves when the performer links them
 for free in their Chaturbate bio (the follow service reads a few bios each round, each once a
 day; links that cost tokens are left alone), or by you on the profile; × unlinks one (it isn't
 linked again). Tapping a poster's name in the Feed opens their profile too, the room's if
@@ -483,12 +469,9 @@ the site's own button does (your cookies' session, within seconds of the tap, on
 checks Chaturbate's answer and updates the list here at once. Only when you tap.
 
 **Discover, in the Feed:** X accounts you don't follow (you follow whoever your Following
-timeline shows): those linked from the rooms you follow, and those people you follow mention
-or reply to, twice or more (counted from new posts on). On their profile, Preview their media
-fetches their latest 30 media posts with your X cookies, through the same checks as the Feed
-(one at a time, never while the feeds are being read, a job runs or training: the checks
-need the same few GB). They're shown on the profile only, never in the Feed, and expire after
-14 days like the Feed's.
+timeline shows): those linked from the rooms you follow, those people you follow mention or
+reply to and those in X's For you, twice or more (from the Feed pages you've looked at in the
+last 30 days). Their profile shows their latest posts, read live.
 
 **Watch several:** on Live, pick up to 4 live rooms (yours or from Discover) and watch them
 together, each in its own tile at a quality to fit. All are muted but the one you tap;
