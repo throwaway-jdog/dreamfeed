@@ -466,7 +466,10 @@ out.
 service reaches it, e.g. `http://streamonitor:5000` on a Docker network they share; and
 `STREAMONITOR_PASSWORD` if it has one), Live shows what it does for each room you follow: ● REC
 on a live room it's recording, "Records when they go live", "Recording paused". Record on a live
-card (or a profile) adds the room to its list or starts it again; Pause stops it but keeps it
+card (or a profile) asks which: **this stream** only (their next, when they're not live) or **all
+streams** (the room on its list, recording each time). This stream only ends itself: once the
+recording has stopped for 3 minutes (a short drop isn't the end), the room is paused again, or
+taken off the list if it wasn't on it before. Pause (Stop, for one stream) stops it but keeps it
 listed; Remove (on the profile) takes it off the list, and the recordings you have stay. Free disk
 space shows on the profile. Its recordings show up on the room's profile (below).
 

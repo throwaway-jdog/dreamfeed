@@ -2035,13 +2035,22 @@ function liveCard(r, list) {
     r.videos ? `Profile · ${r.videos} video${r.videos === 1 ? "" : "s"}` : "Profile");
   pfb.type = "button"; pfb.onclick = () => openRoomProfile(r); acts.append(pfb);
   if ((follow.dvr || {}).on && r.dvr !== undefined) {      // (rooms you follow: your recorder's say on each)
-    const on = !!(r.dvr && r.dvr.running), rb = el("button", "secondary vids", on ? "● Recording" : "Record");
+    // Record asks which: this stream only, or all of them; recording, a tap stops it
+    const on = !!(r.dvr && r.dvr.running), once = on && r.dvr.once;
+    const rb = el("button", "secondary vids", on ? (once ? "● This stream" : "● Recording") : "Record");
     rb.type = "button"; rb.setAttribute("aria-pressed", String(on));
     rb.title = r.dvr ? r.dvr.status : "Not on your recorder's list";
-    rb.onclick = async () => {
-      rb.disabled = true;
-      try { r.dvr = (await api("api/dvr", { name: r.name, action: on ? "pause" : "record" })).dvr; refreshFollowing(); }
-      catch (err) { toast(err.message); rb.disabled = false; }
+    const send = async (b, action) => {
+      b.disabled = true;
+      try { r.dvr = (await api("api/dvr", { name: r.name, action })).dvr; refreshFollowing(); }
+      catch (err) { toast(err.message); b.disabled = false; }
+    };
+    rb.onclick = () => {
+      if (on) return send(rb, "stop");
+      const one = el("button", "secondary vids", "This stream"), all = el("button", "secondary vids", "All streams");
+      one.type = all.type = "button";
+      one.onclick = () => send(one, "once"); all.onclick = () => send(all, "record");
+      rb.replaceWith(one, all);
     };
     acts.append(rb);
   }
@@ -2058,8 +2067,10 @@ function liveCard(r, list) {
   return item;
 }
 // Your recorder (streamonitor) on a room, in words.
-function dvrWords(st) {
+function dvrWords(st, live) {
   if (!st) return "Not recorded";
+  if (st.once && st.state === "recording") return "● Recording this stream only";
+  if (st.once && st.state === "waiting") return live ? "Records this stream only (starting)" : "Records their next stream only";
   return { recording: "● Recording now", waiting: "Records when they go live", paused: "Recording paused" }[st.state]
     || `Recorder: ${st.status || "a problem"}`;
 }
@@ -2750,8 +2761,11 @@ function renderDvr(d, gen) {
   };
   if (rec.error) out.push(el("small", null, rec.error));
   else {
-    out.push(el("b", null, dvrWords(st)));
-    out.push(st && st.running ? act("Pause", "pause") : act("Record", "record"));
+    out.push(el("b", null, dvrWords(st, d.live)));
+    const next = d.live ? "this stream" : "next stream";
+    if (st && st.running && st.once) out.push(act("Record all streams", "record"), act("Stop", "stop"));
+    else if (st && st.running) out.push(act("Pause", "pause"), act(d.live ? "Only this stream" : "Only the next stream", "once"));
+    else out.push(act(`Record ${next}`, "once"), act("Record all streams", "record"));
     if (st) out.push(act("Remove", "remove", `Take ${d.room} off your recorder's list? Recordings you have stay.`));
     out.push(el("small", null, [st && st.status && st.state === "waiting" ? st.status : "", rec.free ? `${rec.free} free` : ""]
       .filter(Boolean).join(" · ")));

@@ -19,7 +19,8 @@ GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subre
 GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
-POST /api/dvr           {"name": ROOM, "action": "record"|"pause"|"remove"}  your recorder (streamonitor), for that room
+POST /api/dvr           {"name": ROOM, "action": "record"|"once"|"stop"|"pause"|"remove"}  your recorder (streamonitor), for that room:
+                        record = all their streams, once = this stream (or the next) only, stop = end either
 GET  /api/reddit/random ?not=SUB  a random subreddit from RANDOM_SUBREDDITS_URL's list that has posts now
 GET  /api/videos/more  ?id=reddit:ID|e621:ID&cursor=C  more videos after that one: its subreddit, your subscriptions (Reddit); its search, yours (e621)
 GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after that one (its full-screen player's swipe-up feed)
@@ -160,6 +161,10 @@ def db() -> sqlite3.Connection:
         if "via" not in {r[1] for r in conn.execute("PRAGMA table_info(links)")}:
             conn.execute("ALTER TABLE links ADD COLUMN via TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS link_checks (room TEXT PRIMARY KEY, at TEXT NOT NULL, found TEXT)")
+        # rooms recorded for one stream only (dvr_action "once"): listed = on the recorder's list
+        # before (paused again after; else taken off), seen = its recording started, quiet = since when it's stopped
+        conn.execute("""CREATE TABLE IF NOT EXISTS dvr_once (room TEXT PRIMARY KEY, listed INTEGER NOT NULL,
+            seen INTEGER NOT NULL DEFAULT 0, quiet REAL, at REAL NOT NULL)""")
         conn.commit()
     return conn
 
@@ -330,9 +335,9 @@ def following() -> dict:
     except sqlite3.OperationalError:    # the follow service hasn't started yet
         pass
     rooms.sort(key=lambda r: (not r["live"], -(r["info"].get("viewers") or 0) if r["live"] else -(r["last_live"] or 0)))
-    rec = _dvr()
+    rec, once = _dvr(), _once_rooms()
     for r in rooms:
-        r["dvr"] = rec.get("rooms", {}).get(r["name"]) if r["source"] == "chaturbate" else None
+        r["dvr"] = _with_once(rec.get("rooms", {}).get(r["name"]), r["name"], once) if r["source"] == "chaturbate" else None
     return {"rooms": rooms, "status": read_json(FOLLOW / "status.json"), "feeds": read_json(FOLLOW / "feeds.json"),
             "dvr": {"on": dvr.enabled(), "free": rec.get("free"), "error": rec.get("error")}}
 
@@ -345,12 +350,85 @@ def _dvr() -> dict:
         return {"error": str(e)[:200]}
 
 
+DVR_ONCE_POLL = 30        # seconds between looks at the rooms recorded for one stream
+DVR_ONCE_GAP = 180        # seconds a once room's recording has stopped before its stream counts as over
+                          # (a short drop and the recorder picking it up again isn't the end)
+
+
+def _once_rooms() -> set:
+    try:
+        with db() as conn:
+            return {r[0] for r in conn.execute("SELECT room FROM dvr_once")}
+    except sqlite3.Error:
+        return set()
+
+
+def _with_once(st: dict | None, room: str, once: set) -> dict | None:
+    return {**st, "once": room in once} if st else None
+
+
+def _end_once(room: str, conn) -> dict:
+    """A once room done (its stream over, or you stopped it): paused again if it was on the
+    recorder's list before, else taken off it. Its recordings stay."""
+    row = conn.execute("SELECT listed FROM dvr_once WHERE room = ?", (room,)).fetchone()
+    out = dvr.act(room, "pause" if row and row["listed"] else "remove")     # (on failure: tried again)
+    conn.execute("DELETE FROM dvr_once WHERE room = ?", (room,))
+    conn.commit()
+    return out
+
+
 def dvr_action(req: dict) -> dict:
-    """{"name": ROOM, "action": "record" | "pause" | "remove"}: tell your recorder (streamonitor)."""
-    name = str(req.get("name", ""))
+    """{"name": ROOM, "action"}: tell your recorder (streamonitor). record: all their streams;
+    once: only this stream (or their next, when they're not live); stop: end either; pause, remove."""
+    name, action = str(req.get("name", "")), str(req.get("action", ""))
     if not ROOM.match(name):
         raise ValueError("bad room")
-    return dvr.act(name, str(req.get("action", "")))
+    if action not in ("record", "once", "stop", "pause", "remove"):
+        raise ValueError("bad action")
+    with db() as conn:
+        had = conn.execute("SELECT listed FROM dvr_once WHERE room = ?", (name,)).fetchone()
+        if action == "once":
+            listed = had["listed"] if had else int(dvr.rooms().get("rooms", {}).get(name) is not None)
+            out = dvr.act(name, "record")
+            conn.execute("INSERT OR REPLACE INTO dvr_once (room, listed, seen, quiet, at) VALUES (?, ?, 0, NULL, ?)",
+                         (name, listed, time.time()))
+            conn.commit()
+        elif action == "stop" and had:
+            out = _end_once(name, conn)
+        else:
+            conn.execute("DELETE FROM dvr_once WHERE room = ?", (name,))
+            conn.commit()
+            out = dvr.act(name, "pause" if action == "stop" else action)
+    out["dvr"] = _with_once(out.get("dvr"), name, {name} if action == "once" else set())
+    return out
+
+
+def _dvr_once_watch() -> None:
+    """Ends each once room's recording when its stream is over: it was recording, and has
+    stopped for DVR_ONCE_GAP. One paused or taken off the list elsewhere is let go."""
+    while True:
+        time.sleep(DVR_ONCE_POLL)
+        try:
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM dvr_once").fetchall()
+                if not rows:
+                    continue
+                rec = dvr.rooms().get("rooms", {})
+                now = time.time()
+                for r in rows:
+                    st = rec.get(r["room"])
+                    if st is None or not st["running"]:
+                        conn.execute("DELETE FROM dvr_once WHERE room = ?", (r["room"],))
+                    elif st["state"] == "recording":
+                        conn.execute("UPDATE dvr_once SET seen = 1, quiet = NULL WHERE room = ?", (r["room"],))
+                    elif r["seen"] and r["quiet"] is None:
+                        conn.execute("UPDATE dvr_once SET quiet = ? WHERE room = ?", (now, r["room"]))
+                    elif r["seen"] and now - r["quiet"] >= DVR_ONCE_GAP:
+                        print(time.strftime("%F %T"), f"web: {r['room']}'s stream is over: recorder stops", flush=True)
+                        _end_once(r["room"], conn)
+                conn.commit()
+        except (sqlite3.Error, LookupError, ValueError) as e:
+            print(time.strftime("%F %T"), f"web: once recordings: {e}", flush=True)
 
 
 MULTPORN = "https://multporn.net"
@@ -1196,7 +1274,7 @@ def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = ""
                                " ORDER BY id DESC LIMIT 1", (room,)).fetchone()
             out["action"] = dict(act) if act else None
             rec = _dvr()
-            out["dvr"] = {"on": dvr.enabled(), "room": rec.get("rooms", {}).get(room), "free": rec.get("free"),
+            out["dvr"] = {"on": dvr.enabled(), "room": _with_once(rec.get("rooms", {}).get(room), room, _once_rooms()), "free": rec.get("free"),
                           "error": rec.get("error")}
             out["links"] = [{"source": l["source"], "handle": l["handle"], "state": l["state"],
                              "via": l["via"] or ("their Chaturbate bio" if l["state"] == "bio" else None)} for l in conn.execute(
@@ -2576,4 +2654,5 @@ if __name__ == "__main__":
              "<circle cx='8' cy='8' r='6' fill='%23e5604a'/></svg>")
     print(time.strftime("%F %T"), f"web: feed on :{PORT}", flush=True)
     threading.Thread(target=_link_sweep, daemon=True).start()
+    threading.Thread(target=_dvr_once_watch, daemon=True).start()
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
