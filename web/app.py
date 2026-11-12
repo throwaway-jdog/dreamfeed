@@ -118,6 +118,18 @@ GENERATED = DATA / "generated"
 LIKED = DATA / "liked"
 DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
+STATIC = Path(__file__).with_name("static").resolve()     # its style and scripts
+# The page's script is kept in parts by what they do (static/js/NN-name.js) and served as one,
+# static/app.js, joined in their order: one script, so a part can use what a later one defines.
+_script = {"key": None, "body": b""}
+
+
+def page_script() -> bytes:
+    parts = sorted((STATIC / "js").glob("[0-9][0-9]-*.js"))
+    key = tuple((p.name, p.stat().st_mtime_ns) for p in parts)
+    if _script["key"] != key:
+        _script.update(key=key, body=b"".join(p.read_bytes() for p in parts))
+    return _script["body"]
 # Each part of the page has its own address (the page reads it and opens that part):
 PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
          "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos", "bsky"}
@@ -2994,6 +3006,14 @@ class Handler(BaseHTTPRequestHandler):
             if not data:
                 return self.send(404, {"error": "no cover"})
             return self.send(200, data, "image/jpeg", cache="private, max-age=86400")
+        if path == "/static/app.js":
+            return self.send(200, page_script(), "text/javascript; charset=utf-8", cache="no-cache")
+        if path.startswith("/static/"):          # the page's style (static/app.css)
+            file = (STATIC / path[len("/static/"):]).resolve()
+            ctype = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}.get(file.suffix)
+            if not ctype or not file.is_relative_to(STATIC) or not file.is_file():
+                return self.send(404, {"error": "not found"})
+            return self.send(200, file.read_bytes(), ctype, cache="no-cache")
         if path == "/vendor/hls.min.js":
             return self.send(200, (Path(__file__).parent / "vendor" / "hls.min.js").read_bytes(),
                              "text/javascript; charset=utf-8", cache="private, max-age=604800")
