@@ -2522,7 +2522,7 @@ function postCard(p, opened) {
   const who = el("span", "name", p.source === "bsky" ? p.nick || p.author || "?" : p.author || "?");
   if (person) { who.classList.add("who"); who.onclick = () => openPerson(person); }
   head.append(who,
-              (() => { const w = el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : p.source === "bsky" ? `Bluesky · @${p.author}` : "X");
+              (() => { const w = el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : p.source === "bsky" ? `Bluesky · ${p.place || "@" + p.author}` : "X");
                        if (p.source === "reddit" && p.place) { w.classList.add("go"); w.onclick = () => openBrowse(p.place, "hot"); }
                        return w; })(),
               el("span", "time", "· " + relTime(p.posted_at)));

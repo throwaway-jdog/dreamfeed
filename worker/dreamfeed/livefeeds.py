@@ -477,12 +477,14 @@ def x_page(kind: str, start: int) -> dict:
 
 
 # ---- Bluesky ----
-# Read as you (your handle and an app password, the Dashboard's Sign-ins): your Following, a
-# feed for For you (the first feed you pinned on Bluesky, else its Discover) and someone's posts
-# with media. Its pictures (cdn.bsky.app) and videos (HLS from video.bsky.app) play here.
+# Read as you (your handle and an app password, the Dashboard's Sign-ins): your Following, For
+# you (your own feeds on Bluesky, the ones you pinned, else saved, mixed; else its Discover) and
+# someone's posts with media. Its pictures (cdn.bsky.app) and videos (HLS from video.bsky.app) play here.
 BSKY_ENTRY = "https://bsky.social"
 BSKY_DISCOVER = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
 BSKY_PAGE = 40
+BSKY_FEEDS = 10           # your feeds mixed into For you, at most
+BSKY_FEED_PAGE = 20       # posts read from each a page
 BSKY_ID = re.compile(r"^([a-z2-7]{24})_([a-z2-7]{13})$")          # a post: its account (did:plc:…) and its key
 BSKY_HANDLE = re.compile(r"^(?:did:plc:[a-z2-7]{24}|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)$")
 _bsky_lock = threading.Lock()
@@ -607,28 +609,57 @@ def _bsky_list(items: list, via: str) -> list[dict]:
     return out
 
 
-def _bsky_foryou_feed() -> str:
-    """The first feed you pinned on Bluesky (not Following), else its Discover."""
-    try:
-        prefs = _bsky("app.bsky.actor.getPreferences").get("preferences") or []
-    except LookupError:
-        return BSKY_DISCOVER
+def _bsky_my_feeds() -> list[dict]:
+    """Your own feeds on Bluesky: those you pinned (in your order), else those you saved; else
+    its Discover. [{"uri", "name"}]."""
+    prefs = _bsky("app.bsky.actor.getPreferences").get("preferences") or []
+    pinned, saved = [], []
     for pref in prefs:
-        if str(pref.get("$type", "")).endswith("savedFeedsPrefV2"):
+        t = str(pref.get("$type", ""))
+        if t.endswith("savedFeedsPrefV2"):
             for f in pref.get("items") or []:
-                if f.get("type") == "feed" and f.get("pinned") and str(f.get("value", "")).startswith("at://"):
-                    return f["value"]
-    return BSKY_DISCOVER
+                if f.get("type") == "feed" and str(f.get("value", "")).startswith("at://"):
+                    (pinned if f.get("pinned") else saved).append(f["value"])
+        elif t.endswith("savedFeedsPref"):       # (Bluesky's older form of the same)
+            saved += [u for u in pref.get("saved") or [] if str(u).startswith("at://")]
+            pinned += [u for u in pref.get("pinned") or [] if str(u).startswith("at://")]
+    uris = list(dict.fromkeys(pinned or saved))[:BSKY_FEEDS] or [BSKY_DISCOVER]
+    names = {}
+    try:
+        for g in _bsky("app.bsky.feed.getFeedGenerators", {"feeds": uris}).get("feeds") or []:
+            names[g.get("uri")] = g.get("displayName")
+    except LookupError:
+        pass
+    return [{"uri": u, "name": names.get(u) or "Discover" if u == BSKY_DISCOVER else names.get(u) or "a feed"} for u in uris]
+
+
+def bsky_foryou(cursor: dict | None) -> tuple[list[dict], dict | None]:
+    """For you: a page of each of your feeds, taken in turns (each its own cursor; one that's
+    run out is left out of the next pages). (posts, cursor or None)."""
+    feeds = _cached("bsky:my-feeds", _bsky_my_feeds, SUBS_TTL)
+    first = not cursor
+    cursor = {k: v for k, v in (cursor or {}).items() if isinstance(v, str) and len(v) < 1000}     # (from the page: only what Bluesky gave)
+    todo = [f for f in feeds if first or cursor.get(f["uri"])]
+
+    def one(f):
+        def fetch():
+            d = _bsky("app.bsky.feed.getFeed", {"feed": f["uri"], "limit": BSKY_FEED_PAGE, "cursor": cursor.get(f["uri"]) or None})
+            return [{**p, "place": f["name"]} for p in _bsky_list(d.get("feed") or [], "foryou")], d.get("cursor") or None
+        try:
+            return _cached(f"bsky:feed:{f['uri']}:{cursor.get(f['uri'])}", fetch)
+        except LookupError:
+            return [], None                     # (a feed that's gone or failing: the others still come)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        got = list(pool.map(one, todo))
+    nxt = {f["uri"]: after for f, (_, after) in zip(todo, got) if after}
+    return _merge([posts for posts, _ in got], by_time=False), nxt or None
 
 
 def bsky_page(kind: str, cursor: str | None) -> tuple[list[dict], str | None]:
-    """Your Following ("home"), For you ("foryou") or someone's posts with media ("@handle")."""
+    """Your Following ("home") or someone's posts with media ("@handle"). (For you: bsky_foryou.)"""
     def fetch():
         if kind == "home":
             d, via = _bsky("app.bsky.feed.getTimeline", {"limit": BSKY_PAGE, "cursor": cursor}), "following"
-        elif kind == "foryou":
-            feed_uri = _cached("bsky:foryou-feed", _bsky_foryou_feed, SUBS_TTL)
-            d, via = _bsky("app.bsky.feed.getFeed", {"feed": feed_uri, "limit": BSKY_PAGE, "cursor": cursor}), "foryou"
         elif kind.startswith("@") and BSKY_HANDLE.match(kind[1:]):
             d, via = _bsky("app.bsky.feed.getAuthorFeed", {"actor": kind[1:], "filter": "posts_with_media",
                                                           "limit": BSKY_PAGE, "cursor": cursor}), "profile"
@@ -802,7 +833,11 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
             if s == "bsky":
                 if not bsky_ready():
                     return [], [], None, None
-                posts, after = bsky_page("home" if mode == "following" else "foryou", cursor.get("bsky") or None)
+                if mode == "following":
+                    posts, after = bsky_page("home", cursor.get("bsky") or None)
+                else:
+                    c = cursor.get("bsky")
+                    posts, after = bsky_foryou(c if isinstance(c, dict) else None)
                 return [posts], [], after, None
             if s == "reddit":
                 if not reddit_ready():

@@ -361,8 +361,10 @@ posts never go to training, styles, comics or generation. Open on X/Reddit goes 
 remembered in this browser; Following and For you both take it.
 
 - **Bluesky:** as you (the Dashboard's Sign-ins: your handle and an app password, never your
-  own; it signs in once and keeps the session it makes): Following is your timeline, For you
-  the first feed you pinned on Bluesky (else its Discover). Posts with pictures or a video
+  own; it signs in once and keeps the session it makes): Following is your timeline; For you
+  mixes your own feeds on Bluesky, the ones you pinned (else the ones you saved; else its
+  Discover), up to 10, a page of each taken in turns, each post saying which feed it's from
+  (pin adult feeds such as After Dark, 🐾 Hot 🌙 or Hentai Illust on Bluesky to have them here). Posts with pictures or a video
   (Bluesky's own HLS, played and kept like Reddit's), their replies, and profiles (tap a name:
   their posts with media, at `/bsky/HANDLE`). Adult posts only come when adult content is on
   in Bluesky's own settings (on its website).
