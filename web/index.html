@@ -3150,9 +3150,15 @@ function siCookieRow(st, browser) {
   head.append(info); li.append(head);
   if (browser) {       // the server's own browser: sign in there yourself, then take its cookies
     const site = { x: "x.com", chaturbate: "chaturbate.com" }[st.site] || st.site;
-    const row = el("div", "si-acts"), open = el("a", "secondary", "Sign in on the server's browser"), take = el("button", "primary", "Take its cookies");
-    open.href = browser; open.target = "_blank"; open.rel = "noopener";
-    take.type = "button";
+    const row = el("div", "si-acts"), open = el("button", "secondary", "Sign in on the server's browser"), take = el("button", "primary", "Take its cookies");
+    open.type = take.type = "button";
+    open.onclick = async () => {        // it runs only when needed: started now, the tab opened once it's up
+      const tab = window.open("", "_blank");
+      open.disabled = true; open.textContent = "Starting it…";
+      try { await api("api/browser/start", {}); if (tab) tab.location = browser; else location.href = browser; }
+      catch (err) { if (tab) tab.close(); toast(err.message); }
+      finally { open.disabled = false; open.textContent = "Sign in on the server's browser"; }
+    };
     take.onclick = async () => {
       take.disabled = true; take.textContent = "Checking…";
       try {
@@ -3160,7 +3166,11 @@ function siCookieRow(st, browser) {
         toast(r.check ? `Taken, but: ${r.check}` : `${st.name}: signed in ✓`); loadSignins();
       } catch (err) { toast(err.message); take.disabled = false; take.textContent = "Take its cookies"; }
     };
-    row.append(open, take, el("small", "hint", `Opens a browser running on your server: go to ${site} there and sign in, then come back and tap Take its cookies.`));
+    const rf = st.refresh, auto = st.browser
+      ? (rf && rf.error ? `Couldn't take them again by itself: ${rf.error}. Sign in there again.`
+        : `Taken from it: taken again by itself each day${rf ? ` (last ${relTime(new Date(rf.at * 1000).toISOString())} ago)` : ""}.`)
+      : `Opens a browser running on your server: go to ${site} there and sign in, then come back and tap Take its cookies. It stays signed in, and the cookies are then taken again by themselves each day.`;
+    row.append(open, take, el("small", rf && rf.error ? "hint bad" : "hint", auto));
     li.append(row);
   }
   up.onclick = () => {

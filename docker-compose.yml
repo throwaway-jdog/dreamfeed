@@ -207,10 +207,13 @@ services:
   # sign in to X, Chaturbate and the like yourself (captchas and codes included), then takes the
   # site's cookies from its profile. Reached only through the proxy, after dreamfeed's sign-in
   # (README: Sign-ins); its profile, your sign-ins there, is kept in data/browser.
+  # It runs only when needed: started for you or, once a day, out of sight to take fresh cookies
+  # from it, and stopped when no one's watching. dreamfeed only asks (a file in data/browser-power);
+  # systemd units on the host start and stop it (browserpower/install.sh, README: Sign-ins).
   browser:
     image: jlesage/firefox:v26.09.1
     container_name: dreamfeed-browser
-    restart: unless-stopped
+    restart: "no"
     shm_size: 2g                     # (Firefox needs more than Docker's 64 MB)
     environment:
       USER_ID: ${PUID}
@@ -258,6 +261,8 @@ services:
       CHATURBATE_COOKIES: /config/chaturbate-cookies.txt   # (only shown on the dashboard: the follow service uses them)
       BROWSER_PROFILE: /data/browser/profile     # the browser service's profile (in ./data), for Take its cookies
       BROWSER_URL: ${BROWSER_URL:-}              # its address, as the proxy serves it (e.g. browser/, beside the Feed); empty: off
+      BROWSER_POWER_DIR: /data/browser-power     # where it asks for the browser to start or stop (browserpower/)
+      BROWSER_SCREEN: dreamfeed-browser:5800     # the browser's page, to tell when it's up
       X_RELATED_QUERY: ${X_RELATED_QUERY:-}      # X's "more videos" call id, when X changes it (empty: the known one)
       RANDOM_SUBREDDITS_URL: ${RANDOM_SUBREDDITS_URL:-}   # Browse's 🎲: a list of subreddit names, one a line (empty: off)
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}

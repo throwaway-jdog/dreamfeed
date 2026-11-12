@@ -450,7 +450,16 @@ first wherever dreamfeed signs in (the Feed, styles, comic imports, the Live tab
   server, shown in your own browser (from any device). Sign in on the server's browser opens it:
   go to the site there and sign in yourself (captchas and two-factor codes included), then come
   back and tap Take its cookies, which reads that site's cookies from its profile and checks
-  them as above. It stays signed in there, so next time Take its cookies is all it takes. Your
+  them as above. It stays signed in there, and cookies taken from it are taken again by
+  themselves once a day: it's started out of sight, opens the sites (its homepage tabs, which
+  freshens their sign-ins), and they're taken and checked; if it's been signed out, the
+  Dashboard says so and the cookies you had stay. It runs only when needed: started when you
+  open it or for that, and stopped once no one has watched it for 10 minutes. dreamfeed has no
+  say over Docker for this: it only leaves a file named `start` or `stop` in
+  `data/browser-power`, and systemd on the host runs `browserpower/power.sh` with that fixed
+  action (and each minute, to stop it when unused). Install that once with
+  `sudo browserpower/install.sh` (it copies the script where only root can change it, with its
+  units; `--remove` takes them away; run it again after changing `power.sh`). Your
   proxy serves it beside dreamfeed, letting only someone signed in to dreamfeed through (Caddy:
   `forward_auth` to dreamfeed's `/api/auth-check`, then the browser service on port 5800; its
   address goes in `BROWSER_URL`, e.g. `browser/` for `/dreamfeed/browser/`). Its profile is in

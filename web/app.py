@@ -26,6 +26,7 @@ POST /api/signins      {"site": "x"|"chaturbate", "cookies": TEXT} set them (a c
                         Cookie header) and check they work; {"site", "forget": true} drop the dashboard's;
                         {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys;
                         {"site", "from_browser": true} take them from the server's browser (BROWSER_PROFILE)
+POST /api/browser/start  start the server's browser (it stops itself when no one's using it)
 GET  /api/auth-check   200 when signed in here (the proxy asks before letting you into the server's browser)
 POST /api/dvr           {"name": ROOM, "action": "record"|"once"|"stop"|"pause"|"remove"}  your recorder (streamonitor), for that room:
                         record = all their streams, once = this stream (or the next) only, stop = end either
@@ -367,6 +368,16 @@ def _dvr() -> dict:
 # from the Dashboard at BROWSER_URL): its profile, where Take its cookies reads them.
 BROWSER_PROFILE = os.environ.get("BROWSER_PROFILE", "").strip()
 BROWSER_URL = os.environ.get("BROWSER_URL", "").strip()
+# It runs only when needed: started for you (Sign in on the server's browser) or for a refresh,
+# stopped when no one's watching it. dreamfeed only asks, leaving a file in BROWSER_POWER_DIR;
+# systemd on the host starts and stops it (browserpower/install.sh): nothing here has a say
+# over Docker. BROWSER_SCREEN: its page (host:port), to tell when it's up.
+BROWSER_POWER_DIR = os.environ.get("BROWSER_POWER_DIR", "").strip()
+BROWSER_SCREEN = os.environ.get("BROWSER_SCREEN", "").strip()
+BROWSER_REFRESH = 86400    # cookies taken from it are taken again (it opening the sites) this often
+BROWSER_LOAD = 90          # seconds it's given to open the sites before they're taken
+BROWSER_TICK = 60
+_browser = {"refresh": {}}   # site -> {"at", "error"}: its last refresh
 MOUNTED_COOKIES = {"x": os.environ.get("X_COOKIES", "").strip() or None,
                    "chaturbate": os.environ.get("CHATURBATE_COOKIES", "").strip() or None}
 
@@ -466,8 +477,93 @@ def reddit_callback(query: dict, headers) -> str:
     return f"Signed in to Reddit as u/{name}" if name else "Signed in to Reddit"
 
 
+def _power(action: str) -> dict:
+    """The server's browser: {"running", "viewers"}, after asking it to start or stop (a file left in
+    BROWSER_POWER_DIR, which systemd on the host acts on: browserpower/) or just as it is now."""
+    import socket
+    if not BROWSER_POWER_DIR or not os.path.isdir(BROWSER_POWER_DIR):
+        raise LookupError("the server's browser can't be started from here (sudo browserpower/install.sh)")
+    folder = Path(BROWSER_POWER_DIR)
+
+    def now() -> dict | None:
+        d = read_json(folder / "status.json")
+        return d if isinstance(d, dict) and time.time() - float(d.get("at") or 0) < 180 else None
+    if action == "status":
+        d = now()
+        if d is None:
+            raise LookupError("the server's browser isn't looked after (sudo browserpower/install.sh)")
+        return d
+    asked = time.time()
+    (folder / action).write_text("")
+    for _ in range(90):
+        time.sleep(1)
+        d = now()
+        if d and float(d.get("at") or 0) >= int(asked) and not (folder / action).exists():
+            if action == "start":
+                host, _, port = BROWSER_SCREEN.rpartition(":")
+                for _ in range(60):                 # its page answers once its desktop is up
+                    try:
+                        with socket.create_connection((host, int(port)), timeout=2):
+                            return d
+                    except OSError:
+                        time.sleep(1)
+                raise LookupError("the server's browser started, but its page doesn't answer")
+            return d
+    raise LookupError("the server's browser didn't answer: is browserpower installed? (sudo browserpower/install.sh)")
+
+
+def browser_start(req: dict) -> dict:
+    """Starts the server's browser, for you to use (stopped again once no one's watching)."""
+    cookies.firefox_prefs(BROWSER_PROFILE)
+    return _power("start")
+
+
+def _browser_refresh() -> None:
+    """Takes again the cookies taken from the server's browser, once a day: it's started out of
+    sight, opens the sites (which freshens them), and stopped. Not while you're using it."""
+    due = [s for s in cookies.SITES if cookies.status(s).get("browser")
+           and time.time() - (cookies.status(s).get("updated") or 0) >= BROWSER_REFRESH
+           and time.time() - _browser["refresh"].get(s, {}).get("at", 0) >= BROWSER_REFRESH]
+    if not due:
+        return
+    st = _power("status")
+    if st["viewers"]:
+        return                     # (you're in it: next time)
+    was = st["running"]
+    try:
+        if not was:
+            cookies.firefox_prefs(BROWSER_PROFILE)
+            _power("start")
+        time.sleep(BROWSER_LOAD)
+        for site in due:
+            try:
+                cookies.from_firefox(site, BROWSER_PROFILE)
+                error = _signin_check(site)
+            except (ValueError, OSError) as e:
+                error = str(e)[:200]
+            _browser["refresh"][site] = {"at": time.time(), "error": error}
+            print(time.strftime("%F %T"), f"web: {site}'s cookies from the server's browser:", error or "taken again", flush=True)
+            if site == "x":
+                livefeeds.forget("x:")
+    finally:
+        if not was:
+            _power("stop")        # (it's stopped only if no one's watching it)
+
+
+def _browser_keeper() -> None:
+    """Refreshes the cookies taken from the server's browser (stopping it when unused is the
+    host's: browserpower's idle timer)."""
+    while True:
+        time.sleep(BROWSER_TICK)
+        try:
+            _browser_refresh()
+        except LookupError as e:
+            print(time.strftime("%F %T"), f"web: {e}", flush=True)
+            time.sleep(BROWSER_TICK * 59)
+
+
 def signins(headers=None) -> dict:
-    return {"sites": [cookies.status(s, MOUNTED_COOKIES[s]) for s in cookies.SITES],
+    return {"sites": [{**cookies.status(s, MOUNTED_COOKIES[s]), "refresh": _browser["refresh"].get(s)} for s in cookies.SITES],
             "browser": BROWSER_URL if BROWSER_PROFILE and BROWSER_URL else None,
             "reddit": _reddit_status(headers or {})}
 
@@ -2845,7 +2941,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
-                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/profile/relink": relink}
+                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/browser/start": browser_start, "/api/profile/relink": relink}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
@@ -2885,4 +2981,6 @@ if __name__ == "__main__":
     print(time.strftime("%F %T"), f"web: feed on :{PORT}", flush=True)
     threading.Thread(target=_link_sweep, daemon=True).start()
     threading.Thread(target=_dvr_once_watch, daemon=True).start()
+    if BROWSER_POWER_DIR and BROWSER_PROFILE and BROWSER_SCREEN:
+        threading.Thread(target=_browser_keeper, daemon=True).start()
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()

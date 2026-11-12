@@ -17,8 +17,9 @@ from pathlib import Path
 
 # site: its name, its domains (cookies for others are dropped) and the cookies a sign-in needs
 SITES = {
-    "x": {"name": "X", "domains": ("x.com", "twitter.com"), "needs": ("auth_token", "ct0")},
-    "chaturbate": {"name": "Chaturbate", "domains": ("chaturbate.com",), "needs": ("sessionid", "csrftoken")},
+    "x": {"name": "X", "domains": ("x.com", "twitter.com"), "needs": ("auth_token", "ct0"), "home": "https://x.com/home"},
+    "chaturbate": {"name": "Chaturbate", "domains": ("chaturbate.com",), "needs": ("sessionid", "csrftoken"),
+                   "home": "https://chaturbate.com/followed-cams/"},
 }
 MAX_TEXT = 1 << 20          # a paste's size
 NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,200}$")
@@ -113,10 +114,14 @@ def parse(text: str, site: str) -> list[dict]:
     return cookies
 
 
-def save(site: str, text: str) -> dict:
+BROWSER_NOTE = "# from the server's browser"      # (cookies taken from it: refreshed from it by themselves)
+
+
+def save(site: str, text: str, from_browser: bool = False) -> dict:
     """Keeps the site's cookies from a paste (replacing any set before). Its status()."""
     cookies = parse(text, site)
-    lines = ["# Netscape HTTP Cookie File", f"# {SITES[site]['name']}, set from dreamfeed's dashboard", ""]
+    lines = ["# Netscape HTTP Cookie File", f"# {SITES[site]['name']}, set from dreamfeed's dashboard",
+             BROWSER_NOTE if from_browser else "", ""]
     for c in cookies:
         dom = c["domain"] if c["domain"].startswith(".") else c["domain"]
         lines.append("\t".join([dom, "TRUE" if dom.startswith(".") else "FALSE", c["path"],
@@ -133,6 +138,18 @@ def save(site: str, text: str) -> dict:
         os.unlink(tmp)
         raise
     return status(site)
+
+
+def firefox_prefs(profile: str | os.PathLike) -> None:
+    """The server's browser opens the sites at each start (its homepage tabs), so their cookies
+    are freshened whenever it runs, and doesn't offer to restore what it had open."""
+    p = Path(profile)
+    if not p.is_dir():
+        return
+    home = "|".join(s["home"] for s in SITES.values())
+    (p / "user.js").write_text("\n".join([
+        'user_pref("browser.startup.page", 1);', f'user_pref("browser.startup.homepage", "{home}");',
+        'user_pref("browser.sessionstore.resume_from_crash", false);', ""]))
 
 
 def from_firefox(site: str, profile: str | os.PathLike) -> dict:
@@ -163,7 +180,7 @@ def from_firefox(site: str, profile: str | os.PathLike) -> dict:
                                 "TRUE" if secure else "FALSE", str(exp), name, value]))
     if not lines:
         raise ValueError(f"the server's browser isn't signed in to {s['name']}: sign in there first")
-    return save(site, "\n".join(lines))
+    return save(site, "\n".join(lines), from_browser=True)
 
 
 def forget(site: str) -> dict:
@@ -179,7 +196,8 @@ def status(site: str, mounted: str | os.PathLike | None = None) -> dict:
     "updated" (unix), "missing"}."""
     s = _site(site)
     p = path(site, mounted)
-    out = {"site": site, "name": s["name"], "set": None, "count": 0, "expires": None, "updated": None, "missing": list(s["needs"])}
+    out = {"site": site, "name": s["name"], "set": None, "count": 0, "expires": None, "updated": None, "missing": list(s["needs"]),
+           "browser": False}
     if not p:
         return out
     try:
@@ -189,6 +207,8 @@ def status(site: str, mounted: str | os.PathLike | None = None) -> dict:
         cookies, missing = [], list(s["needs"])
     need = [c for c in cookies if c["name"] in s["needs"]]
     exp = [c["expires"] for c in need if c["expires"]]
+    text = p.read_text(errors="replace")
+    out["browser"] = BROWSER_NOTE in text.splitlines()[:4]
     out.update(set="dashboard" if p.parent == folder() else "file", count=len(cookies),
                expires=min(exp) if exp else (0 if need else None), updated=int(p.stat().st_mtime), missing=missing)
     return out
