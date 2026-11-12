@@ -613,6 +613,10 @@ textarea.in { resize: vertical; min-height: 72px; }
 .si-row a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 .si-acts small { flex-basis: 100%; }
 .si-row a.primary { display: inline-flex; align-items: center; text-decoration: none; font-size: 14px; }
+.e6-vote { display: inline-flex; align-items: center; gap: 4px; }
+.e6-vote .secondary { width: auto; min-height: 32px; padding: 0 10px; }
+.e6-vote .secondary[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.e6-vote small { color: var(--muted); min-width: 2ch; text-align: center; }
 .si-uri { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 .cs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .cs-row .primary { padding: 0 18px; }
@@ -1026,7 +1030,7 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="personas" aria-pressed="false">Personas</button>
       <button type="button" data-s="x" aria-pressed="false">X</button><button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
       <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
-    <button type="button" class="secondary" id="saved-import">Bring in what you saved on X and Reddit</button>
+    <button type="button" class="secondary" id="saved-import">Bring in what you saved on X, Reddit and e621</button>
     <small class="note" id="saved-note"></small></div>
   <div class="timeline" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
@@ -1664,7 +1668,7 @@ function setView(v) {
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
   else reset();
 }
-// Saved: bring in your X bookmarks and Reddit saved posts (their files are then kept in full quality).
+// Saved: bring in your X bookmarks, Reddit saved posts and e621 favorites (their files are then kept in full quality).
 let importTimer = null;
 async function importStatus(started) {
   clearTimeout(importTimer);
@@ -1673,7 +1677,7 @@ async function importStatus(started) {
   const one = (name, r) => !r ? "" : r.error ? `${name}: ${r.error}` : `${name}: ${r.added} new of ${r.found}`;
   const f = d.files || {}, waiting = (f.queued || 0) + (f.running || 0);
   $("saved-import").disabled = d.running;
-  $("saved-note").textContent = [d.running ? "Reading what you saved…" : "", one("X", d.x), one("Reddit", d.reddit),
+  $("saved-note").textContent = [d.running ? "Reading what you saved…" : "", one("X", d.x), one("Reddit", d.reddit), one("e621", d.e621),
     waiting ? `keeping ${waiting} post${waiting === 1 ? "" : "s"} in full quality…` : "", f.failed ? `${f.failed} couldn't be kept` : ""]
     .filter(Boolean).join(" · ");
   if (state.view === "liked" && (d.running || waiting)) importTimer = setTimeout(() => importStatus(), 5000);
@@ -2559,7 +2563,8 @@ function postCard(p, opened) {
       const y = p.sync || {}, k = p.keep || {};
       const kept = !p.saved ? "" : k.status === "done" ? "kept in full quality" : k.status === "failed" ? `not kept: ${k.error || "?"}`
         : k.status ? "keeping a full-quality copy…" : "";
-      note.textContent = [y.status === "failed" ? y.error || "Reddit didn't take it" : p.saved && y.status === "done" ? "saved on Reddit too" : "",
+      const site = p.source === "e621" ? "e621" : "Reddit";
+      note.textContent = [y.status === "failed" ? y.error || `${site} didn't take it` : y.status === "done" ? (p.saved ? (p.source === "e621" ? "favorited on e621 too" : "saved on Reddit too") : p.source === "e621" ? "unfavorited on e621" : "") : "",
                           kept].filter(Boolean).join(" · ");
     };
     sv.onclick = async () => {
@@ -2570,6 +2575,18 @@ function postCard(p, opened) {
       show();
     };
     show(); acts.append(sv, note);
+  }
+  if (p.source === "e621" && p.votable) {          // signed in to e621: vote on it (the same again takes it back)
+    const vote = el("span", "e6-vote"), up = el("button", "secondary", "▲"), down = el("button", "secondary", "▼"), n = el("small", null, String(p.score ?? ""));
+    up.type = down.type = "button"; up.title = "Vote up on e621"; down.title = "Vote down on e621";
+    const mark = () => { up.setAttribute("aria-pressed", String(p.ours === 1)); down.setAttribute("aria-pressed", String(p.ours === -1)); n.textContent = String(p.score ?? ""); };
+    const cast = async s => {
+      up.disabled = down.disabled = true;
+      try { const r = await api("api/e621/vote", { id: p.id, score: s }); p.score = r.score; p.ours = r.ours; } catch (err) { toast(err.message); }
+      up.disabled = down.disabled = false; mark();
+    };
+    up.onclick = () => cast(1); down.onclick = () => cast(-1);
+    mark(); vote.append(up, n, down); acts.append(vote);
   }
   body.append(acts);
   a.append(av, body);
@@ -3128,7 +3145,7 @@ async function loadSignins() {
   if (q) { toast(q); history.replaceState(history.state, "", location.pathname); }
   let d;
   try { d = await api("api/signins"); } catch (err) { $("si-list").replaceChildren(el("li", "note", err.message)); return; }
-  $("si-list").replaceChildren(...d.sites.map(st => siCookieRow(st, d.browser)), siRedditRow(d.reddit));
+  $("si-list").replaceChildren(...d.sites.map(st => siCookieRow(st, d.browser)), siRedditRow(d.reddit), siE621Row(d.e621));
 }
 function siCookieRow(st, browser) {
   const li = el("li", "si-row"), head = el("div", "si-head");
@@ -3193,6 +3210,36 @@ function siCookieRow(st, browser) {
       } catch (x) { err.textContent = x.message; save.disabled = false; save.textContent = "Save and check"; }
     };
     li.append(form); ta.focus();
+  };
+  return li;
+}
+function siE621Row(st) {
+  const li = el("li", "si-row"), head = el("div", "si-head");
+  const words = st.signed_in ? [`Signed in as ${st.username}`, st.favorites != null ? `${Number(st.favorites).toLocaleString()} favorites` : "",
+    st.blacklist ? `your blacklist's ${st.blacklist} lines applied` : "", st.from === "env" ? "from .env" : ""].filter(Boolean).join(" · ")
+    : st.error ? `Not signed in: ${st.error}` : "Not signed in: Save favorites, votes, your favorites in Saved and For you need it";
+  const set = el("button", "secondary", st.signed_in ? "Change" : "Sign in"); set.type = "button";
+  head.append(el("b", null, "e621"), set);
+  if (st.from === "dashboard") {
+    const rm = el("button", "secondary", "Forget"); rm.type = "button";
+    rm.onclick = async () => { if (!confirm("Forget your e621 username and API key?")) return;
+      try { await api("api/signins", { site: "e621", forget: true }); loadSignins(); } catch (err) { toast(err.message); } };
+    head.append(rm);
+  }
+  head.append(el("small", st.signed_in ? null : "bad", words)); li.append(head);
+  set.onclick = () => {
+    if (li.querySelector(".si-form")) return;
+    const form = el("form", "si-form"), name = el("input", "in"), key = el("input", "in"), save = el("button", "primary", "Sign in"), err = el("div", "ed-err");
+    form.noValidate = true; name.placeholder = "username"; name.value = st.username || ""; key.type = "password"; key.placeholder = "API key";
+    for (const x of [name, key]) { x.setAttribute("autocomplete", "off"); x.setAttribute("autocapitalize", "off"); x.spellcheck = false; }
+    save.type = "submit"; err.setAttribute("role", "alert");
+    form.append(el("small", "hint", "On e621.net: your Account, then Manage API Access, makes the key (with your password). It's checked before it's kept."), name, key, save, err);
+    form.onsubmit = async e => {
+      e.preventDefault(); err.textContent = ""; save.disabled = true; save.textContent = "Checking…";
+      try { await api("api/signins", { site: "e621", username: name.value, api_key: key.value }); toast("e621: signed in ✓"); loadSignins(); }
+      catch (x) { err.textContent = x.message; save.disabled = false; save.textContent = "Sign in"; }
+    };
+    li.append(form); (st.username ? key : name).focus();
   };
   return li;
 }

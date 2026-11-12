@@ -20,6 +20,7 @@ These are real people: nothing here goes to training, styles, comics or generati
 """
 import base64
 import datetime as dt
+import itertools
 import json
 import os
 import re
@@ -485,12 +486,13 @@ def _e621_full(p: dict, kind: str) -> str | None:
 
 
 TOP_TODAY = "order:score date:day"      # For you: the best rated of the last 24 hours
+TOP_WEEK = "order:score date:week"      # (your taste's artists: the week's, as they post less often)
 
 
 def _e621_post(p: dict, place: str, top: bool = False) -> dict | None:
     """One e621 post as the Feed shows it, or None when it's left out."""
     got = e621.media(p)
-    if e621.blocked(p) or not got or text_blocked(p.get("description")):
+    if e621.blocked(p) or not got or text_blocked(p.get("description")) or e621.blacklisted(p):    # (and your own blacklist)
         return None
     d = e621.details(p)
     kind = "video" if got[1] in ("mp4", "webm") else "image"
@@ -503,15 +505,16 @@ def _e621_post(p: dict, place: str, top: bool = False) -> dict | None:
             "place": place, "text": d["title"], "posted_at": d["date"], "link": d["link"],
             "via": "foryou" if top else "following", "saved": False,
             "score": ((p.get("score") or {}).get("total") or 0), "comments": p.get("comment_count"),
+            "votable": bool(e621.creds()),
             "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
                        "poster": prev if kind == "video" else None}]}
 
 
-def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict], int | None]:
+def e621_page(search: str, at: int | None, top: bool = False, window: str = TOP_TODAY) -> tuple[list[dict], int | None]:
     """A page of an e621 tag search: the newest (at: the post id the page starts below), or
-    with top, the best rated of the last 24 hours (at: the page number)."""
+    with top, the best rated in window (the last 24 hours; at: the page number)."""
     def fetch():
-        params = {"tags": e621.query(f"{search} {TOP_TODAY}" if top else search), "limit": E621_PAGE}
+        params = {"tags": e621.query(f"{search} {window}" if top else search), "limit": E621_PAGE}
         if at:
             params["page"] = str(at) if top else f"b{at}"
         found = e621.get("/posts.json", params).get("posts") or []
@@ -521,7 +524,27 @@ def e621_page(search: str, at: int | None, top: bool = False) -> tuple[list[dict
         if top:
             return out, (at or 1) + 1
         return out, min((int(p["id"]) for p in found if str(p.get("id", "")).isdigit()), default=None)
-    return _cached(f"e621:{top}:{search}:{at}", fetch)
+    return _cached(f"e621:{top}:{window}:{search}:{at}", fetch)
+
+
+def e621_taste_searches() -> list[tuple[str, str, str]]:
+    """For you's searches from your taste (signed in): [(search, window, what it's called)]: the
+    artists you favorite and vote up most (the week's best), the species (today's), without
+    what you've already favorited."""
+    t = e621.taste()
+    if not t:
+        return []
+    out, mine = [], f"-fav:{t['name']}"
+    if t["artists"]:
+        out.append((" ".join("~" + a for a in t["artists"]) + " " + mine, TOP_WEEK, "artists you like"))
+    if t["species"]:
+        out.append((" ".join("~" + x for x in t["species"]) + " " + mine, TOP_TODAY, "what you like"))
+    return out
+
+
+def e621_favorites(limit: int = 1000) -> list[dict]:
+    """Your e621 favorites as Feed posts (the Saved import), newest favorited first."""
+    return [x for x in (_e621_post(p, "your favorites") for p in e621.favorites(limit)) if x]
 
 
 def e621_artist(name: str) -> dict:
@@ -604,21 +627,33 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
                             error = err[:200]
                 return lists, [], after, error
             top = mode == "foryou"
-            qs = [tags] if tags else searches
+            qs = [tags] if tags else list(searches)
+            windows, labels = {}, {}
+            if top and not tags:                # signed in: your taste too (the artists and species you like)
+                try:
+                    for q, window, label in e621_taste_searches():
+                        qs.append(q); windows[q] = window; labels[q] = label
+                except (LookupError, OSError, ValueError):
+                    pass
             state = cursor.get("e621") or {q: None for q in qs}
-            more, got, refused = {}, [], []
+            more, groups, refused = {}, [], []
             for q in qs:
                 if not first and state.get(q) is None:
                     continue
                 try:
-                    posts, last = e621_page(q, state.get(q), top)
+                    posts, last = e621_page(q, state.get(q), top, windows.get(q, TOP_TODAY))
                 except ValueError as e:         # a search dreamfeed won't run: the others still do
                     refused.append(f"{q}: {e}")
                     continue
-                got += posts
+                if q in labels:
+                    posts = [{**p, "place": labels[q]} for p in posts]
+                groups.append(posts)
                 more[q] = last
-            if top:                             # your searches' best of the day, together
-                got.sort(key=lambda p: p["score"], reverse=True)
+            if top:                             # each search's best first, the searches taken in turns
+                groups = [sorted(g, key=lambda p: p["score"], reverse=True) for g in groups]
+                got = [p for row in itertools.zip_longest(*groups) for p in row if p]
+            else:
+                got = [p for g in groups for p in g]
             return ([got] if qs else [], [], more if any(v is not None for v in more.values()) else None,
                     "; ".join(refused)[:200] or None)
         except (LookupError, ValueError, OSError) as e:

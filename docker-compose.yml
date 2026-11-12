@@ -254,6 +254,7 @@ services:
       TZ: ${TZ:?set TZ in .env}
       DREAMFEED_USERNAME: ${DREAMFEED_USERNAME:-}
       E621_USERNAME: ${E621_USERNAME-}        # optional: named in e621's user agent (the Feed, the Comics search)
+      E621_API_KEY: ${E621_API_KEY-}          # optional: signed in as you (or the Dashboard's Sign-ins)
       CB_VIDEOS: /videos/cb                    # your own videos of the rooms, on their Live profiles
       # The live Feed (README: Feed): X with your cookies, Reddit as you (your own Reddit app and
       # the refresh token from `follow reddit-login`). Without them, that site is left out.

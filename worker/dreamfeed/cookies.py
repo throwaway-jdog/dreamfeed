@@ -279,3 +279,48 @@ def forget_reddit() -> None:
     f = _reddit_file()
     if f:
         f.unlink(missing_ok=True)
+
+
+# ---- e621: your username and API key (e621.net: Account, Manage API Access), the same way
+# (<DATA_DIR>/cookies/e621.json); until set there, E621_USERNAME and E621_API_KEY from the environment.
+E621_NAME = re.compile(r"^[A-Za-z0-9_.~-]{2,40}$")
+E621_KEY = re.compile(r"^[A-Za-z0-9]{10,64}$")
+
+
+def _e621_file() -> Path | None:
+    return folder() / "e621.json" if os.environ.get("DATA_DIR", "").strip() else None
+
+
+def e621() -> dict:
+    """{"username", "api_key", "from": dashboard|env|None}."""
+    f = _e621_file()
+    try:
+        d = json.loads(f.read_text()) if f and f.is_file() else {}
+    except ValueError:
+        d = {}
+    if d.get("username") and d.get("api_key"):
+        return {"username": str(d["username"]), "api_key": str(d["api_key"]), "from": "dashboard"}
+    env = {"username": os.environ.get("E621_USERNAME", "").strip(), "api_key": os.environ.get("E621_API_KEY", "").strip()}
+    return {**env, "from": "env" if env["username"] and env["api_key"] else None}
+
+
+def save_e621(username: str, api_key: str) -> None:
+    username, api_key = username.strip(), api_key.strip()
+    if not E621_NAME.match(username) or not E621_KEY.match(api_key):
+        raise ValueError("that doesn't look like an e621 username and API key")
+    folder().mkdir(mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder(), prefix=".e621-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"username": username, "api_key": api_key}, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, folder() / "e621.json")
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def forget_e621() -> None:
+    f = _e621_file()
+    if f:
+        f.unlink(missing_ok=True)

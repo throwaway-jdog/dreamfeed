@@ -370,6 +370,16 @@ posts never go to training, styles, comics or generation. Open on X/Reddit goes 
   search asks e621 to leave them out too (`e621.NEVER`: the youth tags such as `young` and
   `cub`, `feral`, `bestiality`). `E621_USERNAME` (optional) names you in the user agent.
 
+  **Signed in to e621** (the Dashboard's Sign-ins: your username and an API key from e621's
+  Account, Manage API Access; checked before it's kept, or `E621_USERNAME` and `E621_API_KEY`):
+  Save on an e621 post favorites it there too (and unsaving unfavorites it); ▲ ▼ on e621 posts
+  vote as you (the same again takes it back); your account's blacklist hides what it does here
+  too (its lines of tags, `-tag`, `~tag`, `rating:`, `*`; a line with other metatags is left to
+  e621's own site), read again each hour; Saved's import brings in your favorites; and For you
+  adds your taste: the artists you favorite and vote up most (their week's best) and the species
+  (today's best), from your last few hundred favorites and up votes, without what you've already
+  favorited, each search taken in turns with the Dashboard's.
+
 The Feed has two parts, each with All, X, Reddit (and e621) to pick from (what you save goes to
 the **Saved** tab, below):
 - **Following:** your X Following timeline, your subreddits and Reddit people, e621, newest
@@ -390,8 +400,9 @@ the **Saved** tab, below):
   the site stays. Unsaving deletes them. A Reddit post is saved on Reddit too, as you, at once.
   An X post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client,
   so use Open on X for that.
-  **Bring in what you saved on X and Reddit** (at the top of Saved) adds your X bookmarks and
-  your Reddit saved posts (the last 1000 Reddit keeps) with pictures or videos, kept the same
+  **Bring in what you saved on X, Reddit and e621** (at the top of Saved) adds your X bookmarks,
+  your Reddit saved posts (the last 1000 Reddit keeps) and your e621 favorites (the last 1000;
+  signed in to e621) with pictures or videos, kept the same
   way; the same word rules leave some out, and ones you unsaved here stay out. Run it again any
   time for new ones. Reddit's saved list needs the sign-in's `history` permission (signed in
   before it was added: sign in again, below). Unsaving an imported X post doesn't remove the

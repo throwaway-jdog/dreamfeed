@@ -25,7 +25,9 @@ GET  /reddit/callback  and back here, where the sign-in is kept
 POST /api/signins      {"site": "x"|"chaturbate", "cookies": TEXT} set them (a cookies.txt or JSON export, or a
                         Cookie header) and check they work; {"site", "forget": true} drop the dashboard's;
                         {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys;
+                        {"site": "e621", "username", "api_key"} your e621 account (checked before it's kept);
                         {"site", "from_browser": true} take them from the server's browser (BROWSER_PROFILE)
+POST /api/e621/vote    {"id": "e621:ID", "score": 1|-1} vote on it as you (signed in to e621; the same again takes it back)
 POST /api/browser/start  start the server's browser (it stops itself when no one's using it)
 GET  /api/auth-check   200 when signed in here (the proxy asks before letting you into the server's browser)
 POST /api/dvr           {"name": ROOM, "action": "record"|"once"|"stop"|"pause"|"remove"}  your recorder (streamonitor), for that room:
@@ -562,8 +564,21 @@ def _browser_keeper() -> None:
             time.sleep(BROWSER_TICK * 59)
 
 
+def _e621_status() -> dict:
+    c = cookies.e621()
+    out = {"site": "e621", "name": "e621", "from": c["from"], "username": c["username"] or None, "signed_in": False}
+    if c["from"]:
+        try:
+            me = livefeeds._cached("e621-me", e621.me, 600)
+            out.update(signed_in=True, favorites=me["favorites"], blacklist=len(me["blacklist"]))
+        except (LookupError, OSError, ValueError) as e:
+            out["error"] = str(e)[:200]
+    return out
+
+
 def signins(headers=None) -> dict:
     return {"sites": [{**cookies.status(s, MOUNTED_COOKIES[s]), "refresh": _browser["refresh"].get(s)} for s in cookies.SITES],
+            "e621": _e621_status(),
             "browser": BROWSER_URL if BROWSER_PROFILE and BROWSER_URL else None,
             "reddit": _reddit_status(headers or {})}
 
@@ -572,6 +587,18 @@ def save_signin(req: dict) -> dict:
     """{"site", "cookies": TEXT} keeps them and checks them; {"site", "forget": true} drops them;
     {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys."""
     site = str(req.get("site", ""))
+    if site == "e621":
+        if req.get("forget"):
+            cookies.forget_e621()
+        else:
+            cookies.save_e621(str(req.get("username", "")), str(req.get("api_key", "")))
+        livefeeds.forget()
+        st = _e621_status()
+        if not req.get("forget") and not st["signed_in"]:
+            cookies.forget_e621()            # (a key e621 doesn't take isn't kept)
+            livefeeds.forget()
+            raise ValueError(st.get("error") or "e621 didn't take them")
+        return {"site": st}
     if site == "reddit":
         if req.get("forget"):
             cookies.forget_reddit()
@@ -1144,7 +1171,7 @@ def person_posts(source: str, handle: str, cursor: str) -> dict:
 
 def save_post(req: dict) -> dict:
     """{"post": {...}, "save": bool}: keep a post in Saved (as it was shown); a Reddit post is
-    saved on Reddit too."""
+    saved on Reddit too, an e621 one favorited (signed in)."""
     p, save = req.get("post") or {}, bool(req.get("save"))
     pid = str(p.get("id") or "")
     m = re.fullmatch(r"(x|reddit|e621):([A-Za-z0-9_]{1,30})", pid)
@@ -1157,6 +1184,12 @@ def save_post(req: dict) -> dict:
             sync = {"status": "done"}
         except (LookupError, ValueError) as e:
             sync = {"status": "failed", "error": str(e)}
+    elif m.group(1) == "e621" and e621.creds() and m.group(2).isdigit():
+        try:
+            e621.favorite(m.group(2), save)
+            sync = {"status": "done"}
+        except (LookupError, OSError) as e:
+            sync = {"status": "failed", "error": str(e)[:200]}
     media = []
     for x in p["media"][:livefeeds.MAX_GALLERY]:
         if not isinstance(x, dict) or x.get("kind") not in ("image", "video", "hls"):
@@ -1179,7 +1212,16 @@ def save_post(req: dict) -> dict:
     return {"saved": save, "sync": sync, "keep": dict(r) if r else None}
 
 
-_import = {"running": False, "at": None, "x": None, "reddit": None}
+_import = {"running": False, "at": None, "x": None, "reddit": None, "e621": None}
+
+
+def e621_vote(req: dict) -> dict:
+    """{"id": "e621:ID", "score": 1 | -1}: vote on it as you (the same again takes it back)."""
+    m = re.fullmatch(r"e621:(\d{1,12})", str(req.get("id", "")))
+    score = req.get("score")
+    if not m or score not in (1, -1):
+        raise ValueError("bad vote")
+    return e621.vote(m.group(1), score)
 _import_lock = threading.Lock()
 
 
@@ -1190,16 +1232,19 @@ def import_saved(req: dict) -> dict:
     with _import_lock:
         if _import["running"]:
             return dict(_import)
-        _import.update(running=True, x=None, reddit=None)
+        _import.update(running=True, x=None, reddit=None, e621=None)
     threading.Thread(target=_run_import, daemon=True).start()
     return dict(_import)
 
 
 def _run_import() -> None:
     try:
-        for source, read in (("x", livefeeds.x_bookmarks), ("reddit", livefeeds.reddit_saved)):
+        for source, read in (("x", livefeeds.x_bookmarks), ("reddit", livefeeds.reddit_saved), ("e621", livefeeds.e621_favorites)):
             if source == "reddit" and not livefeeds.reddit_ready():
                 _import["reddit"] = {"error": "Reddit isn't signed in"}
+                continue
+            if source == "e621" and not e621.creds():
+                _import["e621"] = {"error": "e621 isn't signed in"}
                 continue
             try:
                 posts = read()
@@ -2941,7 +2986,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
-                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/browser/start": browser_start, "/api/profile/relink": relink}
+                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/browser/start": browser_start, "/api/e621/vote": e621_vote, "/api/profile/relink": relink}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
