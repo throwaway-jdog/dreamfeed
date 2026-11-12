@@ -17,6 +17,25 @@ The page is at `https://<your domain>/dreamfeed/` (behind formlogin).
 Models (in `.env`): WAI-Illustrious v17 for anime, FurryVision XL v2 for furry, Wan 2.2
 I2V for clips. Civitai downloads that need an account use `CIVITAI_API_KEY`.
 
+## Where things are
+
+- `worker/dreamfeed/`: the worker's code (also the follow service's, and some of the web app's),
+  `python -m dreamfeed` (`__main__.py`):
+  - `core/`: what everything shares: settings (`config`), the database (`db`), the word and
+    youth rules (`safety`, `checks`), personas and their acts, sign-ins (`cookies`).
+  - `art/`: making pictures and videos and training styles: the nightly posts (`generate`,
+    `comfy`, `captions`), scenes and motion, styles, character and video LoRAs, the checks'
+    models (`vision`).
+  - `comics/`: comics: writing and drawing them, importing them, lettering, animating panels.
+  - `live/`: Chaturbate: the follow service (`follow`), your recordings and highlights
+    (`cbvideos`, `cbhighlights`), profiles and linking accounts across sites.
+  - `feed/`: the live Feed's sites, a module each (`x`, `bsky`, `reddit`, `redgifs`,
+    `e621posts` with e621's API in `e621`, `xvideos`), mixed by `livefeeds`; Saved's copies
+    (`savedposts`).
+- `web/`: the web app (`app.py`, the page `index.html`, the recorder client `dvr.py`).
+- `browserpower/`: starts and stops the server's browser (systemd on the host; Sign-ins).
+- `trainer/`, `video-trainer/`, `comfyui/`, `agecheck/`: the other services.
+
 ## Personas
 
 Add, change, pause and remove them on the Dashboard (**Personas**). The editor covers
@@ -125,7 +144,7 @@ night's best), and the Dashboard can animate posts on request. Each is a ~5-seco
 image-to-video clip:
 
 - **The act.** The picture's tags decide whether it shows a sex act (cowgirl, missionary,
-  doggy, blowjob, double blowjob; `worker/dreamfeed/motion.py`). Those clips use a motion
+  doggy, blowjob, double blowjob; `worker/dreamfeed/art/motion.py`). Those clips use a motion
   LoRA trained for these acts (`VIDEO_ACT_LORA_HIGH` / `_LOW`, made for DR34ML4Y v2 from
   Civitai) with the act's trigger word; Wan alone barely knows them. Other clips go without.
 - **The motion.** The caption model writes a plain-sentence description of what moves and
@@ -137,14 +156,14 @@ image-to-video clip:
   (it was 2.5); in a test, the same picture moved about ten times as much.
 
 - **Smoothing.** Once a clip passes its checks, a frame is made between each two (RIFE 4.25,
-  `smooth.py`; optical flow, not a cross-fade), so it plays at 32 fps instead of Wan's 16.
+  `art/smooth.py`; optical flow, not a cross-fade), so it plays at 32 fps instead of Wan's 16.
   Scenes are smoothed shot by shot, and comic panel loops too (the wrap included), at 24 fps.
   If smoothing fails, the clip is kept as drawn.
 
 Every clip is checked on at least 8 frames, like images, before it reaches the feed.
 
 From a post with two characters, the viewer's Animate can also make a **scene** of about 40
-seconds (`worker/dreamfeed/scene.py`), cut together the way animators do it: a few looping shots,
+seconds (`worker/dreamfeed/art/scene.py`), cut together the way animators do it: a few looping shots,
 each a new drawing, building to a climax. Wan makes ~5 seconds at a time and drifts when clips are
 chained, so each shot is its own clip:
 
@@ -285,7 +304,7 @@ dreamfeed/
 
 The **Comics** tab makes comics about two characters: two personas (each with a trained
 character style), or a persona and her partner. Give it a story in a few sentences and a page
-count (1 to 4, 4 panels a page). The worker (`worker/dreamfeed/comic.py`, also
+count (1 to 4, 4 panels a page). The worker (`worker/dreamfeed/comics/comic.py`, also
 `python -m dreamfeed comic A B --story "..."`) draws a clean picture of the two of them first,
 plans the panels (build-up, then acts, cuddling at the end), has the text model write each page's
 lines in their voices from the story, draws all panels like a scene's shots (one cast, one room,
@@ -294,7 +313,7 @@ the tail toward the speaker (the image model can't write). About 6 minutes a pag
 lines are checked like captions, and must be consensual (`safety.story_blocked`). Comics stay
 until deleted; they aren't in the feed and don't expire.
 
-**Importing** a comic (the same tab; `comicimport.py`): paste the gallery's link (anything
+**Importing** a comic (the same tab; `comics/comicimport.py`): paste the gallery's link (anything
 gallery-dl reads, and multporn comics) and say whether it's furry or anime. Every page gets the
 strict adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
 imported. Pages are kept as drawn, to read and animate panels of. (Colouring black-and-white
@@ -322,13 +341,13 @@ saved) to jump to one; the comic's delete button is there too. A comic's card in
 **Animated panels.** In the reader, **Animate a panel** shows each page's panels (found when the
 comic is saved: cut along the gutters, white, black or coloured; drag a box for panels that
 overlap or touch).
-Pick one, optionally say what moves, and a job (`comic_animate`, `comicanim.py`) cuts the panel
+Pick one, optionally say what moves, and a job (`comic_animate`, `comics/comicanim.py`) cuts the panel
 out and has Wan 2.2 animate it for about four seconds (as asked, or by the act's motion LoRA;
 a sex panel with no position thrusts), then cuts it to a cycle within the clip, blended at the
 seam, played at 12 fps. The clip gets the video checks (stricter ones for imported comics) and
 plays over its panel in the reader, looping; **Remove animation** takes it off again.
 Panels can be queued one after another without leaving the picker (queued ones show as such).
-Speech bubbles and text never move: `lettering.py` finds them (ogkalu's comic text and bubble
+Speech bubbles and text never move: `comics/lettering.py` finds them (ogkalu's comic text and bubble
 detector, Apache 2.0, on the CPU; each bubble traced to its shape from its box) and the clip
 shows the drawing there. The outlines say what moves (one loop per character, reaching past the
 panel for a character breaking out of it): only that moves, the rest is the drawing itself.
@@ -565,7 +584,7 @@ usually live, their bio, the X and Reddit accounts linked to the room, their lat
 (read live), and your videos of them. Accounts get linked by themselves when the performer links them
 for free in their Chaturbate bio (the follow service reads a few bios each round, each once a
 day; links that cost tokens are left alone), or by you on the profile; × unlinks one (it isn't
-linked again). **Their accounts, found across sites** (`linking.py`, run by the web app: it has the Reddit and
+linked again). **Their accounts, found across sites** (`live/linking.py`, run by the web app: it has the Reddit and
 X sign-ins). From what a room links, dreamfeed follows what the creator publishes themselves: link
 pages (Linktree, AllMyLinks) are read and every account on them linked; each account's own profile
 is read for more (an X bio and website, a Reddit profile, a RedGifs profile), two steps out. Then

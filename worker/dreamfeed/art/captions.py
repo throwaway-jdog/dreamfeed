@@ -21,8 +21,8 @@ import re
 from functools import cache
 from pathlib import Path
 
-from . import safety
-from .personas import RATINGS
+from ..core import safety
+from ..core.personas import RATINGS
 
 TRIES = 4
 EXAMPLES = 14         # example posts shown to the model per caption
@@ -309,7 +309,7 @@ def write_all(cfg, conn, night: str, posts: list[tuple[int, str, list[str]]], pr
     model_id = cfg.caption_model
     if not model_id or not posts:
         return {}
-    from .personas import load
+    from ..core.personas import load
     by_handle = {p.handle: p for p in load(cfg.personas_path)}
     try:
         writer = Writer(model_id)

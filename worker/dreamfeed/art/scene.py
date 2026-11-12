@@ -71,7 +71,7 @@ HIS_MOTION = {
     "standing": "he stands behind her and thrusts his hips into her hard, his whole body moving",
     "blowjob": "his hips push forward into her mouth, his hand on her head",
 }
-from .acts import (GIRL_GIRL_MIDDLE as YURI_MIDDLE, GIRL_GIRL_PEAK as YURI_PEAK,
+from ..core.acts import (GIRL_GIRL_MIDDLE as YURI_MIDDLE, GIRL_GIRL_PEAK as YURI_PEAK,
                    STRAIGHT_MIDDLE as MIDDLE, STRAIGHT_OPENERS as OPENERS)
 
 # Girl-girl scenes (a post with 2girls and no man): their own acts (motion.ACTS has a LoRA for
@@ -115,7 +115,7 @@ YURI_ONLY = re.compile(r"\b(kiss\w*|french kiss|fingering|cunnilingus|tribadism|
 
 
 def is_yuri(prompt: str) -> bool:
-    from .acts import kind
+    from ..core.acts import kind
     return kind(prompt) == "girl-girl"
 
 NO_CUM = "cum, semen, cum on body, cum in pussy, cum in mouth, creampie, ejaculation, cum string"
@@ -546,7 +546,7 @@ def draw(cfg, comfy, persona, post: dict, shots: list[Shot], subdir: str, name: 
     then looks most like the post, wins, and is pasted into the room. Losers are deleted;
     winners are cropped (CROP). The room is deleted too, or moved to keep_room."""
     from . import captions
-    from .checks import problem
+    from ..core.checks import problem
     from .vision import Vision
     # The post first: its likeness to score candidates by, and her body for every shot.
     vision = Vision(cfg.models_dir)
@@ -634,7 +634,7 @@ def into_room(cfg, comfy, post: dict, plate: Path, out: list, asks: list, lora, 
     pass of the image model to blend the edges and light, with the room's own pixels put back
     everywhere away from them. A shot whose blended picture fails a check keeps its own room."""
     from . import cutout
-    from .checks import problem
+    from ..core.checks import problem
     from .vision import Vision
     with Image.open(plate) as im:
         room = im.convert("RGB")
@@ -723,9 +723,9 @@ def load_post(cfg, conn, gid: int) -> dict:
 
 
 def preview(args: list[str]) -> None:
-    from . import db, personas as people
+    from ..core import db, personas as people
     from .comfy import Comfy
-    from .config import Config
+    from ..core.config import Config
     ap = argparse.ArgumentParser(prog="dreamfeed scene-preview")
     ap.add_argument("post", type=int)
     ap.add_argument("--seed", type=int)
@@ -733,7 +733,7 @@ def preview(args: list[str]) -> None:
     ap.add_argument("--reference", help="IP-Adapter on the post: WEIGHT,TYPE (e.g. 0.5,linear), or off")
     ap.add_argument("--out", default="contact-sheet.jpg", help="the contact sheet's file name")
     a = ap.parse_args(args)
-    from .acts import checked
+    from ..core.acts import checked
     picked_raw = dict(x.split("=", 1) for x in a.acts.split(",")) if a.acts else {}
     cfg = Config()
     gen = cfg.generation()
@@ -784,7 +784,8 @@ def render(cfg, comfy, post: dict, shots: list[Shot], pictures: list[Path | None
     check it, play it shot.loops times, and cut to the next. Returns the scene file (None if no
     shot passed) and a note per shot."""
     import subprocess
-    from . import personas as people, videolora
+    from ..core import personas as people
+    from . import videolora
     from .comfy import WAN
     from .generate import MOTION
     gen = cfg.generation()
@@ -915,7 +916,7 @@ def _check_shots(cfg, clips: dict[int, np.ndarray], post: dict) -> dict[int, tup
 
 def _check_shot(cfg, frames: np.ndarray, post: dict, vision) -> tuple[str, str] | None:
     """The clip checks, and that no frame drifts away from the first (a morph)."""
-    from .checks import problem
+    from ..core.checks import problem
     from .generate import VIDEO_CHECK_FRAMES
     sample = _sample(frames, VIDEO_CHECK_FRAMES)
     a = vision.analyze(sample)
@@ -929,9 +930,9 @@ def _check_shot(cfg, frames: np.ndarray, post: dict, vision) -> tuple[str, str] 
 
 def render_preview(args: list[str]) -> None:
     """scene-render POST_ID [--shots 4,5]: animate the pictures scene-preview drew."""
-    from . import db
+    from ..core import db
     from .comfy import Comfy
-    from .config import Config
+    from ..core.config import Config
     from dataclasses import fields
     ap = argparse.ArgumentParser(prog="dreamfeed scene-render")
     ap.add_argument("post", type=int)
@@ -976,7 +977,7 @@ def render_preview(args: list[str]) -> None:
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
     """A "Make a scene" request from the viewer: params {"kind": "scene", "ids": [post]}."""
     import datetime as dt
-    from . import personas as people
+    from ..core import personas as people
     from .comfy import Comfy
     from .generate import _cancel_requested, _finish, _progress, _set, check_videos
     night = f"scene-{dt.datetime.now():%Y%m%d-%H%M%S}"
@@ -993,7 +994,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
         post = load_post(cfg, conn, src)
         persona = {p.handle: p for p in people.load(cfg.personas_path)}.get(post["persona"])
         rng = random.Random()
-        from .acts import checked
+        from ..core.acts import checked
         picked = checked(post["prompt"], params.get("picks"))
         shots = plan_yuri(rng, picked) if is_yuri(post["prompt"]) else plan(rng, picked)
         with conn:

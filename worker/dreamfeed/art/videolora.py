@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from . import motion
-from .config import Config
+from ..core.config import Config
 from .lora import TAG_MIN, write_status
 
 VIDEO_FILTER = "extension in ('mp4', 'webm', 'mov', 'm4v')"
@@ -83,7 +83,7 @@ def _convert(src: Path, dst: Path) -> bool:
 def check(cfg: Config, base: Path, medium: str) -> tuple[list[tuple[Path, list[str]]], dict]:
     """Clips that pass every check, with their tags. Failing clips are deleted."""
     from . import media
-    from .checks import problem
+    from ..core.checks import problem
     from .vision import Vision
     files = sorted(p for p in (base / "video_raw").iterdir() if p.is_file() and media.kind(p) == "video")
     vision = Vision(cfg.models_dir)

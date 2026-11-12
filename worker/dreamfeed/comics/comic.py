@@ -33,7 +33,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from . import acts, safety, scene
+from ..core import acts, safety
+
+from ..art import scene
 
 PANELS = 4             # per page
 MAX_PAGES = 4
@@ -92,13 +94,13 @@ def _hair(look: str) -> tuple[int, int, int] | None:
 
 
 def _voice(cfg, p, girls_only: bool) -> list[str]:
-    from . import captions
+    from ..art import captions
     lines = (captions.voice(cfg, p.voice) if p.voice else []) + [c for k in p.posts for c in k.captions]
     return [l for l in lines if len(l) <= MAX_LINE and not (girls_only and MAN.search(l))]
 
 
 def _line_ok(line: str, examples: list[str], girls_only: bool) -> bool:
-    from .captions import REFUSAL
+    from ..art.captions import REFUSAL
     if not line or len(line) > MAX_LINE or REFUSAL.search(line) or safety.story_blocked(line):
         return False
     if re.search(r"@\w|https?://|www\.|#\w|\[|\]", line) or (girls_only and MAN.search(line)):
@@ -120,7 +122,7 @@ def plan(kind: str, pages: int, rng: random.Random, picks: list[str] | None = No
 def script(cfg, cast: list, kind: str, story: str, actions: list[str], rng: random.Random) -> dict:
     """{"title", "panels": [{"action", "expression", "speaker" (0, 1 or None), "line"}]}, one page
     at a time, each following on from the lines before."""
-    from .captions import Writer
+    from ..art.captions import Writer
     girls = kind == "girl-girl"
     voices = [rng.sample(v, min(8, len(v))) for v in (_voice(cfg, p, girls) for p in cast)]
     examples = [l for v in voices for l in v]
@@ -282,7 +284,7 @@ def page(panels: list[Image.Image], layout: str) -> Image.Image:
 def cast_for(cfg, handles: list[str]):
     """(personas [A, B] for the script, the persona drawing it with B as a friend or partner,
     the reference prompt). handles: [A, B] with B a persona handle or "partner"."""
-    from . import personas as people
+    from ..core import personas as people
     every = {p.handle: p for p in people.load(cfg.personas_path)}
     a = every.get(handles[0])
     if not a or not a.lora:
@@ -307,9 +309,9 @@ def cast_for(cfg, handles: list[str]):
 
 def reference(cfg, comfy, persona, prompt: str, subdir: str, name: str, rng: random.Random) -> Path:
     """The comic's starting picture: drawn until one passes every post check."""
-    from .checks import problem
-    from .generate import CLOTHED_NEGATIVE, _watermark
-    from .vision import Vision
+    from ..core.checks import problem
+    from ..art.generate import CLOTHED_NEGATIVE, _watermark
+    from ..art.vision import Vision
     gen = cfg.generation()
     ckpt = gen.checkpoints[persona.medium]
     paths = []
@@ -346,8 +348,8 @@ def reference(cfg, comfy, persona, prompt: str, subdir: str, name: str, rng: ran
 def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = None,
          progress=lambda phase, done, total: None) -> dict:
     """A comic: {"title", "pages": [files under generated/], "dir"}."""
-    from . import cutout
-    from .comfy import Comfy
+    from ..art import cutout
+    from ..art.comfy import Comfy
     bad = safety.story_blocked(story)
     if bad:
         raise ValueError(f"the story can't include: {', '.join(bad)}")
@@ -429,7 +431,7 @@ def make(cfg, handles: list[str], story: str, pages: int, seed: int | None = Non
 
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
     """A comic queued from the dashboard: params {"kind": "comic", "cast": [A, B|partner], "story", "pages"}."""
-    from .generate import _cancel_requested, _progress, _set
+    from ..art.generate import _cancel_requested, _progress, _set
     night = f"comicjob-{job_id}"
     with conn:
         conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
@@ -461,7 +463,7 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
 
 
 def main(args: list[str]) -> None:
-    from .config import Config
+    from ..core.config import Config
     ap = argparse.ArgumentParser(prog="dreamfeed comic")
     ap.add_argument("a", help="a persona's handle")
     ap.add_argument("b", help="another persona's handle, or partner (a man from A's partners list)")

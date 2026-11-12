@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 from . import captions
-from .config import Config
+from ..core.config import Config
 from .lora import write_status
 
 MOUNTED_COOKIES = Path("/config/cookies.txt")   # X_COOKIES_FILE, needed for x.com sources
@@ -32,7 +32,7 @@ MOUNTED_COOKIES = Path("/config/cookies.txt")   # X_COOKIES_FILE, needed for x.c
 
 def x_cookies() -> Path | None:
     """Your X cookies: the dashboard's (Sign-ins), else X_COOKIES_FILE's (cookies.py)."""
-    from . import cookies
+    from ..core import cookies
     return cookies.path("x", MOUNTED_COOKIES)
 COOKIE_HOSTS = ("x.com", "twitter.com")
 MIN_IMAGES = 20           # fewer usable images than this is not worth training on

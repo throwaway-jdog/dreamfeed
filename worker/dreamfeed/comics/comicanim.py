@@ -157,7 +157,7 @@ def add_outlines(meta: dict, out_dir: Path, progress=lambda phase, done, total: 
     they were), round the characters in its panels with the lettering left out
     (lettering.outlines), offered by the reader to start from. A comic is kept without them if
     it fails."""
-    from .cutout import Cutout
+    from ..art.cutout import Cutout
     from .lettering import Lettering, outlines
     found = dict(meta.get("outlines") or {}) if pages is not None else {}
     try:
@@ -221,7 +221,7 @@ def _act(tags: list[str], said: str):
     """The act whose motion LoRA moves this panel: what the person said first, then the tags,
     then plain thrusting if there's sex in it."""
     import re
-    from . import motion
+    from ..art import motion
     by_name = {a.name: a for a in (*motion.ACTS, *motion.CLIMAXES.values())}
     for pattern, name in SAID_ACTS:
         if re.search(pattern, said, re.I) and name in by_name:
@@ -301,12 +301,13 @@ def animate_panel(cfg, folder: Path, meta: dict, page: int, box: list[float], mo
                   outline: list | None = None) -> dict:
     """The clip for one panel; returns its entry for meta["animations"]. outline: loops (page
     shares) around what moves; the rest stays as drawn."""
-    from . import motion, safety
-    from .comfy import Comfy
-    from .generate import MOTION
-    from .scene import _check_shots, _frames
-    from .smooth import smoothed
-    from .vision import Vision
+    from ..art import motion
+    from ..core import safety
+    from ..art.comfy import Comfy
+    from ..art.generate import MOTION
+    from ..art.scene import _check_shots, _frames
+    from ..art.smooth import smoothed
+    from ..art.vision import Vision
     gen = cfg.generation()
     out_dir = cfg.data_dir / "generated"
     medium = meta.get("medium") or "furry"
@@ -415,8 +416,8 @@ def run_job(cfg, conn, job_id: int, params: dict) -> None:
 def _smooth_old(path: Path, out_dir: Path, device: str) -> int:
     """A comic's clips made before smoothing, smoothed (as new files: names are never reused);
     how many."""
-    from .scene import _frames
-    from .smooth import fps_of, smoothed
+    from ..art.scene import _frames
+    from ..art.smooth import fps_of, smoothed
     meta = json.loads(path.read_text())
     done = 0
     for a in meta.get("animations") or []:
@@ -442,7 +443,7 @@ def _smooth_old(path: Path, out_dir: Path, device: str) -> int:
 def main(args: list[str]) -> None:
     """comic-panels: panels and thumbnails for the comics saved before they were kept."""
     import sqlite3
-    from .config import Config
+    from ..core.config import Config
     cfg = Config()
     out_dir = cfg.data_dir / "generated"
     conn = sqlite3.connect(cfg.db_path)

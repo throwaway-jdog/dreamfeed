@@ -11,7 +11,7 @@ the act is used. Descriptions go through the same checks as captions.
 """
 from dataclasses import dataclass
 
-from . import safety
+from ..core import safety
 
 
 @dataclass(frozen=True)

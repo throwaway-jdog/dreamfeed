@@ -99,7 +99,10 @@ import dvr
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, cbprofile, cbvideos, cookies, e621, linking, livefeeds, personas as people, safety, savedposts   # the worker's own rules (see Dockerfile)
+# the worker's own rules and the live sites (see Dockerfile)
+from dreamfeed.core import acts, cookies, personas as people, safety
+from dreamfeed.feed import e621, livefeeds, savedposts
+from dreamfeed.live import cbprofile, cbvideos, linking
 
 
 def required(name: str) -> str:

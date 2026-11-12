@@ -6,9 +6,12 @@ COPY app.py dvr.py index.html /app/
 COPY vendor /app/vendor
 # Shared sign-in library (the formlogin build context, see docker-compose.yml).
 COPY --from=formlogin formlogin /app/formlogin
-# The worker's persona and safety rules, so the persona editor checks edits exactly as the
-# worker will (the worker build context). Pure Python, no other worker code.
-COPY --from=worker dreamfeed/personas.py dreamfeed/safety.py dreamfeed/acts.py dreamfeed/e621.py dreamfeed/cbvideos.py dreamfeed/cbprofile.py dreamfeed/livefeeds.py dreamfeed/savedposts.py dreamfeed/linking.py dreamfeed/cookies.py /app/dreamfeed/
-RUN touch /app/dreamfeed/__init__.py
+# From the worker (its build context): its persona and safety rules, so the persona editor
+# checks edits exactly as the worker will (core), the live sites (feed) and Chaturbate's (live).
+# Pure Python: only what these import is used (none of the worker's GPU code).
+COPY --from=worker dreamfeed/__init__.py /app/dreamfeed/
+COPY --from=worker dreamfeed/core /app/dreamfeed/core
+COPY --from=worker dreamfeed/feed /app/dreamfeed/feed
+COPY --from=worker dreamfeed/live /app/dreamfeed/live
 ENV PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp
 CMD ["python", "/app/app.py"]

@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import Config
+from ..core.config import Config
 from .lora import write_status
 
 CROWD = {"2girls", "3girls", "4girls", "multiple girls", "group sex", "yuri"}
@@ -88,7 +88,7 @@ def _closeups(cfg: Config, vision, keep: list[Path], full: Path, out: Path, name
     altogether, with all its close-ups (one flagged feral is left out on its own). data/lora/NAME/closeups.json lists what was kept and
     why the rest weren't."""
     from PIL import Image
-    from .checks import problem
+    from ..core.checks import problem
     log, counts = [], {}
     for part in parts:
         tag, sizes, others, solo_only = PARTS[part]

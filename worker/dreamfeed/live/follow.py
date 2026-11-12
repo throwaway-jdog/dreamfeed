@@ -32,7 +32,7 @@ import urllib.request
 from pathlib import Path
 
 from . import cbprofile, cbvideos
-from .db import connect
+from ..core.db import connect
 
 POLL = 120                   # seconds between looks
 TICK = 5                     # seconds between checks for highlight requests
@@ -60,7 +60,7 @@ def _now() -> str:
 
 
 def _opener():
-    from . import cookies
+    from ..core import cookies
     file = cookies.path("chaturbate", MOUNTED_COOKIES)
     if not file:
         raise SignedOut("no Chaturbate cookies: add them on the dashboard (Sign-ins)")
@@ -158,10 +158,10 @@ def main(argv: list[str]) -> None:
         from .cbhighlights import run
         return run(int(argv[1]))
     if argv[:1] == ["save"] and len(argv) == 2:
-        from .savedposts import run as save
+        from ..feed.savedposts import run as save
         return save(argv[1])
     if argv[:1] == ["reddit-login"]:
-        from .redditlogin import login
+        from ..feed.redditlogin import login
         return login(argv[1:])
     data = os.environ.get("DATA_DIR", "").strip()
     if not data:

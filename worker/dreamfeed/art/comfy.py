@@ -12,7 +12,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from . import presets, safety
+from . import presets
+
+from ..core import safety
 
 
 class Comfy:

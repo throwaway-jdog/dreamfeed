@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 
 from . import cbvideos
-from .db import connect
+from ..core.db import connect
 
 STEP = 0.5            # seconds between looks
 SMOOTH = 9            # looks averaged (about 4.5 s)

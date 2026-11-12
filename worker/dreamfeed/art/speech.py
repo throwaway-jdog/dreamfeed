@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 
-from .config import Config
+from ..core.config import Config
 
 MODEL = "stepfun-ai/GOT-OCR-2.0-hf"
 REVISION = "d3017ef2c2c1395888c8d635c5e0508bcb0ac78d"

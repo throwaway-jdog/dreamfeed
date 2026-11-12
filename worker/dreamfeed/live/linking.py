@@ -22,7 +22,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import cbprofile, livefeeds
+from . import cbprofile
+
+from ..feed import livefeeds
 
 AGENT = "Mozilla/5.0 (dreamfeed: a creator's own links)"
 MAX_FETCHES = 14          # pages read for one room

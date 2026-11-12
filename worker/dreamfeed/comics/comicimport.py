@@ -36,7 +36,7 @@ def _host(url: str) -> str:
 
 
 def _gallery_dl(url: str, folder: Path, extra: list[str]) -> subprocess.CompletedProcess:
-    from .styles import COOKIE_HOSTS, x_cookies
+    from ..art.styles import COOKIE_HOSTS, x_cookies
     conf = {"extractor": {"directory": [], "base-directory": str(folder), "filename": "{num:>04}_{filename}.{extension}",
                           "cookies-update": False}, "downloader": {"part-directory": str(folder / ".part")}}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -130,8 +130,8 @@ def check_pages(cfg, pages: list[Path], medium: str, progress=lambda phase, done
                 whole: bool = True) -> tuple[list[Path], int]:
     """The pages that pass the checks (the others deleted), and how many were dropped. whole:
     it's a whole comic, refused if too many fail (new pages of one are taken one by one)."""
-    from .checks import problem
-    from .vision import Vision
+    from ..core.checks import problem
+    from ..art.vision import Vision
     kept, dropped = [], 0
     vision = Vision(cfg.models_dir)
     try:
@@ -153,7 +153,7 @@ def check_pages(cfg, pages: list[Path], medium: str, progress=lambda phase, done
 
 def _job(conn, job_id: int, night: str, work) -> None:
     """Runs work(progress) -> message as job job_id, keeping its runs row."""
-    from .generate import _progress
+    from ..art.generate import _progress
     with conn:
         conn.execute("UPDATE jobs SET status = 'running', night = ? WHERE id = ?", (night, job_id))
         conn.execute("INSERT INTO runs(night, status, attempts, started_at) VALUES (?, 'running', 1, datetime('now'))",
@@ -175,7 +175,7 @@ def _job(conn, job_id: int, night: str, work) -> None:
 def run_job(cfg, conn, job_id: int, params: dict) -> None:
     """An import queued from the Comics page: {"kind": "comic_import", "url", "title", "medium"}."""
     from .comicanim import add_outlines, add_panels
-    from .generate import _set
+    from ..art.generate import _set
     out_dir = cfg.data_dir / "generated"
     folder = out_dir / f"comic-import-{dt.datetime.now():%Y%m%d-%H%M%S}"
     medium = params.get("medium", "furry")
@@ -258,7 +258,7 @@ UPDATE_EVERY = 24 * 3600
 def due_update(cfg) -> None:
     """Queues the daily look for new pages of every imported comic, once a day."""
     import time
-    from . import db
+    from ..core import db
     mark = cfg.data_dir / "generated" / ".comic-updates"
     try:
         if time.time() - mark.stat().st_mtime < UPDATE_EVERY:

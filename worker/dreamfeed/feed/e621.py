@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import safety
+from ..core import safety
 
 API = "https://e621.net"
 STATIC = ("static1.e621.net",)
@@ -39,7 +39,7 @@ _lock, _last = threading.Lock(), [0.0]
 
 def creds() -> tuple[str, str] | None:
     """(username, API key) when signed in."""
-    from . import cookies
+    from ..core import cookies
     c = cookies.e621()
     return (c["username"], c["api_key"]) if c["from"] else None
 

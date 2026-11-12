@@ -23,7 +23,7 @@ import sys
 
 import numpy as np
 
-from .config import Config
+from ..core.config import Config
 
 FRAMINGS = ["full body, standing", "full body, sitting", "cowboy shot", "upper body", "portrait",
             "full body, from behind, looking back", "from side, full body", "lying on bed",
@@ -52,8 +52,8 @@ def _sheet(paths, out) -> None:
 
 def run(cfg: Config, handle: str, count: int, keep: int, add: bool = False, nude: bool = False) -> dict:
     from PIL import Image
-    from . import personas
-    from .checks import problem
+    from ..core import personas
+    from ..core.checks import problem
     from .comfy import Comfy
     from .vision import Vision
 

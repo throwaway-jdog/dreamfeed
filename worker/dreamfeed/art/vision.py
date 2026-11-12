@@ -12,7 +12,7 @@ from huggingface_hub import hf_hub_download
 from PIL import Image
 from timm.data import create_transform, resolve_data_config
 
-from . import safety
+from ..core import safety
 
 TAGGER_REPO = "SmilingWolf/wd-eva02-large-tagger-v3"
 CLIP_ARCH, CLIP_WEIGHTS = "ViT-L-14-quickgelu", "openai"

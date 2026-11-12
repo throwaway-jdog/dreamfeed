@@ -19,7 +19,7 @@ import json
 import re
 from functools import cache
 
-from . import personas as people, safety
+from ..core import personas as people, safety
 from .captions import REFUSAL, Writer
 
 TRIES = 4

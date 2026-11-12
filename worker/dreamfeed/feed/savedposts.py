@@ -83,7 +83,7 @@ def _hls(url: str, dest_stem: Path) -> Path:
 
 
 def run(post_id: str) -> None:
-    from .db import connect          # (here: the web app uses the rest without the worker's db)
+    from ..core.db import connect          # (here: the web app uses the rest without the worker's db)
     data = Path(os.environ["DATA_DIR"])
     conn = connect(data / "feed.db")
     row = conn.execute("SELECT data FROM saved_posts WHERE id = ? AND status = 'running'", (post_id,)).fetchone()

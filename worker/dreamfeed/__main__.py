@@ -34,7 +34,7 @@ import subprocess
 import sys
 import time
 
-from .config import Config
+from .core.config import Config
 
 
 def child(*args: str) -> None:
@@ -58,12 +58,12 @@ def training(cfg: Config) -> bool:
 def main() -> None:
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("run", [])
     if cmd == "run":
-        from .generate import next_job, recover
+        from .art.generate import next_job, recover
         cfg = Config()
         cfg.generation()   # fail at start, not at 1am, if generation settings are missing
         recover(cfg)
         print("dreamfeed: waiting for dashboard requests", flush=True)
-        from .comicimport import due_update
+        from .comics.comicimport import due_update
         while True:
             if not training(cfg):
                 due_update(cfg)          # once a day: new pages of imported comics
@@ -78,44 +78,44 @@ def main() -> None:
         ap.add_argument("--keep", type=int)
         ap.add_argument("--persona", action="append")
         args = ap.parse_args(rest)
-        from .generate import run
+        from .art.generate import run
         night = f"test-{dt.datetime.now():%Y%m%d-%H%M}" if args.now else None
         run(Config(), night=night, images=args.images, keep=args.keep, ignore_window=args.now, handles=args.persona)
     elif cmd == "job":
-        from .generate import run_job
+        from .art.generate import run_job
         run_job(Config(), int(rest[0]))
     elif cmd == "lora-prep":
-        from .lora import main as lora_prep
+        from .art.lora import main as lora_prep
         lora_prep(rest)
     elif cmd == "character-prep":
-        from .character import main as character_prep
+        from .art.character import main as character_prep
         character_prep(rest)
     elif cmd == "speech":
-        from .speech import main as speech
+        from .art.speech import main as speech
         speech(rest)
     elif cmd == "comic":
-        from .comic import main as comic
+        from .comics.comic import main as comic
         comic(rest)
     elif cmd == "comic-panels":
-        from .comicanim import main as comic_panels
+        from .comics.comicanim import main as comic_panels
         comic_panels(rest)
     elif cmd == "bootstrap":
-        from .bootstrap import main as bootstrap
+        from .art.bootstrap import main as bootstrap
         bootstrap(rest)
     elif cmd == "video-prep":
-        from .videolora import main as video_prep
+        from .art.videolora import main as video_prep
         video_prep(rest)
     elif cmd == "scene-preview":
-        from .scene import preview
+        from .art.scene import preview
         preview(rest)
     elif cmd == "scene-render":
-        from .scene import render_preview
+        from .art.scene import render_preview
         render_preview(rest)
     elif cmd == "follow":
-        from .follow import main as follow
+        from .live.follow import main as follow
         follow(rest)
     elif cmd == "report":
-        from .report import main as report
+        from .core.report import main as report
         report(rest)
     else:
         sys.exit(__doc__)

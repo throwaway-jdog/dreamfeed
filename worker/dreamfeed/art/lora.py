@@ -17,7 +17,7 @@ import shutil
 import sys
 import time
 
-from .config import Config
+from ..core.config import Config
 
 # Text, watermark and signature tags stay in the captions on purpose: tagged, the LoRA learns
 # them as removable things (and the negative prompt removes them); untagged, it would bake the
@@ -67,7 +67,7 @@ def strip_marks(vision, img):
 
 def prepare(cfg: Config, name: str, medium: str, trigger: str, repeats: int) -> dict:
     from PIL import Image
-    from .checks import problem
+    from ..core.checks import problem
     from .vision import Vision
 
     base = cfg.data_dir / "lora" / name

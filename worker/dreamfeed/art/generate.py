@@ -15,8 +15,10 @@ from pathlib import Path
 
 import numpy as np
 
-from . import captions, db, personas as people
-from .config import Config, GenConfig
+from . import captions
+
+from ..core import db, personas as people
+from ..core.config import Config, GenConfig
 
 MAX_ATTEMPTS = 3
 TOP_K = 5            # taste score: mean similarity to the closest K liked posts
@@ -231,8 +233,8 @@ def _check(cfg: Config, conn, night: str, out_dir: Path, rng, tags: dict) -> lis
     """Check every post drawn since the last check; the ids of those thrown out for a watermark
     or for being off-model, to draw again."""
     from PIL import Image
-    from . import personas as people
-    from .checks import problem
+    from ..core import personas as people
+    from ..core.checks import problem
     from .vision import Vision
     marked = []
     cast = {p.handle: p for p in people.load(cfg.personas_path)}
@@ -441,16 +443,16 @@ def run_job(cfg: Config, job_id: int) -> None:
         from . import styles
         return styles.run(cfg, conn, job_id, params)
     if params.get("kind") == "comic":
-        from . import comic
+        from ..comics import comic
         return comic.run_job(cfg, conn, job_id, params)
     if params.get("kind") == "comic_import":
-        from . import comicimport
+        from ..comics import comicimport
         return comicimport.run_job(cfg, conn, job_id, params)
     if params.get("kind") == "comic_update":
-        from . import comicimport
+        from ..comics import comicimport
         return comicimport.run_update_job(cfg, conn, job_id, params)
     if params.get("kind") == "comic_animate":
-        from . import comicanim
+        from ..comics import comicanim
         return comicanim.run_job(cfg, conn, job_id, params)
     night = f"manual-{dt.datetime.now():%Y%m%d-%H%M%S}"
     with conn:
@@ -523,7 +525,8 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
         if row:   # posts from before tags were saved: their prompt's tags instead
             picture[src] = [t.strip() for t in (row[0] or row[1]).split(",") if t.strip()]
     plans = motion.plan(cfg, list(picture.items()), motion_text.strip())
-    from . import personas as people, videolora
+    from ..core import personas as people
+    from . import videolora
     style = {}   # persona handle -> its style's video LoRA, if trained
     for p in people.load(cfg.personas_path):
         v = p.lora and videolora.for_style(cfg, p.lora[0])
@@ -585,7 +588,7 @@ def animate(cfg: Config, conn, night: str, sources: list[int],
 
 def _check_frames(cfg: Config, frames: list, medium: str, strict: bool) -> tuple[str, str] | None:
     """The clip checks on some frames, for one shot of a scene before it's used."""
-    from .checks import problem
+    from ..core.checks import problem
     from .vision import Vision
     vision = Vision(cfg.models_dir)
     try:
@@ -597,7 +600,7 @@ def _check_frames(cfg: Config, frames: list, medium: str, strict: bool) -> tuple
 
 def check_videos(cfg: Config, conn, night: str) -> dict:
     from . import media
-    from .checks import problem
+    from ..core.checks import problem
     from .vision import Vision
     out_dir = cfg.data_dir / "generated"
     rows = conn.execute("SELECT g.id, g.medium, g.file, s.score, coalesce(p.strict, 1) FROM generations g"
