@@ -446,6 +446,15 @@ first wherever dreamfeed signs in (the Feed, styles, comic imports, the Live tab
   sign-in needs must be there (X: `auth_token`, `ct0`; Chaturbate: `sessionid`, `csrftoken`),
   and Save checks the site takes them. Until then, the files mounted as `X_COOKIES_FILE` and
   `CHATURBATE_COOKIES_FILE` are used (now optional); Forget goes back to those.
+- **Or sign in on the server's browser:** the `browser` service is a Firefox running on your
+  server, shown in your own browser (from any device). Sign in on the server's browser opens it:
+  go to the site there and sign in yourself (captchas and two-factor codes included), then come
+  back and tap Take its cookies, which reads that site's cookies from its profile and checks
+  them as above. It stays signed in there, so next time Take its cookies is all it takes. Your
+  proxy serves it beside dreamfeed, letting only someone signed in to dreamfeed through (Caddy:
+  `forward_auth` to dreamfeed's `/api/auth-check`, then the browser service on port 5800; its
+  address goes in `BROWSER_URL`, e.g. `browser/` for `/dreamfeed/browser/`). Its profile is in
+  `data/browser` (its caches can be left out of backups).
 - **Reddit:** your own app at reddit.com/prefs/apps. Its redirect uri must be dreamfeed's own
   address, which App keys shows (e.g. `https://<your domain>/dreamfeed/reddit/callback`): set it
   there once. Give App keys its id and secret, then Sign in with Reddit: you approve it on

@@ -610,6 +610,8 @@ textarea.in { resize: vertical; min-height: 72px; }
 .si-form { display: grid; gap: 8px; }
 .si-form textarea { font-family: ui-monospace, monospace; font-size: 12px; }
 .si-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.si-row a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
+.si-acts small { flex-basis: 100%; }
 .si-row a.primary { display: inline-flex; align-items: center; text-decoration: none; font-size: 14px; }
 .si-uri { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 .cs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
@@ -3126,9 +3128,9 @@ async function loadSignins() {
   if (q) { toast(q); history.replaceState(history.state, "", location.pathname); }
   let d;
   try { d = await api("api/signins"); } catch (err) { $("si-list").replaceChildren(el("li", "note", err.message)); return; }
-  $("si-list").replaceChildren(...d.sites.map(siCookieRow), siRedditRow(d.reddit));
+  $("si-list").replaceChildren(...d.sites.map(st => siCookieRow(st, d.browser)), siRedditRow(d.reddit));
 }
-function siCookieRow(st) {
+function siCookieRow(st, browser) {
   const li = el("li", "si-row"), head = el("div", "si-head");
   const where = st.set === "dashboard" ? "set here" : st.set === "file" ? "from the mounted file" : null;
   const words = !st.set ? "Not set" : st.missing.length ? `Missing ${st.missing.join(", ")}` :
@@ -3146,6 +3148,21 @@ function siCookieRow(st) {
     head.append(rm);
   }
   head.append(info); li.append(head);
+  if (browser) {       // the server's own browser: sign in there yourself, then take its cookies
+    const site = { x: "x.com", chaturbate: "chaturbate.com" }[st.site] || st.site;
+    const row = el("div", "si-acts"), open = el("a", "secondary", "Sign in on the server's browser"), take = el("button", "primary", "Take its cookies");
+    open.href = browser; open.target = "_blank"; open.rel = "noopener";
+    take.type = "button";
+    take.onclick = async () => {
+      take.disabled = true; take.textContent = "Checking…";
+      try {
+        const r = await api("api/signins", { site: st.site, from_browser: true });
+        toast(r.check ? `Taken, but: ${r.check}` : `${st.name}: signed in ✓`); loadSignins();
+      } catch (err) { toast(err.message); take.disabled = false; take.textContent = "Take its cookies"; }
+    };
+    row.append(open, take, el("small", "hint", `Opens a browser running on your server: go to ${site} there and sign in, then come back and tap Take its cookies.`));
+    li.append(row);
+  }
   up.onclick = () => {
     if (li.querySelector(".si-form")) return;
     const form = el("form", "si-form"), ta = el("textarea", "in"), file = el("input"), save = el("button", "primary", "Save and check"), err = el("div", "ed-err");

@@ -135,6 +135,37 @@ def save(site: str, text: str) -> dict:
     return status(site)
 
 
+def from_firefox(site: str, profile: str | os.PathLike) -> dict:
+    """Keeps the site's cookies from a Firefox profile (the server's own browser, signed in
+    there by you): read from a copy of its cookies.sqlite, as it's in use. Its status()."""
+    import shutil
+    import sqlite3
+    s = _site(site)
+    src = Path(profile) / "cookies.sqlite"
+    if not src.is_file():
+        raise ValueError("the server's browser hasn't been opened yet")
+    with tempfile.TemporaryDirectory() as tmp:
+        for suffix in ("", "-wal"):            # (what it's written lately is in the -wal)
+            if Path(f"{src}{suffix}").is_file():
+                shutil.copy(f"{src}{suffix}", Path(tmp) / f"cookies.sqlite{suffix}")
+        conn = sqlite3.connect(Path(tmp) / "cookies.sqlite")
+        try:
+            rows = conn.execute("SELECT host, name, value, path, expiry, isSecure FROM moz_cookies").fetchall()
+        finally:
+            conn.close()
+    lines = []
+    for host, name, value, path_, expiry, secure in rows:
+        if not _ours(str(host), s["domains"]):
+            continue
+        exp = int(expiry or 0)
+        exp = exp // 1000 if exp > 10 ** 11 else exp      # (newer Firefox keeps it in milliseconds)
+        lines.append("\t".join([host, "TRUE" if str(host).startswith(".") else "FALSE", path_ or "/",
+                                "TRUE" if secure else "FALSE", str(exp), name, value]))
+    if not lines:
+        raise ValueError(f"the server's browser isn't signed in to {s['name']}: sign in there first")
+    return save(site, "\n".join(lines))
+
+
 def forget(site: str) -> dict:
     """Drops the dashboard's cookies for site (a mounted file, if any, is used again)."""
     _site(site)

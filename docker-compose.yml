@@ -203,6 +203,28 @@ services:
     logging:
       options: { max-size: 10m, max-file: "3" }
 
+  # The server's own browser (Firefox, shown in your browser): the Dashboard's Sign-ins opens it to
+  # sign in to X, Chaturbate and the like yourself (captchas and codes included), then takes the
+  # site's cookies from its profile. Reached only through the proxy, after dreamfeed's sign-in
+  # (README: Sign-ins); its profile, your sign-ins there, is kept in data/browser.
+  browser:
+    image: jlesage/firefox:v26.09.1
+    container_name: dreamfeed-browser
+    restart: unless-stopped
+    shm_size: 2g                     # (Firefox needs more than Docker's 64 MB)
+    environment:
+      USER_ID: ${PUID}
+      GROUP_ID: ${PGID}
+      TZ: ${TZ:?set TZ in .env}
+      KEEP_APP_RUNNING: "1"
+      DISPLAY_WIDTH: "1280"
+      DISPLAY_HEIGHT: "900"
+    volumes:
+      - ./data/browser:/config
+    networks: [apps]
+    logging:
+      options: { max-size: 10m, max-file: "3" }
+
   # Feed at https://<your domain>/dreamfeed/ through Caddy (reachable from anywhere, behind
   # the sign-in page). Set the password with
   #   docker compose exec web python -m formlogin passwd
@@ -234,6 +256,8 @@ services:
       # the refresh token from `follow reddit-login`). Without them, that site is left out.
       X_COOKIES: /config/x-cookies.txt           # (X_COOKIES_FILE's; the dashboard's Sign-ins come first)
       CHATURBATE_COOKIES: /config/chaturbate-cookies.txt   # (only shown on the dashboard: the follow service uses them)
+      BROWSER_PROFILE: /data/browser/profile     # the browser service's profile (in ./data), for Take its cookies
+      BROWSER_URL: ${BROWSER_URL:-}              # its address, as the proxy serves it (e.g. browser/, beside the Feed); empty: off
       X_RELATED_QUERY: ${X_RELATED_QUERY:-}      # X's "more videos" call id, when X changes it (empty: the known one)
       RANDOM_SUBREDDITS_URL: ${RANDOM_SUBREDDITS_URL:-}   # Browse's 🎲: a list of subreddit names, one a line (empty: off)
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}

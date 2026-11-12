@@ -24,7 +24,9 @@ GET  /reddit/login     Sign in with Reddit (your app's keys from the dashboard):
 GET  /reddit/callback  and back here, where the sign-in is kept
 POST /api/signins      {"site": "x"|"chaturbate", "cookies": TEXT} set them (a cookies.txt or JSON export, or a
                         Cookie header) and check they work; {"site", "forget": true} drop the dashboard's;
-                        {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys
+                        {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys;
+                        {"site", "from_browser": true} take them from the server's browser (BROWSER_PROFILE)
+GET  /api/auth-check   200 when signed in here (the proxy asks before letting you into the server's browser)
 POST /api/dvr           {"name": ROOM, "action": "record"|"once"|"stop"|"pause"|"remove"}  your recorder (streamonitor), for that room:
                         record = all their streams, once = this stream (or the next) only, stop = end either
 GET  /api/reddit/random ?not=SUB  a random subreddit from RANDOM_SUBREDDITS_URL's list that has posts now
@@ -361,6 +363,10 @@ def _dvr() -> dict:
 
 # Sign-ins (the dashboard): the sites' cookies, set by pasting an export (cookies.py). The files
 # mounted for them (X_COOKIES_FILE, CHATURBATE_COOKIES_FILE) are used until then.
+# The server's own browser (the browser service, a Firefox you sign in to the sites in, opened
+# from the Dashboard at BROWSER_URL): its profile, where Take its cookies reads them.
+BROWSER_PROFILE = os.environ.get("BROWSER_PROFILE", "").strip()
+BROWSER_URL = os.environ.get("BROWSER_URL", "").strip()
 MOUNTED_COOKIES = {"x": os.environ.get("X_COOKIES", "").strip() or None,
                    "chaturbate": os.environ.get("CHATURBATE_COOKIES", "").strip() or None}
 
@@ -462,6 +468,7 @@ def reddit_callback(query: dict, headers) -> str:
 
 def signins(headers=None) -> dict:
     return {"sites": [cookies.status(s, MOUNTED_COOKIES[s]) for s in cookies.SITES],
+            "browser": BROWSER_URL if BROWSER_PROFILE and BROWSER_URL else None,
             "reddit": _reddit_status(headers or {})}
 
 
@@ -483,6 +490,14 @@ def save_signin(req: dict) -> dict:
             cookies.save_reddit_app(str(req.get("client_id", "")), str(req.get("client_secret", "")))
         livefeeds.forget()
         return {"ok": True}
+    if req.get("from_browser"):
+        if not BROWSER_PROFILE:
+            raise ValueError("no server browser set up (BROWSER_PROFILE)")
+        cookies.from_firefox(site, BROWSER_PROFILE)
+        problem = _signin_check(site)
+        if site == "x":
+            livefeeds.forget("x:")
+        return {"site": cookies.status(site, MOUNTED_COOKIES.get(site)), "check": problem}
     if req.get("forget"):
         st = cookies.forget(site)
         return {"site": cookies.status(site, MOUNTED_COOKIES.get(site))}
@@ -2716,6 +2731,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(502, {"error": str(e)[:200]})
         if path == "/api/signins":
             return self.send(200, signins(self.headers))
+        if path == "/api/auth-check":          # (the proxy asks, before the server's browser: signed in here?)
+            return self.send(200, {"ok": True})
         if path in ("/reddit/login", "/reddit/callback"):
             prefix = (self.headers.get("X-Forwarded-Prefix") or "").rstrip("/")
             back = (prefix if PREFIX.match(prefix) else "") + "/dashboard"
