@@ -1308,9 +1308,10 @@ async function loadMore() {
   finally { state.loading = false; $("loading").hidden = true; }
 }
 
+// Feed videos don't play by themselves: one you start stops when it's scrolled away.
 const playObs = new IntersectionObserver(es => {
-  for (const e of es) { const v = e.target; if (e.isIntersecting && e.intersectionRatio > .5) v.play().catch(() => {}); else v.pause(); }
-}, { threshold: [0, .5, 1] });
+  for (const e of es) if (!e.isIntersecting || e.intersectionRatio < .2) e.target.pause();
+}, { threshold: [0, .2] });
 
 function captionNodes(text) {
   const out = [];
@@ -2449,12 +2450,12 @@ function postCard(p, opened) {
     const t = el("p", "text", p.text); body.append(t);
     if (canOpen) { t.classList.add("go"); t.onclick = () => openPost(p); }
   }
-  // pictures and videos: several swipe sideways (n / N); videos play muted while on screen;
+  // pictures and videos: several swipe sideways (n / N); a video plays when you start it;
   // opened, a post shows its pictures in full quality and a tap shows one full screen
   const boxes = p.media.map(m => {
     const box = el("div", "media");
     if (m.kind === "video" || m.kind === "hls") {
-      const v = el("video"); v.controls = v.loop = v.muted = v.playsInline = true; v.preload = "none";
+      const v = el("video"); v.controls = v.loop = v.playsInline = true; v.preload = "none";
       if (m.poster) v.poster = m.poster;
       if (m.kind === "video") v.src = m.url; else feedHls(v, m);
       box.append(v); playObs.observe(v);
