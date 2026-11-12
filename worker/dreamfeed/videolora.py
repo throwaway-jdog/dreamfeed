@@ -35,7 +35,7 @@ def trigger_for(name: str) -> str:
 
 
 def download(base: Path, source: str, limit: int) -> int:
-    from .styles import GALLERY_DL, COOKIES, COOKIE_HOSTS
+    from .styles import GALLERY_DL, COOKIE_HOSTS, x_cookies
     import tempfile
     raw = base / "video_raw"
     raw.mkdir(exist_ok=True)
@@ -49,9 +49,9 @@ def download(base: Path, source: str, limit: int) -> int:
            "--filter", VIDEO_FILTER]
     host = source.split("/")[2].lower() if source.count("/") >= 2 else ""
     if host.removeprefix("www.").removeprefix("mobile.") in COOKIE_HOSTS:
-        if not COOKIES.is_file():
-            raise RuntimeError("x.com needs your cookies: set X_COOKIES_FILE in .env")
-        cmd += ["--cookies", str(COOKIES)]
+        if not x_cookies():
+            raise RuntimeError("x.com needs your cookies: add them on the dashboard (Sign-ins)")
+        cmd += ["--cookies", str(x_cookies())]
     write_status(base, video_phase="downloading")
     proc = subprocess.run(cmd + [source], capture_output=True, text=True)
     Path(f.name).unlink(missing_ok=True)

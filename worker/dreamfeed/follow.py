@@ -47,7 +47,7 @@ SITE = "https://chaturbate.com"
 ROOMS = SITE + "/api/ts/roomlist/room-list/"
 THUMB_HOSTS = ("thumb.live.mmcdn.com",)
 NAME = re.compile(r"^[a-z0-9_]{1,64}$")
-COOKIES = Path("/config/chaturbate-cookies.txt")
+MOUNTED_COOKIES = Path("/config/chaturbate-cookies.txt")    # CHATURBATE_COOKIES_FILE (the dashboard's come first)
 AGENT = "dreamfeed (personal follow list)"
 
 
@@ -60,9 +60,11 @@ def _now() -> str:
 
 
 def _opener():
-    if not COOKIES.is_file():
-        raise SignedOut("no Chaturbate cookies: set CHATURBATE_COOKIES_FILE in .env")
-    jar = http.cookiejar.MozillaCookieJar(str(COOKIES))
+    from . import cookies
+    file = cookies.path("chaturbate", MOUNTED_COOKIES)
+    if not file:
+        raise SignedOut("no Chaturbate cookies: add them on the dashboard (Sign-ins)")
+    jar = http.cookiejar.MozillaCookieJar(str(file))
     jar.load(ignore_discard=True, ignore_expires=True)    # read each time: a fresh export needs no restart
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 

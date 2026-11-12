@@ -48,7 +48,7 @@ services:
       - ${LORA_DATA_DIR:?set LORA_DATA_DIR in .env}:/data/lora   # style training: downloads, datasets, voices
       - ./models:/models                      # writable: downloads the tagger and CLIP on first run
       # X cookies (Netscape cookies.txt) for downloading artists' images from x.com to train styles.
-      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/cookies.txt:ro
+      - ${X_COOKIES_FILE:-/dev/null}:/config/cookies.txt:ro   # (optional: or set them on the dashboard, Sign-ins)
     deploy:
       resources:
         reservations:
@@ -196,7 +196,7 @@ services:
       # Your Chaturbate cookies (Netscape cookies.txt) for the rooms you follow. Read on each
       # look, so a fresh export copied over it (cp, not mv: a file moved in isn't seen until a
       # restart) needs no restart.
-      - ${CHATURBATE_COOKIES_FILE:?set CHATURBATE_COOKIES_FILE in .env}:/config/chaturbate-cookies.txt:ro
+      - ${CHATURBATE_COOKIES_FILE:-/dev/null}:/config/chaturbate-cookies.txt:ro   # (optional: or the dashboard's Sign-ins)
       # Your own videos of the rooms you follow, a folder per room (README: Live). Written only
       # for highlights (<room>/highlights/) and deletes (into .trash/, emptied after a week).
       - ${CB_VIDEOS_DIR:?set CB_VIDEOS_DIR in .env}:/videos/cb
@@ -232,7 +232,8 @@ services:
       CB_VIDEOS: /videos/cb                    # your own videos of the rooms, on their Live profiles
       # The live Feed (README: Feed): X with your cookies, Reddit as you (your own Reddit app and
       # the refresh token from `follow reddit-login`). Without them, that site is left out.
-      X_COOKIES: /config/x-cookies.txt
+      X_COOKIES: /config/x-cookies.txt           # (X_COOKIES_FILE's; the dashboard's Sign-ins come first)
+      CHATURBATE_COOKIES: /config/chaturbate-cookies.txt   # (only shown on the dashboard: the follow service uses them)
       X_RELATED_QUERY: ${X_RELATED_QUERY:-}      # X's "more videos" call id, when X changes it (empty: the known one)
       RANDOM_SUBREDDITS_URL: ${RANDOM_SUBREDDITS_URL:-}   # Browse's 🎲: a list of subreddit names, one a line (empty: off)
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
@@ -249,7 +250,8 @@ services:
       # for highlights (<room>/highlights/) and deletes (into .trash/, emptied after a week).
       - ${CB_VIDEOS_DIR:?set CB_VIDEOS_DIR in .env}:/videos/cb
       # X cookies (the same export the worker uses for styles), for your X timelines in the Feed.
-      - ${X_COOKIES_FILE:?set X_COOKIES_FILE in .env}:/config/x-cookies.txt:ro
+      - ${X_COOKIES_FILE:-/dev/null}:/config/x-cookies.txt:ro
+      - ${CHATURBATE_COOKIES_FILE:-/dev/null}:/config/chaturbate-cookies.txt:ro
     networks: [default, apps]
     logging:
       options: { max-size: 10m, max-file: "3" }

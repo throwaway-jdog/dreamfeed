@@ -1,0 +1,230 @@
+"""Your sign-ins to the sites, as cookies: set from the dashboard (Sign-ins), kept in
+<DATA_DIR>/cookies/<site>.txt (Netscape cookies.txt, readable only by dreamfeed's user). A site
+without one there uses the file mounted for it (X_COOKIES_FILE, CHATURBATE_COOKIES_FILE), so
+those still work; one set from the dashboard replaces it. Read on each use: no restart needed.
+
+A paste can be a cookies.txt export, a JSON export (Cookie-Editor's and the like: a list of
+{"domain", "name", "value", ...}) or a Cookie header ("name=value; name2=value2", e.g. copied
+from the browser's developer tools). Only the site's own cookies are kept, and the ones it
+needs to be signed in must be there.
+"""
+import json
+import os
+import re
+import tempfile
+import time
+from pathlib import Path
+
+# site: its name, its domains (cookies for others are dropped) and the cookies a sign-in needs
+SITES = {
+    "x": {"name": "X", "domains": ("x.com", "twitter.com"), "needs": ("auth_token", "ct0")},
+    "chaturbate": {"name": "Chaturbate", "domains": ("chaturbate.com",), "needs": ("sessionid", "csrftoken")},
+}
+MAX_TEXT = 1 << 20          # a paste's size
+NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,200}$")
+
+
+def folder() -> Path:
+    data = os.environ.get("DATA_DIR", "").strip()
+    if not data:
+        raise RuntimeError("DATA_DIR isn't set")
+    return Path(data) / "cookies"
+
+
+def _site(site: str) -> dict:
+    if site not in SITES:
+        raise ValueError("unknown site")
+    return SITES[site]
+
+
+def path(site: str, mounted: str | os.PathLike | None = None) -> Path | None:
+    """The cookies file to use for site: the dashboard's, else the mounted one, else None.
+    (A service without DATA_DIR only has the mounted one.)"""
+    _site(site)
+    own = folder() / f"{site}.txt" if os.environ.get("DATA_DIR", "").strip() else None
+    if own and own.is_file():
+        return own
+    if mounted and Path(mounted).is_file():
+        return Path(mounted)
+    return None
+
+
+def _ours(domain: str, domains: tuple) -> bool:
+    d = domain.lstrip(".").lower()
+    return any(d == x or d.endswith("." + x) for x in domains)
+
+
+def parse(text: str, site: str) -> list[dict]:
+    """The site's cookies in text (any of the forms above): [{"domain", "name", "value", "path",
+    "secure", "expires"}]."""
+    s = _site(site)
+    text = (text or "").strip().lstrip("﻿")
+    if not text:
+        raise ValueError("nothing pasted")
+    if len(text) > MAX_TEXT:
+        raise ValueError("too long for a cookies export")
+    found = []
+    if text[0] in "[{":
+        try:
+            d = json.loads(text)
+        except ValueError:
+            raise ValueError("that looks like JSON but doesn't read as it")
+        items = d.get("cookies", []) if isinstance(d, dict) else d
+        for c in items if isinstance(items, list) else []:
+            if not isinstance(c, dict):
+                continue
+            exp = c.get("expirationDate", c.get("expires", c.get("expiry")))
+            found.append({"domain": str(c.get("domain") or s["domains"][0]), "name": str(c.get("name") or ""),
+                          "value": str(c.get("value") or ""), "path": str(c.get("path") or "/"),
+                          "secure": bool(c.get("secure")), "expires": int(float(exp)) if isinstance(exp, (int, float)) and exp > 0 else 0})
+    elif "\t" in text:
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("#HttpOnly_"):
+                line = line[len("#HttpOnly_"):]
+            elif not line or line.startswith("#"):
+                continue
+            f = line.split("\t")
+            if len(f) < 7:
+                continue
+            found.append({"domain": f[0], "name": f[5], "value": f[6], "path": f[2] or "/",
+                          "secure": f[3].upper() == "TRUE", "expires": int(f[4]) if f[4].isdigit() else 0})
+    else:
+        header = re.sub(r"^\s*cookie:\s*", "", text, flags=re.I)
+        for part in header.split(";"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                found.append({"domain": "." + s["domains"][0], "name": k.strip(), "value": v.strip(), "path": "/",
+                              "secure": True, "expires": 0})
+    now = time.time()
+    out = {}
+    for c in found:
+        if not NAME.match(c["name"]) or any(ch in c["value"] for ch in "\t\r\n") or not _ours(c["domain"], s["domains"]):
+            continue
+        if c["expires"] and c["expires"] < now:
+            continue
+        out[(c["domain"].lower(), c["path"], c["name"])] = c
+    cookies = list(out.values())
+    if not cookies:
+        raise ValueError(f"no {s['name']} cookies in it (export them while on {s['domains'][0]})")
+    missing = [n for n in s["needs"] if not any(c["name"] == n for c in cookies)]
+    if missing:
+        raise ValueError(f"it's missing {', '.join(missing)}: export them while signed in to {s['name']}")
+    return cookies
+
+
+def save(site: str, text: str) -> dict:
+    """Keeps the site's cookies from a paste (replacing any set before). Its status()."""
+    cookies = parse(text, site)
+    lines = ["# Netscape HTTP Cookie File", f"# {SITES[site]['name']}, set from dreamfeed's dashboard", ""]
+    for c in cookies:
+        dom = c["domain"] if c["domain"].startswith(".") else c["domain"]
+        lines.append("\t".join([dom, "TRUE" if dom.startswith(".") else "FALSE", c["path"],
+                                "TRUE" if c["secure"] else "FALSE", str(c["expires"]), c["name"], c["value"]]))
+    d = folder()
+    d.mkdir(mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=f".{site}-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, d / f"{site}.txt")       # (in one step: readers see the old or the new)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return status(site)
+
+
+def forget(site: str) -> dict:
+    """Drops the dashboard's cookies for site (a mounted file, if any, is used again)."""
+    _site(site)
+    (folder() / f"{site}.txt").unlink(missing_ok=True)
+    return status(site)
+
+
+def status(site: str, mounted: str | os.PathLike | None = None) -> dict:
+    """What dreamfeed has for site, never the values: {"site", "name", "set" (dashboard|file|None),
+    "count", "expires" (when the first needed one runs out, unix; 0: with the browser session),
+    "updated" (unix), "missing"}."""
+    s = _site(site)
+    p = path(site, mounted)
+    out = {"site": site, "name": s["name"], "set": None, "count": 0, "expires": None, "updated": None, "missing": list(s["needs"])}
+    if not p:
+        return out
+    try:
+        cookies = parse(p.read_text(errors="replace"), site)
+        missing = []
+    except ValueError:
+        cookies, missing = [], list(s["needs"])
+    need = [c for c in cookies if c["name"] in s["needs"]]
+    exp = [c["expires"] for c in need if c["expires"]]
+    out.update(set="dashboard" if p.parent == folder() else "file", count=len(cookies),
+               expires=min(exp) if exp else (0 if need else None), updated=int(p.stat().st_mtime), missing=missing)
+    return out
+
+
+# ---- Reddit: your own app's keys and the sign-in, the same way (<DATA_DIR>/cookies/reddit.json) ----
+# Set from the dashboard (the keys, then Sign in with Reddit); until then REDDIT_CLIENT_ID,
+# REDDIT_CLIENT_SECRET, REDDIT_USERNAME and REDDIT_REFRESH_TOKEN from the environment are used.
+REDDIT_KEYS = ("client_id", "client_secret", "username", "refresh_token")
+REDDIT_FIELD = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
+
+
+def _reddit_file() -> Path | None:
+    return folder() / "reddit.json" if os.environ.get("DATA_DIR", "").strip() else None
+
+
+def _reddit_saved() -> dict:
+    f = _reddit_file()
+    try:
+        d = json.loads(f.read_text()) if f and f.is_file() else {}
+    except ValueError:
+        d = {}
+    return {k: str(d.get(k) or "") for k in REDDIT_KEYS}
+
+
+def reddit() -> dict:
+    """{"client_id", "client_secret", "username", "refresh_token", "from": dashboard|env|None}: the
+    dashboard's when it has an app set, else the environment's."""
+    own = _reddit_saved()
+    if own["client_id"]:
+        return {**own, "from": "dashboard"}
+    env = {k: os.environ.get(f"REDDIT_{k.upper()}", "").strip() for k in REDDIT_KEYS}
+    return {**env, "from": "env" if env["client_id"] else None}
+
+
+def _reddit_write(d: dict) -> None:
+    folder().mkdir(mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder(), prefix=".reddit-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({k: d.get(k, "") for k in REDDIT_KEYS}, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, folder() / "reddit.json")
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def save_reddit_app(client_id: str, client_secret: str) -> None:
+    """Your Reddit app's keys (a new app: sign in again)."""
+    client_id, client_secret = client_id.strip(), client_secret.strip()
+    if not REDDIT_FIELD.match(client_id) or not REDDIT_FIELD.match(client_secret):
+        raise ValueError("those don't look like a Reddit app's id and secret")
+    old = _reddit_saved()
+    same = old["client_id"] == client_id
+    _reddit_write({"client_id": client_id, "client_secret": client_secret,
+                   "username": old["username"] if same else "", "refresh_token": old["refresh_token"] if same else ""})
+
+
+def save_reddit_signin(refresh_token: str, username: str) -> None:
+    d = _reddit_saved()
+    if not d["client_id"]:
+        raise ValueError("set your Reddit app's id and secret first")
+    _reddit_write({**d, "refresh_token": refresh_token, "username": username})
+
+
+def forget_reddit() -> None:
+    f = _reddit_file()
+    if f:
+        f.unlink(missing_ok=True)

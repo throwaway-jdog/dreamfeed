@@ -36,14 +36,14 @@ def _host(url: str) -> str:
 
 
 def _gallery_dl(url: str, folder: Path, extra: list[str]) -> subprocess.CompletedProcess:
-    from .styles import COOKIES, COOKIE_HOSTS
+    from .styles import COOKIE_HOSTS, x_cookies
     conf = {"extractor": {"directory": [], "base-directory": str(folder), "filename": "{num:>04}_{filename}.{extension}",
                           "cookies-update": False}, "downloader": {"part-directory": str(folder / ".part")}}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(conf, f)
     cmd = ["gallery-dl", "--config-ignore", "--config", f.name, "--filter", "extension in ('jpg', 'jpeg', 'png', 'webp')"]
-    if _host(url).removeprefix("mobile.") in COOKIE_HOSTS and COOKIES.is_file():
-        cmd += ["--cookies", str(COOKIES)]
+    if _host(url).removeprefix("mobile.") in COOKIE_HOSTS and x_cookies():
+        cmd += ["--cookies", str(x_cookies())]
     try:
         return subprocess.run(cmd + extra + [url], capture_output=True, text=True, timeout=3600)
     finally:

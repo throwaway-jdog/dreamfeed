@@ -56,8 +56,10 @@ SUBS_TTL = 3600        # your Reddit subscriptions are asked for again after thi
 
 
 def x_cookies() -> str | None:
-    path = os.environ.get("X_COOKIES", "").strip()
-    return path if path and os.path.isfile(path) else None
+    """Your X cookies: the dashboard's (Sign-ins), else the mounted X_COOKIES file."""
+    from . import cookies
+    p = cookies.path("x", os.environ.get("X_COOKIES", "").strip() or None)
+    return str(p) if p else None
 
 
 def _cached(key: str, fetch, ttl: float = CACHE_TTL):
@@ -96,23 +98,31 @@ def _utc(ts: float) -> str:
 
 
 # ---- Reddit ----
+def _creds() -> dict:
+    """Your Reddit app and sign-in: the dashboard's, else the environment's (cookies.py)."""
+    from . import cookies
+    return cookies.reddit()
+
+
 def _agent() -> str:
-    user = os.environ.get("REDDIT_USERNAME", "").strip()
+    user = _creds()["username"]
     return f"linux:dreamfeed:1.0 (by /u/{user})" if user else REDDIT_AGENT
 
 
 def reddit_ready() -> bool:
-    return all(os.environ.get(k, "").strip() for k in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_REFRESH_TOKEN"))
+    c = _creds()
+    return all(c[k] for k in ("client_id", "client_secret", "refresh_token"))
 
 
 def _reddit_token() -> str:
-    with _lock:
-        if _token["value"] and time.time() < _token["until"]:
+    c = _creds()
+    with _lock:      # (a new sign-in: a new token)
+        if _token["value"] and time.time() < _token["until"] and _token.get("for") == c["refresh_token"]:
             return _token["value"]
     if not reddit_ready():
-        raise LookupError("Reddit isn't signed in (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_REFRESH_TOKEN)")
-    creds = ":".join(os.environ[k].strip() for k in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"))
-    form = {"grant_type": "refresh_token", "refresh_token": os.environ["REDDIT_REFRESH_TOKEN"].strip()}
+        raise LookupError("Reddit isn't signed in (the dashboard: Sign-ins)")
+    creds = f"{c['client_id']}:{c['client_secret']}"
+    form = {"grant_type": "refresh_token", "refresh_token": c["refresh_token"]}
     req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", data=urllib.parse.urlencode(form).encode(),
                                  headers={"User-Agent": _agent(), "Authorization": "Basic " + base64.b64encode(creds.encode()).decode()})
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -120,7 +130,7 @@ def _reddit_token() -> str:
     if not d.get("access_token"):
         raise LookupError(f"Reddit refused the sign-in: {d.get('error') or d}")
     with _lock:
-        _token.update(value=d["access_token"], until=time.time() + int(d.get("expires_in") or 3600) - 120)
+        _token.update(value=d["access_token"], until=time.time() + int(d.get("expires_in") or 3600) - 120, **{"for": c["refresh_token"]})
     return d["access_token"]
 
 
@@ -387,7 +397,7 @@ def _x_video(url: str, md: dict) -> str:
 
 def _x(url: str, start: int, count: int, timeout: int = 90, options: tuple = ()) -> list:
     if not x_cookies():
-        raise LookupError("X isn't signed in (X_COOKIES_FILE)")
+        raise LookupError("X isn't signed in (add your X cookies on the dashboard: Sign-ins)")
     try:
         out = subprocess.run([sys.executable, "-c", X_RUNNER, "--config-ignore", "--cookies", x_cookies(), "-o", "cookies-update=false",
                               *[a for o in options for a in ("-o", o)],
@@ -699,7 +709,7 @@ def x_related(tid: str, handle: str, cursor: str = "") -> dict:
     if not re.fullmatch(r"\d{5,25}", tid or "") or (handle and not X_HANDLE.match(handle)) or len(cursor) > 2000:
         raise ValueError("bad post")
     if not x_cookies():
-        raise LookupError("X isn't signed in (X_COOKIES_FILE)")
+        raise LookupError("X isn't signed in (add your X cookies on the dashboard: Sign-ins)")
     def fetch():
         try:
             out = subprocess.run([sys.executable, "-c", X_RELATED_RUNNER, x_cookies(), X_RELATED_QUERY, tid, handle, cursor,

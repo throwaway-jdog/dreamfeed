@@ -601,6 +601,17 @@ textarea.in { resize: vertical; min-height: 72px; }
 .rf-row { display: flex; align-items: center; gap: 10px; min-height: 48px; }
 .rf-row b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .rf-row .secondary { width: auto; min-height: 36px; padding: 0 12px; }
+.si-row { display: grid; gap: 8px; padding: 10px 0; }
+.si-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.si-head b { flex: 1; min-width: 0; }
+.si-head small { color: var(--muted); flex-basis: 100%; }
+.si-head .bad { color: var(--accent); }
+.si-row .secondary, .si-row .primary { width: auto; min-height: 36px; padding: 0 12px; }
+.si-form { display: grid; gap: 8px; }
+.si-form textarea { font-family: ui-monospace, monospace; font-size: 12px; }
+.si-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.si-row a.primary { display: inline-flex; align-items: center; text-decoration: none; font-size: 14px; }
+.si-uri { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 .cs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .cs-row .primary { padding: 0 18px; }
 .cs-item { display: grid; gap: 6px; align-content: start; }
@@ -701,6 +712,12 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button class="primary" type="button" id="g-go">Generate</button>
       <p class="note" id="g-est"></p>
       </div>
+    </div>
+
+    <div class="panel" id="si-panel">
+      <h2>Sign-ins</h2>
+      <p class="note">How dreamfeed reads the sites as you. Kept on your server only, readable by dreamfeed alone; the values are never shown here.</p>
+      <ul class="plist" id="si-list"></ul>
     </div>
 
     <div class="panel" id="rf-panel">
@@ -1639,7 +1656,7 @@ function setView(v) {
   if (v !== "feed") state.persona = "";
   renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
-  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); loadReddit(); }
+  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); loadReddit(); loadSignins(); }
   else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
   else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
@@ -3097,6 +3114,106 @@ document.addEventListener("keydown", e => {
 /* ---------- the Reddit list (Dashboard) ---------- */
 const rf = { follow: [], top: 10, subscribed: [] };
 const e6 = { searches: [], top: 10 };
+/* Sign-ins (dashboard): X's and Chaturbate's cookies, pasted from an export; Reddit: your app's
+   keys, then Sign in with Reddit (it comes back here by itself). */
+const SI_HOW = {
+  x: "While signed in to x.com, export its cookies with a browser extension (cookies.txt or JSON, e.g. Cookie-Editor), or copy the Cookie header from the developer tools. auth_token and ct0 are needed.",
+  chaturbate: "While signed in to chaturbate.com, export its cookies the same way. sessionid and csrftoken are needed.",
+};
+function siWhen(t) { return new Date(t * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); }
+async function loadSignins() {
+  const q = new URLSearchParams(location.search).get("reddit");
+  if (q) { toast(q); history.replaceState(history.state, "", location.pathname); }
+  let d;
+  try { d = await api("api/signins"); } catch (err) { $("si-list").replaceChildren(el("li", "note", err.message)); return; }
+  $("si-list").replaceChildren(...d.sites.map(siCookieRow), siRedditRow(d.reddit));
+}
+function siCookieRow(st) {
+  const li = el("li", "si-row"), head = el("div", "si-head");
+  const where = st.set === "dashboard" ? "set here" : st.set === "file" ? "from the mounted file" : null;
+  const words = !st.set ? "Not set" : st.missing.length ? `Missing ${st.missing.join(", ")}` :
+    [where, `${st.count} cookies`, st.expires ? `good until ${siWhen(st.expires)}` : st.expires === 0 ? "until the browser closes" : "",
+     st.updated ? `updated ${siWhen(st.updated)}` : ""].filter(Boolean).join(" · ");
+  const up = el("button", "secondary", st.set ? "Update" : "Add"); up.type = "button";
+  const info = el("small", !st.set || st.missing.length || (st.expires && st.expires * 1000 < Date.now() + 7 * 864e5) ? "bad" : null, words);
+  head.append(el("b", null, st.name), up);
+  if (st.set === "dashboard") {
+    const rm = el("button", "secondary", "Forget"); rm.type = "button";
+    rm.onclick = async () => {
+      if (!confirm(`Forget the ${st.name} cookies set here?` + (st.set === "dashboard" ? " (A mounted file, if there is one, is used again.)" : ""))) return;
+      try { await api("api/signins", { site: st.site, forget: true }); loadSignins(); } catch (err) { toast(err.message); }
+    };
+    head.append(rm);
+  }
+  head.append(info); li.append(head);
+  up.onclick = () => {
+    if (li.querySelector(".si-form")) return;
+    const form = el("form", "si-form"), ta = el("textarea", "in"), file = el("input"), save = el("button", "primary", "Save and check"), err = el("div", "ed-err");
+    form.noValidate = true; ta.rows = 5; ta.placeholder = "Paste cookies.txt, JSON or a Cookie header"; ta.spellcheck = false;
+    ta.setAttribute("autocomplete", "off"); ta.setAttribute("autocapitalize", "off");
+    file.type = "file"; file.accept = ".txt,.json,text/plain,application/json";
+    file.onchange = async () => { if (file.files[0]) ta.value = await file.files[0].text(); };
+    save.type = "submit"; err.setAttribute("role", "alert");
+    const acts = el("div", "si-acts"); acts.append(save, file);
+    form.append(el("small", "hint", SI_HOW[st.site] || ""), ta, acts, err);
+    form.onsubmit = async e => {
+      e.preventDefault(); err.textContent = ""; save.disabled = true; save.textContent = "Checking…";
+      try {
+        const r = await api("api/signins", { site: st.site, cookies: ta.value });
+        ta.value = "";
+        toast(r.check ? `Saved, but: ${r.check}` : `${st.name}: signed in ✓`);
+        loadSignins();
+      } catch (x) { err.textContent = x.message; save.disabled = false; save.textContent = "Save and check"; }
+    };
+    li.append(form); ta.focus();
+  };
+  return li;
+}
+function siRedditRow(st) {
+  const li = el("li", "si-row"), head = el("div", "si-head");
+  const words = st.signed_in ? [`Signed in${st.username ? " as u/" + st.username : ""}`, st.from === "env" ? "from .env" : "set here"].join(" · ")
+    : st.app ? "Your app is set: sign in with Reddit" : "Not set";
+  head.append(el("b", null, "Reddit"));
+  const go = el("a", "primary", st.signed_in ? "Sign in again" : "Sign in with Reddit"); go.href = "reddit/login";
+  if (st.from === "dashboard" && st.app) head.append(go);
+  const keys = el("button", "secondary", st.app ? "App keys" : "Add app keys"); keys.type = "button"; head.append(keys);
+  if (st.from === "env") {
+    const mv = el("button", "secondary", "Keep here instead"); mv.type = "button";
+    mv.title = "Copy .env's Reddit app and sign-in here, so they're managed from this page";
+    mv.onclick = async () => { try { await api("api/signins", { site: "reddit", from_env: true }); toast("Reddit: kept here now."); loadSignins(); } catch (err) { toast(err.message); } };
+    head.append(mv);
+  }
+  if (st.from === "dashboard") {
+    const rm = el("button", "secondary", "Forget"); rm.type = "button";
+    rm.onclick = async () => {
+      if (!confirm("Forget your Reddit app and sign-in set here? (.env's, if any, are used again.)")) return;
+      try { await api("api/signins", { site: "reddit", forget: true }); loadSignins(); } catch (err) { toast(err.message); }
+    };
+    head.append(rm);
+  }
+  head.append(el("small", st.signed_in ? null : "bad", words)); li.append(head);
+  keys.onclick = () => {
+    if (li.querySelector(".si-form")) return;
+    const form = el("form", "si-form"), id = el("input", "in"), sec = el("input", "in"), save = el("button", "primary", "Save keys"), err = el("div", "ed-err");
+    form.noValidate = true; id.placeholder = "client id (under the app's name)"; id.value = st.client_id || "";
+    sec.type = "password"; sec.placeholder = "secret"; sec.setAttribute("autocomplete", "off"); id.setAttribute("autocomplete", "off");
+    id.spellcheck = false; id.setAttribute("autocapitalize", "off");
+    save.type = "submit"; err.setAttribute("role", "alert");
+    const how = el("small", "hint", "Your own app at reddit.com/prefs/apps (one you have already works). Edit it so its redirect uri is exactly this address:");
+    const uri = el("div", "si-uri", st.redirect || "(open this page through its usual address)");
+    const copy = el("button", "secondary", "Copy address"); copy.type = "button";
+    copy.onclick = async () => { try { await navigator.clipboard.writeText(st.redirect); toast("Copied."); } catch { toast("Couldn't copy: select it instead."); } };
+    const acts = el("div", "si-acts"); acts.append(save, copy);
+    form.append(how, uri, id, sec, acts, err);
+    form.onsubmit = async e => {
+      e.preventDefault(); err.textContent = ""; save.disabled = true;
+      try { await api("api/signins", { site: "reddit", client_id: id.value, client_secret: sec.value }); toast("Saved: now sign in with Reddit."); loadSignins(); }
+      catch (x) { err.textContent = x.message; save.disabled = false; }
+    };
+    li.append(form); (st.client_id ? sec : id).focus();
+  };
+  return li;
+}
 async function loadReddit() {
   try { const d = await api("api/following/settings"); Object.assign(rf, d.reddit); Object.assign(e6, d.e621); renderReddit(); renderE6(); }
   catch (err) { $("rf-err").textContent = err.message; }

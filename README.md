@@ -172,7 +172,7 @@ and cumshot, all from Civitai.
 
 A persona can post in a trained artist style. On the Dashboard, **Trained styles** → **Train
 a new style**: give it a name, the medium, and the artist's page (an X media page such as
-`https://x.com/artist/media`, or any site gallery-dl reads; x.com needs `X_COOKIES_FILE`).
+`https://x.com/artist/media`, or any site gallery-dl reads; x.com needs your X cookies: the Dashboard's Sign-ins).
 The worker downloads up to the chosen number of images into `data/lora/NAME/raw/`, checks
 them, and the `trainer` service trains `models/loras/style-NAME.safetensors` (about half an
 hour for 300 images at the normal length). Nightly posts wait while it trains. **Retrain**
@@ -357,7 +357,7 @@ those on purpose, so its own moderation doesn't remove them), subreddits whose n
 dreamfeed never takes (young, feral and the like) and posts whose text does. Real people's
 posts never go to training, styles, comics or generation. Open on X/Reddit goes to the post.
 
-- **X:** with your cookies (`X_COOKIES_FILE`, the same export styles use), through gallery-dl's
+- **X:** with your cookies (the Dashboard's Sign-ins, or `X_COOKIES_FILE`; the same ones styles use), through gallery-dl's
   metadata (`-j`: what a post is and where its files are, nothing downloaded), 30 media files
   a page.
 - **Reddit:** through Reddit's API, signed in as you (below): your subscriptions and the
@@ -436,14 +436,25 @@ with their picture and karma; a Reddit post's picture is its subreddit's icon (t
 subreddit). An e621 artist's name gives what they drew, newest first, their pages elsewhere as
 e621 lists them, and their X posts too when one of those is an X account.
 
-**Signing in to Reddit.** Make your own app, a "personal use script" at reddit.com/prefs/apps,
-with the redirect uri `http://localhost:6414/`; its id and secret go in `REDDIT_CLIENT_ID` and
-`REDDIT_CLIENT_SECRET` (and your username in `REDDIT_USERNAME`, for its user agent). Run
-`docker compose exec follow python -m dreamfeed follow reddit-login`, open the address it prints
-and allow it, then run the same with the address your browser lands on (it won't load) in quotes
-after it. The token it prints goes in `REDDIT_REFRESH_TOKEN` (your password is never stored;
-revoke it under Reddit's authorized apps), and `docker compose up -d web`. Without it, Reddit is
-left out of the Feed.
+**Sign-ins** (on the Dashboard). How dreamfeed reads the sites as you, set without touching
+files or restarting anything; each says when it was set and when it runs out (never the values).
+They're kept in `data/cookies/` (readable only by dreamfeed's user, left out of git), and used
+first wherever dreamfeed signs in (the Feed, styles, comic imports, the Live tab's follow list).
+- **X and Chaturbate:** Update, then paste an export of the site's cookies made while signed in
+  (cookies.txt or JSON from a browser extension like Cookie-Editor, or a Cookie header copied
+  from the developer tools), or pick the file. Only that site's cookies are kept, the ones a
+  sign-in needs must be there (X: `auth_token`, `ct0`; Chaturbate: `sessionid`, `csrftoken`),
+  and Save checks the site takes them. Until then, the files mounted as `X_COOKIES_FILE` and
+  `CHATURBATE_COOKIES_FILE` are used (now optional); Forget goes back to those.
+- **Reddit:** your own app at reddit.com/prefs/apps. Its redirect uri must be dreamfeed's own
+  address, which App keys shows (e.g. `https://<your domain>/dreamfeed/reddit/callback`): set it
+  there once. Give App keys its id and secret, then Sign in with Reddit: you approve it on
+  reddit.com and come straight back, signed in (your password is never stored; revoke it under
+  Reddit's authorized apps). Keys and a sign-in in `.env` (`REDDIT_CLIENT_ID`,
+  `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_REFRESH_TOKEN`) still work; Keep here instead
+  copies them to the dashboard. Without a sign-in, Reddit is left out of the Feed. (The older
+  `follow reddit-login` command still prints a token for `.env`, with the redirect uri
+  `http://localhost:6414/`.)
 
 ### Live: Chaturbate
 
@@ -456,8 +467,7 @@ live rooms. A private or hidden show says so. Open on Chaturbate goes to the roo
 chat or tip as you. The header shows how many are live.
 
 The `follow` service (the worker's image, CPU only) looks every 2 minutes, signed in with your
-cookies (`CHATURBATE_COOKIES_FILE`: export them from your browser as a Netscape cookies.txt and
-copy them over that file; it's read on each look). Follows and unfollows there show up here
+cookies (the Dashboard's Sign-ins, or the file `CHATURBATE_COOKIES_FILE`; read on each look). Follows and unfollows there show up here
 within the hour. If the cookies run out, the page says so.
 
 These are real people, so nothing from here goes into training, styles, comics or generation,

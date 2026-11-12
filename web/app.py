@@ -19,6 +19,12 @@ GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subre
 GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
+GET  /api/signins      your sign-ins to the sites (cookies.py): which are set, when they run out (never the values)
+GET  /reddit/login     Sign in with Reddit (your app's keys from the dashboard): off to reddit.com to approve it,
+GET  /reddit/callback  and back here, where the sign-in is kept
+POST /api/signins      {"site": "x"|"chaturbate", "cookies": TEXT} set them (a cookies.txt or JSON export, or a
+                        Cookie header) and check they work; {"site", "forget": true} drop the dashboard's;
+                        {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys
 POST /api/dvr           {"name": ROOM, "action": "record"|"once"|"stop"|"pause"|"remove"}  your recorder (streamonitor), for that room:
                         record = all their streams, once = this stream (or the next) only, stop = end either
 GET  /api/reddit/random ?not=SUB  a random subreddit from RANDOM_SUBREDDITS_URL's list that has posts now
@@ -85,7 +91,7 @@ import dvr
 import formlogin
 import formlogin.httpserver
 
-from dreamfeed import acts, cbprofile, cbvideos, e621, linking, livefeeds, personas as people, safety, savedposts   # the worker's own rules (see Dockerfile)
+from dreamfeed import acts, cbprofile, cbvideos, cookies, e621, linking, livefeeds, personas as people, safety, savedposts   # the worker's own rules (see Dockerfile)
 
 
 def required(name: str) -> str:
@@ -351,6 +357,140 @@ def _dvr() -> dict:
         return dvr.rooms()
     except (LookupError, ValueError) as e:
         return {"error": str(e)[:200]}
+
+
+# Sign-ins (the dashboard): the sites' cookies, set by pasting an export (cookies.py). The files
+# mounted for them (X_COOKIES_FILE, CHATURBATE_COOKIES_FILE) are used until then.
+MOUNTED_COOKIES = {"x": os.environ.get("X_COOKIES", "").strip() or None,
+                   "chaturbate": os.environ.get("CHATURBATE_COOKIES", "").strip() or None}
+
+
+def _signin_check(site: str) -> str | None:
+    """Whether the site takes the cookies now: None when it does, else what's wrong."""
+    import http.cookiejar
+    import urllib.request
+    try:
+        if site == "x":
+            livefeeds.forget("x:")
+            items = livefeeds._x("https://x.com/home", 1, 1, timeout=60)
+            return None if any(isinstance(i, list) and i and i[0] == 3 for i in items) else "X showed nothing: the cookies may be out of date"
+        file = cookies.path(site, MOUNTED_COOKIES[site])
+        if not file:
+            return "no cookies set"
+        jar = http.cookiejar.MozillaCookieJar(str(file))
+        jar.load(ignore_discard=True, ignore_expires=True)
+        req = urllib.request.Request("https://chaturbate.com/api/ts/roomlist/room-list/?follow=true&limit=5&offline=true",
+                                     headers={"User-Agent": "dreamfeed (personal follow list)", "Accept": "application/json",
+                                              "Referer": "https://chaturbate.com/"})
+        with urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar)).open(req, timeout=30) as r:
+            rooms = json.loads(r.read()).get("rooms") or []
+        # (signed out, it ignores follow=true and lists everyone's)
+        return None if all(x.get("is_following") for x in rooms) else "Chaturbate doesn't see you signed in with these"
+    except (LookupError, OSError, ValueError) as e:
+        return str(e)[:200]
+
+
+REDDIT_SCOPES = "identity read mysubreddits save history"     # save: the Save button; history: your saved posts
+_reddit_states: dict[str, float] = {}       # sign-ins started (state -> when), each good for 10 minutes
+HOST = re.compile(r"^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?$")
+
+
+def reddit_redirect(headers) -> str:
+    """Where Reddit sends you back after you approve: this page's own address (your Reddit app's
+    redirect uri must be exactly this)."""
+    host = headers.get("X-Forwarded-Host") or headers.get("Host") or ""
+    proto = (headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
+    prefix = (headers.get("X-Forwarded-Prefix") or "").rstrip("/")
+    if not HOST.match(host) or proto not in ("http", "https") or not PREFIX.match(prefix):
+        raise ValueError("can't tell this page's address")
+    return f"{proto}://{host}{prefix}/reddit/callback"
+
+
+def _reddit_status(headers) -> dict:
+    c = cookies.reddit()
+    try:
+        redirect = reddit_redirect(headers)
+    except ValueError:
+        redirect = None
+    return {"site": "reddit", "name": "Reddit", "from": c["from"], "app": bool(c["client_id"] and c["client_secret"]),
+            "client_id": c["client_id"], "signed_in": livefeeds.reddit_ready(), "username": c["username"] or None,
+            "redirect": redirect}
+
+
+def reddit_login_url(headers) -> str:
+    c = cookies.reddit()
+    if c["from"] != "dashboard" or not c["client_secret"]:
+        raise ValueError("set your Reddit app's id and secret first")
+    import secrets
+    now = time.time()
+    for k in [k for k, t in _reddit_states.items() if now - t > 600]:
+        _reddit_states.pop(k, None)
+    state = secrets.token_urlsafe(16)
+    _reddit_states[state] = now
+    return "https://www.reddit.com/api/v1/authorize?" + urllib.parse.urlencode(
+        {"client_id": c["client_id"], "response_type": "code", "state": state, "redirect_uri": reddit_redirect(headers),
+         "duration": "permanent", "scope": REDDIT_SCOPES})
+
+
+def reddit_callback(query: dict, headers) -> str:
+    """Reddit's answer: the sign-in kept (with your username). What to say on the dashboard."""
+    import urllib.request
+    if query.get("error"):
+        return f"Reddit said: {query['error'][:80]}"
+    if _reddit_states.pop(query.get("state", ""), 0) < time.time() - 600:
+        return "That sign-in had run out: try again"
+    c = cookies.reddit()
+    auth = "Basic " + base64.b64encode(f"{c['client_id']}:{c['client_secret']}".encode()).decode()
+    form = {"grant_type": "authorization_code", "code": query.get("code", ""), "redirect_uri": reddit_redirect(headers)}
+    try:
+        req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", data=urllib.parse.urlencode(form).encode(),
+                                     headers={"User-Agent": livefeeds.REDDIT_AGENT, "Authorization": auth})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.load(r)
+        if not d.get("refresh_token"):
+            return f"Reddit refused: {str(d.get('error') or d)[:80]}"
+        me = urllib.request.Request("https://oauth.reddit.com/api/v1/me", headers={
+            "User-Agent": livefeeds.REDDIT_AGENT, "Authorization": "bearer " + d["access_token"]})
+        with urllib.request.urlopen(me, timeout=30) as r:
+            name = str(json.load(r).get("name") or "")
+    except (OSError, ValueError) as e:
+        return f"Reddit didn't answer ({str(e)[:80]})"
+    cookies.save_reddit_signin(d["refresh_token"], name if livefeeds.REDDIT_USER.match(name) else "")
+    livefeeds.forget()            # (your subscriptions and the rest, read again as you)
+    return f"Signed in to Reddit as u/{name}" if name else "Signed in to Reddit"
+
+
+def signins(headers=None) -> dict:
+    return {"sites": [cookies.status(s, MOUNTED_COOKIES[s]) for s in cookies.SITES],
+            "reddit": _reddit_status(headers or {})}
+
+
+def save_signin(req: dict) -> dict:
+    """{"site", "cookies": TEXT} keeps them and checks them; {"site", "forget": true} drops them;
+    {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys."""
+    site = str(req.get("site", ""))
+    if site == "reddit":
+        if req.get("forget"):
+            cookies.forget_reddit()
+        elif req.get("from_env"):          # the keys and sign-in from .env, kept here instead
+            env = cookies.reddit()
+            if env["from"] != "env":
+                raise ValueError("there are no Reddit keys in the environment")
+            cookies.save_reddit_app(env["client_id"], env["client_secret"])
+            if env["refresh_token"]:
+                cookies.save_reddit_signin(env["refresh_token"], env["username"])
+        else:
+            cookies.save_reddit_app(str(req.get("client_id", "")), str(req.get("client_secret", "")))
+        livefeeds.forget()
+        return {"ok": True}
+    if req.get("forget"):
+        st = cookies.forget(site)
+        return {"site": cookies.status(site, MOUNTED_COOKIES.get(site))}
+    cookies.save(site, str(req.get("cookies", "")))
+    problem = _signin_check(site)
+    if site == "x":
+        livefeeds.forget("x:")
+    return {"site": cookies.status(site, MOUNTED_COOKIES.get(site)), "check": problem}
 
 
 DVR_ONCE_POLL = 30        # seconds between looks at the rooms recorded for one stream
@@ -2574,6 +2714,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, {"error": str(e)})
             except (LookupError, OSError) as e:
                 return self.send(502, {"error": str(e)[:200]})
+        if path == "/api/signins":
+            return self.send(200, signins(self.headers))
+        if path in ("/reddit/login", "/reddit/callback"):
+            prefix = (self.headers.get("X-Forwarded-Prefix") or "").rstrip("/")
+            back = (prefix if PREFIX.match(prefix) else "") + "/dashboard"
+            try:
+                if path == "/reddit/login":
+                    where = reddit_login_url(self.headers)
+                else:
+                    where = back + "?reddit=" + urllib.parse.quote(reddit_callback(self.query(), self.headers))
+            except ValueError as e:
+                where = back + "?reddit=" + urllib.parse.quote(str(e))
+            self.send_response(302)
+            self.send_header("Location", where)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/api/profile":
             q = self.query()
             try:
@@ -2670,7 +2828,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
-                   "/api/dvr": dvr_action, "/api/profile/relink": relink}
+                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/profile/relink": relink}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

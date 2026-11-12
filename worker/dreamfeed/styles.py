@@ -27,7 +27,13 @@ from . import captions
 from .config import Config
 from .lora import write_status
 
-COOKIES = Path("/config/cookies.txt")   # X_COOKIES_FILE, needed for x.com sources
+MOUNTED_COOKIES = Path("/config/cookies.txt")   # X_COOKIES_FILE, needed for x.com sources
+
+
+def x_cookies() -> Path | None:
+    """Your X cookies: the dashboard's (Sign-ins), else X_COOKIES_FILE's (cookies.py)."""
+    from . import cookies
+    return cookies.path("x", MOUNTED_COOKIES)
 COOKIE_HOSTS = ("x.com", "twitter.com")
 MIN_IMAGES = 20           # fewer usable images than this is not worth training on
 PICKUP_SECONDS = 120      # the trainer service checks for requests every few seconds
@@ -122,9 +128,9 @@ def download(base: Path, source: str, limit: int, videos: bool = False) -> int:
            "--filter", VIDEO_FILTER if videos else IMAGE_FILTER]
     host = source.split("/")[2].lower() if source.count("/") >= 2 else ""
     if host.removeprefix("www.").removeprefix("mobile.") in COOKIE_HOSTS:
-        if not COOKIES.is_file():
-            raise RuntimeError("x.com needs your cookies: set X_COOKIES_FILE in .env")
-        cmd += ["--cookies", str(COOKIES)]
+        if not x_cookies():
+            raise RuntimeError("x.com needs your cookies: add them on the dashboard (Sign-ins)")
+        cmd += ["--cookies", str(x_cookies())]
     print(f"style: downloading up to {limit} images for {base.name}", flush=True)
     proc = subprocess.Popen(cmd + [source], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     new, errors = 0, []
