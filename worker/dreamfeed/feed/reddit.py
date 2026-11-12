@@ -18,14 +18,10 @@ from .redgifs import _redgifs_clip
 
 
 REDDIT_API = "https://oauth.reddit.com"
-
-
 REDDIT_AGENT = "linux:dreamfeed:1.0 (personal feed reader)"
 
 
 SUBREDDIT = re.compile(r"^[A-Za-z0-9_]{2,21}$")
-
-
 REDDIT_USER = re.compile(r"^[A-Za-z0-9_-]{3,20}$")
 
 

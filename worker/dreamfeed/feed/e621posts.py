@@ -25,8 +25,6 @@ def _e621_full(p: dict, kind: str) -> str | None:
 
 
 TOP_TODAY = "order:score date:day"      # For you: the best rated of the last 24 hours
-
-
 TOP_WEEK = "order:score date:week"      # (your taste's artists: the week's, as they post less often)
 
 

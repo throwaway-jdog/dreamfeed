@@ -15,8 +15,6 @@ from .common import MAX_COMMENTS, _cached, _comment, text_blocked
 
 
 X_HOME = "https://x.com/home"         # your Following timeline; + "/for-you": X's For you
-
-
 X_HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
@@ -48,8 +46,6 @@ import gallery_dl
 sys.argv = ["gallery-dl"] + sys.argv[1:]
 sys.exit(gallery_dl.main())
 """
-
-
 X_VIDEO_BITRATE = 2_500_000   # the biggest MP4 at or under this (about 720p); the smallest if none is
 
 
@@ -143,8 +139,6 @@ def x_page(kind: str, start: int) -> dict:
 # call). Read as you, through gallery-dl's signed-in connection, like the rest of X here.
 # X changes these ids now and then: X_RELATED_QUERY overrides the one known to work.
 X_RELATED_QUERY = os.environ.get("X_RELATED_QUERY", "").strip() or "knKMRvWHvFkNPnuaEfjEvw"
-
-
 X_RELATED_FEATURES = {
     "rweb_video_screen_enabled": False, "responsive_web_graphql_timeline_navigation_enabled": True,
     "view_counts_everywhere_api_enabled": True, "longform_notetweets_consumption_enabled": True,
@@ -155,8 +149,6 @@ X_RELATED_FEATURES = {
     "c9s_tweet_anatomy_moderator_badge_enabled": True, "verified_phone_label_enabled": False,
     "responsive_web_twitter_article_tweet_consumption_enabled": True, "longform_notetweets_inline_media_enabled": False,
 }
-
-
 X_RELATED_RUNNER = """
 import json, sys
 from gallery_dl import config, extractor

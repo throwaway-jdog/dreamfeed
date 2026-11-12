@@ -21,26 +21,12 @@ from .common import COMMENT_DEPTH, MAX_COMMENTS, MAX_GALLERY, SUBS_TTL, WHO_TTL,
 # you (your own feeds on Bluesky, the ones you pinned, else saved, mixed; else its Discover) and
 # someone's posts with media. Its pictures (cdn.bsky.app) and videos (HLS from video.bsky.app) play here.
 BSKY_ENTRY = "https://bsky.social"
-
-
 BSKY_DISCOVER = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
-
-
 BSKY_PAGE = 40
-
-
 BSKY_FEEDS = 10           # your feeds mixed into For you, at most
-
-
 BSKY_FEED_PAGE = 20       # posts read from each a page
-
-
 BSKY_ID = re.compile(r"^([a-z2-7]{24})_([a-z2-7]{13})$")          # a post: its account (did:plc:…) and its key
-
-
 BSKY_HANDLE = re.compile(r"^(?:did:plc:[a-z2-7]{24}|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)$")
-
-
 _bsky_lock = threading.Lock()
 
 

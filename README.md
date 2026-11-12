@@ -32,7 +32,13 @@ I2V for clips. Civitai downloads that need an account use `CIVITAI_API_KEY`.
   - `feed/`: the live Feed's sites, a module each (`x`, `bsky`, `reddit`, `redgifs`,
     `e621posts` with e621's API in `e621`, `xvideos`), mixed by `livefeeds`; Saved's copies
     (`savedposts`).
-- `web/`: the web app (`app.py`, the page `index.html`, the recorder client `dvr.py`).
+- `web/`: the web app. `app.py` answers the requests (and starts its background work), passing
+  them to its parts in `webapp/` by area: `common` (settings, the database, the page's security
+  policy), `posts` (the persona posts, the dashboard), `feed` (the live Feed, Saved, More videos),
+  `live` (Chaturbate: Following, Discover, recordings, your recorder, profiles, linking),
+  `signins`, `comics` and `editor` (personas, styles, video LoRAs). The page is `index.html` with
+  its style in `static/app.css` and its script in parts by what they do in `static/js/` (served
+  joined, as one `static/app.js`); `dvr.py` talks to your recorder.
 - `browserpower/`: starts and stops the server's browser (systemd on the host; Sign-ins).
 - `trainer/`, `video-trainer/`, `comfyui/`, `agecheck/`: the other services.
 

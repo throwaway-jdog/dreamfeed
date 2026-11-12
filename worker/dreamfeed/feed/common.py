@@ -11,26 +11,14 @@ from ..core import safety
 
 
 MAX_GALLERY = 20
-
-
 SITES = ("x", "bsky", "reddit", "e621")        # the Feed's sites
-
-
 POST_ID = re.compile(r"(x|reddit|e621|bsky):([A-Za-z0-9_]{1,60})")     # a post: its site and its id there
 
 
 CACHE_TTL = 120        # seconds a page is reused (switching tabs, coming back)
-
-
 _lock = threading.Lock()
-
-
 _cache: dict[str, tuple[float, object, float]] = {}     # key: (when, value, seconds it's good for)
-
-
 WHO_TTL = 86400        # who someone is (a Reddit user's picture, an e621 artist's links)
-
-
 
 
 SUBS_TTL = 3600        # your Reddit subscriptions are asked for again after this
@@ -84,8 +72,6 @@ def _merge(lists: list[list[dict]], by_time: bool) -> list[dict]:
 
 # ---- a post's comments ----
 MAX_COMMENTS = 150      # read a post, at most
-
-
 COMMENT_DEPTH = 4       # replies to replies ... (Reddit)
 
 

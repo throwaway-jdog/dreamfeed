@@ -13,8 +13,6 @@ from .common import _cached, text_blocked
 
 # ---- xvideos: a performer's videos (linked on their profile) ----
 XVIDEOS = "https://www.xvideos.com"
-
-
 XVIDEOS_NAME = re.compile(r"^[a-z0-9_-]{2,60}$")
 
 
