@@ -132,7 +132,7 @@ FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it
               " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
 CSP = (f"default-src 'self'; img-src 'self' data: {FEED_IMAGES}; style-src 'self' 'unsafe-inline'; "
        f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it; worker-src 'self' blob:; frame-src {FEED_FRAMES}; "
-       "script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+       "script-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 
 
 def db() -> sqlite3.Connection:
