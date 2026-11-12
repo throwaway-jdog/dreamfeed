@@ -70,6 +70,7 @@ POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 
 import base64
 import json
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -163,6 +164,8 @@ def db() -> sqlite3.Connection:
         conn.execute("CREATE TABLE IF NOT EXISTS link_checks (room TEXT PRIMARY KEY, at TEXT NOT NULL, found TEXT)")
         # rooms recorded for one stream only (dvr_action "once"): listed = on the recorder's list
         # before (paused again after; else taken off), seen = its recording started, quiet = since when it's stopped
+        # posts shown to you where something new is wanted (For you, More videos): when first shown
+        conn.execute("CREATE TABLE IF NOT EXISTS shown (id TEXT PRIMARY KEY, at REAL NOT NULL)")
         conn.execute("""CREATE TABLE IF NOT EXISTS dvr_once (room TEXT PRIMARY KEY, listed INTEGER NOT NULL,
             seen INTEGER NOT NULL DEFAULT 0, quiet REAL, at REAL NOT NULL)""")
         conn.commit()
@@ -731,6 +734,38 @@ def _mark_saved(posts: list[dict]) -> list[dict]:
     return posts
 
 
+SHOWN_AGAIN = 1800        # seconds a post can be shown again (paging back, reloading); after, it's passed over
+SHOWN_DAYS = 14           # how long what you were shown is remembered
+FRESH_MIN = 6             # For you reads further (FRESH_READS pages at most) until it has this many new posts
+FRESH_READS = 3
+
+
+def _stale(ids) -> set:
+    """Those of ids shown to you more than SHOWN_AGAIN ago."""
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return set()
+    with db() as conn:
+        return {r[0] for r in conn.execute(f"SELECT id FROM shown WHERE at < ? AND id IN ({','.join('?' * len(ids))})",
+                                           [time.time() - SHOWN_AGAIN, *ids])}
+
+
+def _now_shown(posts: list[dict]) -> None:
+    now = time.time()
+    with db() as conn:
+        conn.executemany("INSERT OR IGNORE INTO shown (id, at) VALUES (?, ?)", [(p["id"], now) for p in posts])
+        conn.execute("DELETE FROM shown WHERE at < ?", (now - SHOWN_DAYS * 86400,))
+        conn.commit()
+
+
+def _unshown(posts: list[dict]) -> list[dict]:
+    """posts without those you were shown before (more than SHOWN_AGAIN ago); the rest noted as shown."""
+    old = _stale(p["id"] for p in posts)
+    out = [p for p in posts if p["id"] not in old]
+    _now_shown(out)
+    return out
+
+
 def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = "") -> dict:
     """A page of the Feed, live from the sites (livefeeds). tags: e621 only shows posts with
     these tags (e.g. "anal" or "anal canine")."""
@@ -742,6 +777,16 @@ def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = 
     s = follow_settings(subscribed=False)
     d = livefeeds.feed(mode, source, _cursor(cursor), s["reddit"]["follow"], s["e621"]["searches"], tags)
     _seen(d["posts"], d["users"])
+    if mode == "foryou":            # something new each time: what you were shown before is passed over
+        posts, reads = _unshown(d["posts"]), 1
+        while len(posts) < FRESH_MIN and d["more"] and reads < FRESH_READS:
+            more = livefeeds.feed(mode, source, d["cursor"], s["reddit"]["follow"], s["e621"]["searches"], tags)
+            _seen(more["posts"], more["users"])
+            have = {p["id"] for p in posts}
+            posts += [p for p in _unshown(more["posts"]) if p["id"] not in have]
+            d = {**more, "errors": {**d["errors"], **more["errors"]}}
+            reads += 1
+        d = {**d, "posts": posts}
     nxt = base64.urlsafe_b64encode(json.dumps(d["cursor"]).encode()).decode().rstrip("=") if d["more"] else None
     return {"posts": _mark_saved(d["posts"]), "more": d["more"], "cursor": nxt, "errors": d["errors"]}
 
@@ -959,13 +1004,15 @@ def more_videos(post_id: str, cursor: str) -> dict:
         p = one_post(post_id)["post"]
         if site == "reddit":
             sub = p.get("place") or ""
-            stages = ([["sub", f"/r/{sub}/hot"], ["sub", f"/r/{sub}/top?t=week"]] if SUBREDDIT.match(sub) else []) + [["subs", ""]]
+            # its subreddit's listings in a different order each time (hot, new, the week's and month's top)
+            lists = [f"/r/{sub}/{x}" for x in random.sample(["hot", "new", "top?t=week", "top?t=month"], 4)]
+            stages = ([["sub", x] for x in lists] if SUBREDDIT.match(sub) else []) + [["subs", ""]]
         else:
             first = p.get("place") or ((p.get("artists") or [""])[0])
             stages = [["e621", q] for q in dict.fromkeys([first] + follow_settings(subscribed=False)["e621"]["searches"]) if q]
         c = {"stages": stages, "i": 0, "at": None, "seen": [post_id]}
     stages = c.get("stages") or []
-    ok = {"sub": re.compile(r"^/r/[A-Za-z0-9_]{2,21}/(?:hot|top\?t=week)$"), "subs": re.compile(r"^$"), "e621": re.compile(r"^.{1,300}$")}
+    ok = {"sub": re.compile(r"^/r/[A-Za-z0-9_]{2,21}/(?:hot|new|top\?t=week|top\?t=month)$"), "subs": re.compile(r"^$"), "e621": re.compile(r"^.{1,300}$")}
     if (not isinstance(stages, list) or len(stages) > 40 or not isinstance(c.get("i"), int)
             or any(not (isinstance(x, list) and len(x) == 2 and x[0] in ok and isinstance(x[1], str) and ok[x[0]].match(x[1]))
                    for x in stages)
@@ -992,8 +1039,9 @@ def more_videos(post_id: str, cursor: str) -> dict:
                 posts, nxt = livefeeds.reddit_page(where, c["at"], "videos")
         except ValueError:               # (a search dreamfeed won't run)
             posts, nxt = [], None
+        old = _stale(p["id"] for p in posts)          # (shown to you before: passed over)
         for p in posts:
-            if p["id"] not in seen and any(x.get("kind") in VIDEO_KINDS for x in p["media"]):
+            if p["id"] not in seen and p["id"] not in old and any(x.get("kind") in VIDEO_KINDS for x in p["media"]):
                 if kind == "e621":
                     p = {**p, "place": where}
                 seen.add(p["id"]); out.append(p)
@@ -1002,6 +1050,7 @@ def more_videos(post_id: str, cursor: str) -> dict:
         else:
             c.update(i=c["i"] + 1, at=None)
     c["seen"] = list(seen)[-300:]
+    _now_shown(out)
     more = c["i"] < len(stages)
     return {"posts": _mark_saved(out), "cursor": base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("=") if more else None}
 
@@ -2485,6 +2534,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 d = livefeeds.x_related(q.get("id", ""), q.get("handle", ""), q.get("cursor", ""))
                 _seen(d["posts"], [])
+                posts, reads = _unshown(d["posts"]), 1     # (shown to you before: passed over, read on)
+                while len(posts) < 3 and d["cursor"] and reads < FRESH_READS:
+                    d = livefeeds.x_related(q.get("id", ""), q.get("handle", ""), d["cursor"])
+                    _seen(d["posts"], [])
+                    posts += _unshown(d["posts"]); reads += 1
+                d = {**d, "posts": posts}
                 return self.send(200, {"posts": _mark_saved(d["posts"]), "cursor": d["cursor"]})
             except ValueError as e:
                 return self.send(400, {"error": str(e)})

@@ -375,7 +375,10 @@ the **Saved** tab, below):
 - **Following:** your X Following timeline, your subreddits and Reddit people, e621, newest
   first.
 - **For you:** the sites' own picks: X's For you timeline and your Reddit front page (Best), in
-  each site's own order, taken in turns; never mixed into Following. Above it, people you might
+  each site's own order, taken in turns; never mixed into Following. Something new each time:
+  posts you were shown more than 30 minutes ago are passed over (and it reads further down for
+  more), here and in More videos, where Reddit's also starts from a different listing of the
+  subreddit each time (hot, new, the week's or month's top). Above it, people you might
   like: X accounts you don't follow, from your rooms' bios, mentions by people you follow and
   X's For you (from the last 30 days of your timelines, `x_seen`).
 - **Saved** (its own tab, with the persona posts you liked, newest first): what you tapped Save
