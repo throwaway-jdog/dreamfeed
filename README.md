@@ -544,8 +544,8 @@ last 30 days). Their profile shows their latest posts, read live.
 **Watch several:** on Live, pick up to 4 live rooms (yours or from Discover) and watch them
 together, each in its own tile at a quality to fit, with its title and viewers (asked again
 every minute). All are muted but the one you tap (Mute all mutes that one too); Full opens one in
-the player, ✕ drops one (the others keep playing), + Add brings in another live room (yours, then
-Discover's) up to 4. A tile whose stream stops tries again 10 seconds later. In the player,
+the player, ✕ drops one (the others keep playing), + Add brings in another live room up to 4: one
+of yours that's live, or from Discover (for you, or search a tag or a few words). A tile whose stream stops tries again 10 seconds later. In the player,
 + Several starts this with the room you're watching; Follow follows a room you don't yet, and the
 title under the video stays current while you watch.
 

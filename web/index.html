@@ -476,6 +476,7 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
   border-radius: 16px 16px 0 0; padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 30px #0008; }
 .mv-picker-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .mv-picker-head .secondary { width: auto; padding: 0 14px; min-height: 36px; }
+.mv-picker .seg, .mv-picker .d-search { margin-bottom: 8px; }
 .mv-pick-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; text-align: left; padding: 6px 0; }
 .mv-pick-row img { width: 96px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--surface); }
 .mv-pick-row div { display: grid; gap: 2px; min-width: 0; }
@@ -950,7 +951,11 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
       <button type="button" class="secondary" id="mv-close">Close</button></div>
     <div class="mv-grid" id="mv-grid"></div>
     <div class="mv-picker" id="mv-picker" hidden><div class="mv-picker-head"><b>Add a room</b>
-      <button type="button" class="secondary" id="mv-picker-close">Cancel</button></div><div id="mv-list"></div></div>
+      <button type="button" class="secondary" id="mv-picker-close">Cancel</button></div>
+      <div class="seg two" id="mv-tabs" role="group" aria-label="Rooms from">
+        <button type="button" data-t="following" aria-pressed="true">Following</button><button type="button" data-t="discover" aria-pressed="false">Discover</button></div>
+      <form class="d-search" id="mv-search" hidden><input class="in" id="mv-q" placeholder="a tag or a few words (empty: for you)" maxlength="60" autocomplete="off" autocapitalize="off"><button type="submit" class="secondary">Search</button></form>
+      <div id="mv-list"></div><button type="button" class="secondary more" id="mv-more" hidden>More</button></div>
   </div>
   <div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="Live room">
     <div class="reader-bar"><span id="pl-title"></span>
@@ -2177,22 +2182,54 @@ function mvBar() {
   $("mv-hint").textContent = mv.tiles.some(x => !x.v.muted) ? "" : "Tap one for its sound";
 }
 // Add a room: who you follow that's live, then Discover's rooms (those already shown left out).
-function mvPicker() {
-  const shown = new Set(mv.tiles.map(t => t.r.name));
-  const rooms = [...(follow.live || []), ...(dc.rooms || []).filter(r => !(follow.names || new Set()).has(r.name))]
+// Add a room: one of yours that's live, or one from Discover (for you, or a search).
+const mvp = { tab: "following", q: "", offset: 0, rooms: [], more: false, gen: 0 };
+function mvRow(r) {
+  const b = el("button", "mv-pick-row"); b.type = "button";
+  const img = el("img"); img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
+  const i = r.info || {}, d = el("div");
+  d.append(el("b", null, r.name), el("small", null, [`${(i.viewers || 0).toLocaleString()} watching`, i.title].filter(Boolean).join(" · ")));
+  b.append(img, d);
+  b.onclick = () => { $("mv-picker").hidden = true; mvAdd(r); };
+  return b;
+}
+function mvPickList() {
+  const shown = new Set(mv.tiles.map(t => t.r.name)), list = $("mv-list");
+  const following = mvp.tab === "following";
+  document.querySelectorAll("#mv-tabs button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.t === mvp.tab)));
+  $("mv-search").hidden = following;
+  $("mv-more").hidden = following || !mvp.more;
+  const rooms = (following ? follow.live || [] : mvp.rooms)
     .filter((r, k, all) => !shown.has(r.name) && all.findIndex(x => x.name === r.name) === k);
-  const list = $("mv-list");
-  list.replaceChildren(...(rooms.length ? rooms.map(r => {
-    const b = el("button", "mv-pick-row"); b.type = "button";
-    const img = el("img"); img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
-    const i = r.info || {}, d = el("div");
-    d.append(el("b", null, r.name), el("small", null, [`${(i.viewers || 0).toLocaleString()} watching`, i.title].filter(Boolean).join(" · ")));
-    b.append(img, d);
-    b.onclick = () => { $("mv-picker").hidden = true; mvAdd(r); };
-    return b;
-  }) : [el("p", "note", "No other live rooms. Open Discover on the Live tab for more.")]));
+  if (rooms.length) return list.replaceChildren(...rooms.map(mvRow));
+  list.replaceChildren(el("p", "note", following ? "None of yours are live. Try Discover." : mvp.gen && !mvp.loading ? "No one here right now." : "Looking…"));
+}
+async function mvDiscover(reset) {
+  if (reset) { mvp.offset = 0; mvp.rooms = []; mvp.more = false; }
+  const gen = ++mvp.gen, mode = mvp.q ? "search" : "foryou"; mvp.loading = true; mvPickList();
+  let d;
+  try { d = await api(`api/discover/cb?mode=${mode}&gender=${dc.gender}&offset=${mvp.offset}&q=${encodeURIComponent(mvp.q)}`); }
+  catch (err) { if (gen === mvp.gen) { mvp.loading = false; $("mv-list").replaceChildren(el("p", "note", err.message)); } return; }
+  if (gen !== mvp.gen) return;
+  mvp.loading = false;
+  const have = new Set(mvp.rooms.map(r => r.name));
+  mvp.rooms.push(...d.rooms.filter(r => !have.has(r.name)));
+  mvp.offset += mode === "foryou" ? d.rooms.length : 60; mvp.more = !!d.more;
+  for (const r of d.rooms) nav.rooms.set(r.name, r);
+  mvPickList();
+}
+function mvPicker() {
+  if (!(follow.live || []).some(r => !mv.tiles.some(t => t.r.name === r.name))) mvp.tab = "discover";
+  if (mvp.tab === "discover" && !mvp.rooms.length) mvDiscover(true);
+  mvPickList();
   $("mv-picker").hidden = false;
 }
+document.querySelectorAll("#mv-tabs button").forEach(b => b.onclick = () => {
+  mvp.tab = b.dataset.t;
+  if (mvp.tab === "discover" && !mvp.rooms.length && !mvp.loading) mvDiscover(true); else mvPickList();
+});
+$("mv-search").onsubmit = e => { e.preventDefault(); mvp.q = $("mv-q").value.trim(); mvDiscover(true); };
+$("mv-more").onclick = () => mvDiscover(false);
 function closeMulti() {
   clearTimeout(mv.timer);
   for (const t of mv.tiles) { t.gen++; if (t.hls) t.hls.destroy(); if (t.v) { t.v.pause(); t.v.removeAttribute("src"); t.v.load(); } }
