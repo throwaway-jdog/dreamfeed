@@ -17,7 +17,7 @@ GET  /api/discover/cb   ?mode=foryou|top|search&q=WORDS&gender=f|m|c|t&offset=N 
 GET  /api/discover/x    X accounts you might like: linked from your rooms, mentioned by your follows
 GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subreddit as it is now (live)
 GET  /api/reddit/browses   the last few subreddits browsed
-GET  /api/person/posts  ?source=x|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
+GET  /api/person/posts  ?source=x|bsky|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
 GET  /api/signins      your sign-ins to the sites (cookies.py): which are set, when they run out (never the values)
 GET  /reddit/login     Sign in with Reddit (your app's keys from the dashboard): off to reddit.com to approve it,
@@ -26,6 +26,7 @@ POST /api/signins      {"site": "x"|"chaturbate", "cookies": TEXT} set them (a c
                         Cookie header) and check they work; {"site", "forget": true} drop the dashboard's;
                         {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys;
                         {"site": "e621", "username", "api_key"} your e621 account (checked before it's kept);
+                        {"site": "bsky", "identifier", "password"} your Bluesky handle and an app password (the same);
                         {"site", "from_browser": true} take them from the server's browser (BROWSER_PROFILE)
 POST /api/e621/vote    {"id": "e621:ID", "score": 1|-1} vote on it as you (signed in to e621; the same again takes it back)
 POST /api/browser/start  start the server's browser (it stops itself when no one's using it)
@@ -47,7 +48,8 @@ GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
 POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
                         {"e621": {"searches": ["tag tag", ...], "top": N}} change them
-GET  /api/following/posts  ?mode=following|foryou&source=all|x|reddit|e621&cursor=C&tags=T  the Feed, live from the sites
+GET  /api/following/posts  ?mode=following|foryou&source=all|x,bsky,reddit,e621&cursor=C&tags=T  the Feed, live from the sites
+                        (source: all, or the sites you picked, with commas)
                            (tags: e621 only shows posts with them)
                         (its pictures and videos load from them); what you save is in Saved (/api/feed?view=liked)
 GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
@@ -114,7 +116,7 @@ DB_PATH = DATA / "feed.db"
 PAGE = Path(__file__).with_name("index.html")
 # Each part of the page has its own address (the page reads it and opens that part):
 PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
-         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos"}
+         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos", "bsky"}
 # Where the page is served from, as the reverse proxy says (X-Forwarded-Prefix: e.g. Caddy's
 # handle_path strips it, so the page needs it for its own links); none: the site's root.
 PREFIX = re.compile(r"^(?:/[A-Za-z0-9._~-]+)*$")
@@ -127,7 +129,7 @@ PAGE_SIZE = 30
 MEDIUMS = ("anime", "furry")
 HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 FOLLOW = GENERATED / "follow"
-FEED_SOURCES = ("x", "reddit", "e621")
+FEED_SOURCES = ("x", "bsky", "reddit", "e621")
 FEED_MODES = ("following", "foryou")   # your follows; X's For you and Reddit's Best; what you saved
 LIVE_DAYS = 28         # live times this far back give a room's usual hours
 ROOM = re.compile(r"^[a-z0-9_]{1,64}$")
@@ -139,12 +141,13 @@ LIVE_INFO = "https://chaturbate.com/api/chatvideocontext/{}/"
 FEED_IMAGES = ("https://pbs.twimg.com https://i.redd.it https://preview.redd.it https://external-preview.redd.it"
                " https://styles.redditmedia.com https://a.thumbs.redditmedia.com https://b.thumbs.redditmedia.com"
                " https://*.xvideos-cdn.com"
-               " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
+               " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com"
+               " https://cdn.bsky.app https://video.bsky.app")
 FEED_FRAMES = "https://www.xvideos.com"     # xvideos' own player, for a profile's xvideos tab
 FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it https://i.imgur.com"
-              " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com")
+              " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com https://video.bsky.app")
 CSP = (f"default-src 'self'; img-src 'self' data: {FEED_IMAGES}; style-src 'self' 'unsafe-inline'; "
-       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it; worker-src 'self' blob:; frame-src {FEED_FRAMES}; "
+       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it https://video.bsky.app; worker-src 'self' blob:; frame-src {FEED_FRAMES}; "
        "script-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -237,7 +240,7 @@ def feed(view: str, medium: str, offset: int, persona: str = "", gid: int | None
     return {"items": [item(r) for r in rows[:PAGE_SIZE]], "more": len(rows) > PAGE_SIZE}
 
 
-SAVED_SOURCES = ("all", "personas", "x", "reddit", "e621")
+SAVED_SOURCES = ("all", "personas", "x", "bsky", "reddit", "e621")
 
 
 def saved_view(medium: str, offset: int, source: str = "all") -> dict:
@@ -564,6 +567,18 @@ def _browser_keeper() -> None:
             time.sleep(BROWSER_TICK * 59)
 
 
+def _bsky_status() -> dict:
+    c = cookies.bsky()
+    out = {"site": "bsky", "name": "Bluesky", "from": c["from"], "handle": None, "signed_in": False}
+    if c["from"]:
+        try:
+            sess = livefeeds._bsky_session()
+            out.update(signed_in=True, handle=sess.get("handle") or c["identifier"])
+        except LookupError as e:
+            out["error"] = str(e)[:200]
+    return out
+
+
 def _e621_status() -> dict:
     c = cookies.e621()
     out = {"site": "e621", "name": "e621", "from": c["from"], "username": c["username"] or None, "signed_in": False}
@@ -578,7 +593,7 @@ def _e621_status() -> dict:
 
 def signins(headers=None) -> dict:
     return {"sites": [{**cookies.status(s, MOUNTED_COOKIES[s]), "refresh": _browser["refresh"].get(s)} for s in cookies.SITES],
-            "e621": _e621_status(),
+            "e621": _e621_status(), "bsky": _bsky_status(),
             "browser": BROWSER_URL if BROWSER_PROFILE and BROWSER_URL else None,
             "reddit": _reddit_status(headers or {})}
 
@@ -587,6 +602,19 @@ def save_signin(req: dict) -> dict:
     """{"site", "cookies": TEXT} keeps them and checks them; {"site", "forget": true} drops them;
     {"site": "reddit", "client_id", "client_secret"} your Reddit app's keys."""
     site = str(req.get("site", ""))
+    if site == "bsky":
+        if req.get("forget"):
+            cookies.forget_bsky()
+            livefeeds.forget("bsky:")
+            return {"site": _bsky_status()}
+        cookies.save_bsky(str(req.get("identifier", "")), str(req.get("password", "")))
+        livefeeds.forget("bsky:")
+        try:
+            livefeeds._bsky_session(fresh=True)        # (checked by signing in now)
+        except LookupError as e:
+            cookies.forget_bsky()
+            raise ValueError(str(e))
+        return {"site": _bsky_status()}
     if site == "e621":
         if req.get("forget"):
             cookies.forget_e621()
@@ -1047,7 +1075,8 @@ def _unshown(posts: list[dict]) -> list[dict]:
 def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = "") -> dict:
     """A page of the Feed, live from the sites (livefeeds). tags: e621 only shows posts with
     these tags (e.g. "anal" or "anal canine")."""
-    if source not in ("all", *FEED_SOURCES) or mode not in FEED_MODES:
+    picked = source.split(",")
+    if not (source == "all" or picked and all(s in FEED_SOURCES for s in picked)) or mode not in FEED_MODES:
         raise ValueError("bad source")
     tags = " ".join(tags.split())
     if tags:
@@ -1164,6 +1193,11 @@ def person_posts(source: str, handle: str, cursor: str) -> dict:
             posts, nxt = livefeeds.e621_page(name, int(cursor) if cursor.isdigit() else None)
         except OSError as e:
             raise LookupError(f"e621 didn't answer ({e})")
+    elif source == "bsky":
+        h = handle.strip().lstrip("@")
+        if not livefeeds.BSKY_HANDLE.match(h):
+            raise ValueError("bad Bluesky handle")
+        posts, nxt = livefeeds.bsky_page("@" + h, cursor or None)
     else:
         raise ValueError("bad source")
     return {"posts": _mark_saved(posts), "cursor": str(nxt) if nxt else None}
@@ -1174,7 +1208,7 @@ def save_post(req: dict) -> dict:
     saved on Reddit too, an e621 one favorited (signed in)."""
     p, save = req.get("post") or {}, bool(req.get("save"))
     pid = str(p.get("id") or "")
-    m = re.fullmatch(r"(x|reddit|e621):([A-Za-z0-9_]{1,30})", pid)
+    m = livefeeds.POST_ID.fullmatch(pid)
     if not m or p.get("source") != m.group(1) or not isinstance(p.get("media"), list):
         raise ValueError("bad post")
     sync = None
@@ -1580,7 +1614,7 @@ def relink(req: dict) -> dict:
     return {"running": start_linking(room) or room in _linking}
 
 
-def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = "") -> dict:
+def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = "", bsky: str = "") -> dict:
     """One profile across sites: a Chaturbate room (or the room an X or Reddit account is linked
     to), its linked accounts (who they are on X and Reddit) and your videos of it; or an e621
     artist (their pages elsewhere, and their X account's posts when e621 lists one). Their
@@ -1600,7 +1634,16 @@ def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = ""
         if room and not ROOM.match(room):
             raise ValueError("bad room")
         out = {"room": room or None, "followed": False, "bio": {}, "links": [], "xusers": {}, "following_x": [], "videos": 0,
-               "e621": [artist["name"]] if artist else [], "artist": artist, "reddituser": None}
+               "e621": [artist["name"]] if artist else [], "artist": artist, "reddituser": None, "bsky": [], "bskyuser": None}
+        if bsky:                             # a Bluesky account on its own
+            h = bsky.strip().lstrip("@")
+            if not livefeeds.BSKY_HANDLE.match(h):
+                raise ValueError("bad Bluesky handle")
+            out["bsky"] = [h.lower()]
+            try:
+                out["bskyuser"] = livefeeds.bsky_user(h)
+            except LookupError:
+                pass
         if room:
             bio = _bio(room)
             if bio.get("links"):
@@ -2893,7 +2936,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/profile":
             q = self.query()
             try:
-                return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", ""), q.get("e621", "")))
+                return self.send(200, profile(q.get("room", ""), q.get("x", ""), q.get("reddit", ""), q.get("e621", ""), q.get("bsky", "")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
             except LookupError as e:

@@ -20,10 +20,10 @@ from pathlib import Path
 
 
 HOSTS = ("pbs.twimg.com", "video.twimg.com", "i.redd.it", "preview.redd.it", "external-preview.redd.it", "v.redd.it",
-         "i.imgur.com", "static1.e621.net")      # and redgifs' (*.redgifs.com)
+         "i.imgur.com", "static1.e621.net", "cdn.bsky.app", "video.bsky.app")      # and redgifs' (*.redgifs.com)
 MAX_BYTES = 2 << 30          # a file bigger than this isn't kept
 AGENT = "dreamfeed/1.0 (saving a post you saved)"
-POST_ID = re.compile(r"^(x|reddit|e621):([A-Za-z0-9_]{1,30})$")
+POST_ID = re.compile(r"^(x|reddit|e621|bsky):([A-Za-z0-9_]{1,60})$")
 EXTS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif",
         "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov"}
 

@@ -275,7 +275,7 @@ main { padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px)); }
 .off-row img, .off-row .ph { width: 56px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: var(--bg); filter: grayscale(1); opacity: .6; }
 .off-row div { min-width: 0; display: grid; }
 .off-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#f-source { grid-template-columns: repeat(4, 1fr); }
+#f-source { grid-template-columns: repeat(5, 1fr); }
 .br-form.e6-tags-form { grid-template-columns: minmax(0, 1fr) auto; }
 .fposts #f-mode { margin: 10px 14px 0; }
 .saved-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 14px 0; }
@@ -871,8 +871,9 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   <section class="timeline fposts" id="posts" hidden aria-label="Feed">
     <div class="seg" id="f-mode" role="group" aria-label="Feed">
       <button type="button" data-m="following" aria-pressed="true">Following</button><button type="button" data-m="foryou" aria-pressed="false">For you</button></div>
-    <div class="seg" id="f-source" role="group" aria-label="From">
+    <div class="seg five" id="f-source" role="group" aria-label="From (tap several)">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
+      <button type="button" data-s="bsky" aria-pressed="false">Bluesky</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
       <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
     <form class="br-form" id="br-form" hidden>
@@ -1028,8 +1029,8 @@ details.panel > summary::after { content: " +"; } details.panel[open] > summary:
   <div class="saved-bar" id="saved-bar" hidden>
     <div class="seg" id="saved-src" role="group" aria-label="Show">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="personas" aria-pressed="false">Personas</button>
-      <button type="button" data-s="x" aria-pressed="false">X</button><button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
-      <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
+      <button type="button" data-s="x" aria-pressed="false">X</button><button type="button" data-s="bsky" aria-pressed="false">Bluesky</button>
+      <button type="button" data-s="reddit" aria-pressed="false">Reddit</button><button type="button" data-s="e621" aria-pressed="false">e621</button></div>
     <button type="button" class="secondary" id="saved-import">Bring in what you saved on X, Reddit and e621</button>
     <small class="note" id="saved-note"></small></div>
   <div class="timeline" id="grid"></div>
@@ -1756,7 +1757,7 @@ function roomFor(name) {
 }
 // the public ways to open a page
 function openPerson(k) {
-  go(k.room ? `room/${enc(k.room)}` : k.x ? `x/${enc(k.x)}` : k.e621 ? `e621/${enc(k.e621)}` : `u/${enc(k.reddit)}`);
+  go(k.room ? `room/${enc(k.room)}` : k.x ? `x/${enc(k.x)}` : k.e621 ? `e621/${enc(k.e621)}` : k.bsky ? `bsky/${enc(k.bsky)}` : `u/${enc(k.reddit)}`);
 }
 function openProfile(handle) { go(handle ? `p/${enc(handle)}` : "personas"); }      // a persona's posts
 function openBrowse(sub, sort) {
@@ -1832,6 +1833,7 @@ function route() {
     case "x": if (b) return showPerson({ x: b }); break;
     case "u": if (b) return showPerson({ reddit: b }); break;
     case "e621": if (b) return showPerson({ e621: b }); break;
+    case "bsky": if (b) return showPerson({ bsky: b }); break;
     case "r": if (b) return showBrowse(b, ["new", "top"].includes(c) ? c : "hot"); break;
     case "post": if (b && c) return showPostId(`${b}:${c}`); break;
     case "xvideos": if (b) return showXvideo(nav.xv.get(b) || { id: b, title: "xvideos" }); break;
@@ -2336,11 +2338,19 @@ document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
+// From: All, or the sites you tap (several at once: X and Reddit, say); tap one again to drop it.
+const FEED_SITES = ["x", "bsky", "reddit", "e621"];
+function showSources() {
+  const on = fp.source === "all" ? ["all"] : fp.source.split(",");
+  document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(on.includes(x.dataset.s))));
+  $("br-form").hidden = fp.source !== "reddit"; $("e6-tags-form").hidden = fp.source !== "e621";
+}
 document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
-  fp.source = b.dataset.s; remember("feedSource", fp.source);
-  $("br-form").hidden = fp.source !== "reddit"; if (fp.source === "reddit") loadRecentBrowses();
-  $("e6-tags-form").hidden = fp.source !== "e621";
-  document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  const s = b.dataset.s, now = fp.source === "all" ? [] : fp.source.split(",");
+  const next = s === "all" ? [] : now.includes(s) ? now.filter(x => x !== s) : [...now, s];
+  fp.source = next.length && next.length < FEED_SITES.length ? FEED_SITES.filter(x => next.includes(x)).join(",") : "all";
+  remember("feedSource", fp.source); showSources();
+  if (fp.source === "reddit") loadRecentBrowses();
   loadPosts(true);
 });
 $("f-more").onclick = () => loadPosts(false);
@@ -2348,12 +2358,11 @@ $("f-more").onclick = () => loadPosts(false);
 function remember(k, v) { try { localStorage.setItem(k, v); } catch {} }
 function recalled(k, ok) { try { const v = localStorage.getItem(k); return ok.includes(v) ? v : null; } catch { return null; } }
 {
-  const m = recalled("feedMode", ["following", "foryou"]), src = recalled("feedSource", ["all", "x", "reddit", "e621"]);
+  const m = recalled("feedMode", ["following", "foryou"]);
+  let src = null; try { src = localStorage.getItem("feedSource"); } catch {}
+  if (src !== "all" && !(src && src.split(",").every(x => FEED_SITES.includes(x)))) src = null;
   if (m) { fp.mode = m; document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m))); }
-  if (src) {
-    fp.source = src; document.querySelectorAll("#f-source button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === src)));
-    $("br-form").hidden = src !== "reddit"; $("e6-tags-form").hidden = src !== "e621";
-  }
+  if (src) { fp.source = src; showSources(); }
 }
 // e621's tag filter: only posts with these tags (Following: newest; For you: top today)
 $("e6-tags-form").onsubmit = e => { e.preventDefault(); fp.tags = $("e6-tags").value.trim().split(/\s+/).join(" "); loadPosts(true); };
@@ -2365,13 +2374,13 @@ function retryBtn() {
 async function loadPosts(reset) {
   if (reset) {
     fp.cursor = ""; fp.shown = 0; fp.gen++; $("f-posts").replaceChildren();
-    if (fp.mode === "foryou" && fp.source !== "reddit") { const strip = el("div", "dx-wrap"); $("f-posts").append(strip); loadPeople(strip, fp.gen); }
+    if (fp.mode === "foryou" && (fp.source === "all" || fp.source.split(",").includes("x"))) { const strip = el("div", "dx-wrap"); $("f-posts").append(strip); loadPeople(strip, fp.gen); }
   }
   else if (fp.loading) return;
   const gen = fp.gen; fp.loading = true; $("f-more").hidden = true;
   $("f-feeds").textContent = "Reading the sites…";
   try {
-    const d = await api(`api/following/posts?mode=${fp.mode}&source=${fp.source}&cursor=${encodeURIComponent(fp.cursor)}`
+    const d = await api(`api/following/posts?mode=${fp.mode}&source=${encodeURIComponent(fp.source)}&cursor=${encodeURIComponent(fp.cursor)}`
       + (fp.source === "e621" && fp.tags ? `&tags=${encodeURIComponent(fp.tags)}` : ""));
     if (gen !== fp.gen) return;
     const names = { x: "X", reddit: "Reddit", e621: "e621" };
@@ -2501,18 +2510,19 @@ function closeBrowse() { br.gen++; $("browse").hidden = true; for (const v of $(
 $("br-close").onclick = leave;
 function postCard(p, opened) {
   const a = el("article", "post"), body = el("div"), head = el("div", "head");
-  const canOpen = !opened && /^(x|reddit|e621):/.test(String(p.id || ""));
+  const canOpen = !opened && /^(x|reddit|e621|bsky):/.test(String(p.id || ""));
   const av = el("span", "av sm", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
   if (p.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = p.avatar; av.append(im); }
   // whose profile the name opens: X's and Reddit's author, e621's (first) artist
   const person = p.source === "x" && p.author ? { x: p.author } : p.source === "reddit" && p.author ? { reddit: p.author }
+    : p.source === "bsky" && p.author ? { bsky: p.author }
     : p.source === "e621" && (p.artists || []).length ? { e621: p.artists[0] } : null;
   if (p.source === "reddit" && p.avatar && p.place) { av.style.cursor = "pointer"; av.onclick = () => openBrowse(p.place, "hot"); }
   else if (person) { av.style.cursor = "pointer"; av.onclick = () => openPerson(person); }
-  const who = el("span", "name", p.author || "?");
+  const who = el("span", "name", p.source === "bsky" ? p.nick || p.author || "?" : p.author || "?");
   if (person) { who.classList.add("who"); who.onclick = () => openPerson(person); }
   head.append(who,
-              (() => { const w = el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : "X");
+              (() => { const w = el("span", "where", p.source === "reddit" ? `r/${p.place}` : p.source === "e621" ? `e621 · ${p.place || ""}` : p.source === "bsky" ? `Bluesky · @${p.author}` : "X");
                        if (p.source === "reddit" && p.place) { w.classList.add("go"); w.onclick = () => openBrowse(p.place, "hot"); }
                        return w; })(),
               el("span", "time", "· " + relTime(p.posted_at)));
@@ -2553,7 +2563,7 @@ function postCard(p, opened) {
     const mv = el("button", "comments-btn", "▶ More videos"); mv.type = "button"; mv.onclick = () => openVideos(p); acts.append(mv);
   }
   if (p.link) {
-    const out = el("a", "out", { reddit: "Open on Reddit", e621: "Open on e621" }[p.source] || "Open on X");
+    const out = el("a", "out", { reddit: "Open on Reddit", e621: "Open on e621", bsky: "Open on Bluesky" }[p.source] || "Open on X");
     out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener"; acts.append(out);
   }
   if (p.id != null) {
@@ -2731,7 +2741,7 @@ async function showPerson(key) {
   clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); pf.toldFail = false;
   pf.key = key; pf.videos = []; pf.data = null; pf.posts = null; pf.room = key.room ? { name: key.room } : null;
   if (!key.room) pf.card = null;
-  $("pf-title").textContent = key.room || (key.x ? "@" + key.x : key.e621 ? key.e621.replace(/_/g, " ") : "u/" + key.reddit);
+  $("pf-title").textContent = key.room || (key.x ? "@" + key.x : key.e621 ? key.e621.replace(/_/g, " ") : key.bsky ? "@" + key.bsky : "u/" + key.reddit);
   $("pf-info").textContent = "Loading…"; $("pf-about").hidden = true; $("pf-head").hidden = true;
   for (const id of ["pf-links", "pf-grid", "pf-posts", "pf-xv-grid", "pf-rg-grid"]) $(id).replaceChildren();
   pf.xv = pf.rg = null; $("pf-tabs").hidden = true; clearTimeout(pf.ltimer);
@@ -2742,7 +2752,7 @@ async function showPerson(key) {
 }
 async function loadPerson(gen) {
   const k = pf.key, q = k.room ? `room=${encodeURIComponent(k.room)}` : k.x ? `x=${encodeURIComponent(k.x)}`
-    : k.e621 ? `e621=${encodeURIComponent(k.e621)}` : `reddit=${encodeURIComponent(k.reddit)}`;
+    : k.e621 ? `e621=${encodeURIComponent(k.e621)}` : k.bsky ? `bsky=${encodeURIComponent(k.bsky)}` : `reddit=${encodeURIComponent(k.reddit)}`;
   let d;
   try { d = await api(`api/profile?${q}`); } catch (err) { if (gen === pf.gen) $("pf-info").textContent = err.message; return; }
   if (gen !== pf.gen) return;
@@ -2770,7 +2780,7 @@ async function loadPerson(gen) {
   renderDvr(d, gen);
   renderLinks(d);
   renderXHead(d);
-  const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...d.reddit.map(h => "u/" + h), ...(d.redgifs || []).map(h => "rg:" + h),
+  const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...(d.bsky || []).map(h => "bsky:" + h), ...d.reddit.map(h => "u/" + h), ...(d.redgifs || []).map(h => "rg:" + h),
                ...(d.xvideos || []).map(h => "xv:" + h)].join(" ");
   if (!pf.posts || pf.posts.gen !== gen || pf.posts.who !== who) startPersonPosts(d, gen, who);
   if (room && d.followed && d.videos) {
@@ -2907,9 +2917,21 @@ function renderXHead(d) {
   head.replaceChildren(av, info); head.hidden = false;
   if (!d.room) $("pf-title").textContent = u.nick || "@" + u.handle;
 }
-// Without an X account: a Reddit user's picture and karma, or an e621 artist's names and post count.
+// Without an X account: a Bluesky account's picture and bio, a Reddit user's picture and karma, or an e621 artist's names and post count.
 function renderOtherHead(d) {
-  const head = $("pf-head"), r = d.reddituser, a = d.artist;
+  const head = $("pf-head"), r = d.reddituser, a = d.artist, b = d.bskyuser;
+  if (b) {
+    const av = el("span", "av lg", b.avatar ? null : (b.handle || "?").slice(0, 1).toUpperCase()), info = el("div");
+    if (b.avatar) { const im = el("img"); im.alt = ""; im.src = b.avatar; av.append(im); }
+    const n = x => x == null ? null : Number(x).toLocaleString();
+    info.append(el("b", null, b.nick || "@" + b.handle), el("small", null, ["Bluesky @" + b.handle, b.you_follow ? "you follow them" : ""].filter(Boolean).join(" · ")),
+      el("small", null, [n(b.followers) && `${n(b.followers)} followers`, n(b.following) && `${n(b.following)} following`,
+                         n(b.posts) && `${n(b.posts)} posts`].filter(Boolean).join(" · ")));
+    if (b.bio) info.append(el("p", null, b.bio));
+    head.replaceChildren(av, info); head.hidden = false;
+    $("pf-title").textContent = b.nick || "@" + b.handle;
+    return;
+  }
   if (!r && !a) { head.hidden = true; return; }
   const name = r ? "u/" + r.name : a.name.replace(/_/g, " ");
   const av = el("span", "av lg", r && r.avatar ? null : name.replace(/^u\//, "").slice(0, 1).toUpperCase()), info = el("div");
@@ -2924,7 +2946,8 @@ function renderOtherHead(d) {
 // Their latest posts, live from X (their media), Reddit (what they posted) and e621 (what they drew), each a page at a time.
 function startPersonPosts(d, gen, who) {
   const feeds = [...(d.e621 || []).map(h => ({ source: "e621", handle: h, cursor: "" })),
-                 ...d.x.map(h => ({ source: "x", handle: h, cursor: "" })), ...d.reddit.map(h => ({ source: "reddit", handle: h, cursor: "" }))];
+                 ...d.x.map(h => ({ source: "x", handle: h, cursor: "" })), ...(d.bsky || []).map(h => ({ source: "bsky", handle: h, cursor: "" })),
+                 ...d.reddit.map(h => ({ source: "reddit", handle: h, cursor: "" }))];
   pf.posts = { gen, feeds, who, loading: false };
   $("pf-posts").replaceChildren(); $("pf-more").hidden = true;
   const xv = (d.xvideos || [])[0], rg = (d.redgifs || [])[0];
@@ -3028,7 +3051,7 @@ async function morePersonPosts() {
     try {
       const r = await api(`api/person/posts?source=${f.source}&handle=${encodeURIComponent(f.handle)}&cursor=${encodeURIComponent(f.cursor)}`);
       f.cursor = r.cursor; return r.posts;
-    } catch (err) { f.cursor = null; return [el("p", "note", `${{ x: "@", reddit: "u/", e621: "e621 " }[f.source]}${f.handle}: ${err.message}`)]; }
+    } catch (err) { f.cursor = null; return [el("p", "note", `${{ x: "@", bsky: "Bluesky @", reddit: "u/", e621: "e621 " }[f.source]}${f.handle}: ${err.message}`)]; }
   }));
   if (gen !== pf.gen || pf.posts !== st) return;
   wait.remove();
@@ -3145,7 +3168,7 @@ async function loadSignins() {
   if (q) { toast(q); history.replaceState(history.state, "", location.pathname); }
   let d;
   try { d = await api("api/signins"); } catch (err) { $("si-list").replaceChildren(el("li", "note", err.message)); return; }
-  $("si-list").replaceChildren(...d.sites.map(st => siCookieRow(st, d.browser)), siRedditRow(d.reddit), siE621Row(d.e621));
+  $("si-list").replaceChildren(...d.sites.map(st => siCookieRow(st, d.browser)), siBskyRow(d.bsky), siRedditRow(d.reddit), siE621Row(d.e621));
 }
 function siCookieRow(st, browser) {
   const li = el("li", "si-row"), head = el("div", "si-head");
@@ -3210,6 +3233,34 @@ function siCookieRow(st, browser) {
       } catch (x) { err.textContent = x.message; save.disabled = false; save.textContent = "Save and check"; }
     };
     li.append(form); ta.focus();
+  };
+  return li;
+}
+function siBskyRow(st) {
+  const li = el("li", "si-row"), head = el("div", "si-head");
+  const words = st.signed_in ? `Signed in as @${st.handle}` : st.error ? `Not signed in: ${st.error}` : "Not signed in: Bluesky in the Feed needs it";
+  const set = el("button", "secondary", st.signed_in ? "Change" : "Sign in"); set.type = "button";
+  head.append(el("b", null, "Bluesky"), set);
+  if (st.from) {
+    const rm = el("button", "secondary", "Forget"); rm.type = "button";
+    rm.onclick = async () => { if (!confirm("Forget your Bluesky sign-in?")) return;
+      try { await api("api/signins", { site: "bsky", forget: true }); loadSignins(); } catch (err) { toast(err.message); } };
+    head.append(rm);
+  }
+  head.append(el("small", st.signed_in ? null : "bad", words)); li.append(head);
+  set.onclick = () => {
+    if (li.querySelector(".si-form")) return;
+    const form = el("form", "si-form"), name = el("input", "in"), pw = el("input", "in"), save = el("button", "primary", "Sign in"), err = el("div", "ed-err");
+    form.noValidate = true; name.placeholder = "handle, e.g. you.bsky.social"; name.value = st.handle || ""; pw.type = "password"; pw.placeholder = "app password";
+    for (const x of [name, pw]) { x.setAttribute("autocomplete", "off"); x.setAttribute("autocapitalize", "off"); x.spellcheck = false; }
+    save.type = "submit"; err.setAttribute("role", "alert");
+    form.append(el("small", "hint", "Use an app password, not your own: on Bluesky, Settings, Privacy and security, App passwords. For adult posts, turn on adult content in Bluesky's own settings (on the web)."), name, pw, save, err);
+    form.onsubmit = async e => {
+      e.preventDefault(); err.textContent = ""; save.disabled = true; save.textContent = "Checking…";
+      try { await api("api/signins", { site: "bsky", identifier: name.value, password: pw.value }); toast("Bluesky: signed in ✓"); loadSignins(); }
+      catch (x) { err.textContent = x.message; save.disabled = false; save.textContent = "Sign in"; }
+    };
+    li.append(form); (st.handle ? pw : name).focus();
   };
   return li;
 }

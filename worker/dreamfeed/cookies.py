@@ -324,3 +324,56 @@ def forget_e621() -> None:
     f = _e621_file()
     if f:
         f.unlink(missing_ok=True)
+
+
+# ---- Bluesky: your handle and an app password (Settings, Privacy and security, App passwords),
+# the same way (<DATA_DIR>/cookies/bsky.json, with the session it makes so it signs in once).
+BSKY_NAME = re.compile(r"^(?:did:plc:[a-z2-7]{24}|[A-Za-z0-9.-]{3,253}|[^@\s]{1,64}@[^@\s]{1,253})$")
+
+
+def _bsky_file() -> Path | None:
+    return folder() / "bsky.json" if os.environ.get("DATA_DIR", "").strip() else None
+
+
+def bsky() -> dict:
+    """{"identifier", "password", "session": {...} or None, "from": dashboard|None}."""
+    f = _bsky_file()
+    try:
+        d = json.loads(f.read_text()) if f and f.is_file() else {}
+    except ValueError:
+        d = {}
+    ok = bool(d.get("identifier") and d.get("password"))
+    return {"identifier": d.get("identifier", ""), "password": d.get("password", ""),
+            "session": d.get("session") if ok else None, "from": "dashboard" if ok else None}
+
+
+def _bsky_write(d: dict) -> None:
+    folder().mkdir(mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder(), prefix=".bsky-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(d, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, folder() / "bsky.json")
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def save_bsky(identifier: str, password: str, session: dict | None = None) -> None:
+    identifier, password = identifier.strip().lstrip("@"), password.strip()
+    if not BSKY_NAME.match(identifier) or not 4 <= len(password) <= 200:
+        raise ValueError("that doesn't look like a Bluesky handle and app password")
+    _bsky_write({"identifier": identifier, "password": password, "session": session})
+
+
+def save_bsky_session(session: dict) -> None:
+    d = bsky()
+    if d["from"]:
+        _bsky_write({"identifier": d["identifier"], "password": d["password"], "session": session})
+
+
+def forget_bsky() -> None:
+    f = _bsky_file()
+    if f:
+        f.unlink(missing_ok=True)

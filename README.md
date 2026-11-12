@@ -357,6 +357,15 @@ those on purpose, so its own moderation doesn't remove them), subreddits whose n
 dreamfeed never takes (young, feral and the like) and posts whose text does. Real people's
 posts never go to training, styles, comics or generation. Open on X/Reddit goes to the post.
 
+**Which sites:** All, or tap the ones you want (X and Reddit, say; tap one again to drop it),
+remembered in this browser; Following and For you both take it.
+
+- **Bluesky:** as you (the Dashboard's Sign-ins: your handle and an app password, never your
+  own; it signs in once and keeps the session it makes): Following is your timeline, For you
+  the first feed you pinned on Bluesky (else its Discover). Posts with pictures or a video
+  (Bluesky's own HLS, played and kept like Reddit's), their replies, and profiles (tap a name:
+  their posts with media, at `/bsky/HANDLE`). Adult posts only come when adult content is on
+  in Bluesky's own settings (on its website).
 - **X:** with your cookies (the Dashboard's Sign-ins, or `X_COOKIES_FILE`; the same ones styles use), through gallery-dl's
   metadata (`-j`: what a post is and where its files are, nothing downloaded), 30 media files
   a page.
