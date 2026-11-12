@@ -1840,7 +1840,7 @@ function route() {
     case "redgifs": if (/^[a-z]{3,80}$/.test(b)) return showClip(b); break;
     case "videos":
       if (/^\d{5,25}$/.test(b)) return showVideos(b, c);
-      if (["reddit", "e621"].includes(b) && /^[A-Za-z0-9_]{1,30}$/.test(c)) return showVideos(c, "", b);
+      if (["reddit", "e621", "bsky"].includes(b) && /^[A-Za-z0-9_]{1,60}$/.test(c)) return showVideos(c, "", b);
       break;
   }
   go("", true);
@@ -1940,7 +1940,8 @@ function vfAdd(posts) {
     v.onclick = () => { if (v.paused) v.play().catch(() => {}); else v.pause(); };
     const info = el("div", "vf-info"), who = el("span", "vf-who"), av = el("span", "av", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
     if (p.avatar) { const im = el("img"); im.alt = ""; im.src = p.avatar; av.append(im); }
-    const person = p.source === "x" ? { x: p.author } : p.source === "reddit" ? { reddit: p.author } : (p.artists || []).length ? { e621: p.artists[0] } : null;
+    const person = p.source === "x" ? { x: p.author } : p.source === "reddit" ? { reddit: p.author } : p.source === "bsky" ? { bsky: p.author }
+      : (p.artists || []).length ? { e621: p.artists[0] } : null;
     who.append(av, el("span", null, p.source === "x" ? "@" + p.author : p.source === "reddit" ? `u/${p.author} · r/${p.place}` : p.author || "e621"));
     if (person) who.onclick = () => openPerson(person);
     info.append(who);
@@ -1960,7 +1961,7 @@ function vfAdd(posts) {
     };
     showSave();
     const out = el("a"); out.href = p.link; out.target = "_blank"; out.rel = "noreferrer noopener";
-    out.append("↗", el("small", null, { x: "X", reddit: "Reddit", e621: "e621" }[p.source]));
+    out.append("↗", el("small", null, { x: "X", reddit: "Reddit", e621: "e621", bsky: "Bluesky" }[p.source]));
     acts.append(cm, sv, out);
     slide.append(v, info, acts);
     p.el = slide; vf.posts.push(p);
@@ -1978,7 +1979,7 @@ async function vfMore() {
     if (gen !== vf.gen) return;
     msg.remove(); vf.cursor = d.cursor || null;
     vfAdd(d.posts);
-    if (!vf.posts.length) $("vf-track").append(el("p", "vf-msg", "X has no more videos for this one."));
+    if (!vf.posts.length) $("vf-track").append(el("p", "vf-msg", `${{ reddit: "Reddit", e621: "e621", bsky: "Bluesky" }[s.site] || "X"} has no more videos for this one.`));
   } catch (err) { if (gen === vf.gen) { msg.textContent = err.message; if (!msg.isConnected) toast(err.message); } }
   finally { if (gen === vf.gen) vf.loading = false; }
 }
@@ -2559,7 +2560,7 @@ function postCard(p, opened) {
     const c = el("button", "comments-btn", p.comments ? `💬 ${Number(p.comments).toLocaleString()}` : "💬 Comments");
     c.type = "button"; c.onclick = () => openPost(p); acts.append(c);
   }
-  if (["x", "reddit", "e621"].includes(p.source) && p.media.some(m => m.kind === "video" || m.kind === "hls")) {   // a swipe-up feed, from this one
+  if (["x", "reddit", "e621", "bsky"].includes(p.source) && p.media.some(m => m.kind === "video" || m.kind === "hls")) {   // a swipe-up feed, from this one
     const mv = el("button", "comments-btn", "▶ More videos"); mv.type = "button"; mv.onclick = () => openVideos(p); acts.append(mv);
   }
   if (p.link) {

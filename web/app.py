@@ -34,7 +34,8 @@ GET  /api/auth-check   200 when signed in here (the proxy asks before letting yo
 POST /api/dvr           {"name": ROOM, "action": "record"|"once"|"stop"|"pause"|"remove"}  your recorder (streamonitor), for that room:
                         record = all their streams, once = this stream (or the next) only, stop = end either
 GET  /api/reddit/random ?not=SUB  a random subreddit from RANDOM_SUBREDDITS_URL's list that has posts now
-GET  /api/videos/more  ?id=reddit:ID|e621:ID&cursor=C  more videos after that one: its subreddit, your subscriptions (Reddit); its search, yours (e621)
+GET  /api/videos/more  ?id=reddit:ID|e621:ID|bsky:ID&cursor=C  more videos after that one: its subreddit, your subscriptions (Reddit);
+                        its search, yours (e621); theirs, Bluesky's Video feed, your timeline's (Bluesky)
 GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after that one (its full-screen player's swipe-up feed)
 GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
 POST /api/profile/relink {"room"}  look for the room's accounts across sites again (linking.py)
@@ -1325,14 +1326,17 @@ def more_videos(post_id: str, cursor: str) -> dict:
     public API): Reddit, more from its subreddit (hot, then the week's top), then from your
     subscriptions and the Dashboard's subreddits, newest first; e621, more of the search it came
     from (or its artist), then the Dashboard's searches. Videos only. {"posts", "cursor"}."""
-    m = re.fullmatch(r"(reddit|e621):([A-Za-z0-9_]{1,30})", post_id or "")
+    m = re.fullmatch(r"(reddit|e621|bsky):([A-Za-z0-9_]{1,60})", post_id or "")
     if not m:
         raise ValueError("bad post")
     site = m.group(1)
     c = _cursor(cursor) or {}
     if not c:                                  # the first page: what the post itself says where to look
         p = one_post(post_id)["post"]
-        if site == "reddit":
+        if site == "bsky":           # theirs, then Bluesky's own Video feed, then your timeline's
+            who = p.get("author") or ""
+            stages = ([["bsky-author", who]] if livefeeds.BSKY_HANDLE.match(who) else []) + [["bsky-feed", ""], ["bsky-home", ""]]
+        elif site == "reddit":
             sub = p.get("place") or ""
             # its subreddit's listings in a different order each time (hot, new, the week's and month's top)
             lists = [f"/r/{sub}/{x}" for x in random.sample(["hot", "new", "top?t=week", "top?t=month"], 4)]
@@ -1342,14 +1346,17 @@ def more_videos(post_id: str, cursor: str) -> dict:
             stages = [["e621", q] for q in dict.fromkeys([first] + follow_settings(subscribed=False)["e621"]["searches"]) if q]
         c = {"stages": stages, "i": 0, "at": None, "seen": [post_id]}
     stages = c.get("stages") or []
-    ok = {"sub": re.compile(r"^/r/[A-Za-z0-9_]{2,21}/(?:hot|new|top\?t=week|top\?t=month)$"), "subs": re.compile(r"^$"), "e621": re.compile(r"^.{1,300}$")}
+    ok = {"bsky-author": livefeeds.BSKY_HANDLE, "bsky-feed": re.compile(r"^$"), "bsky-home": re.compile(r"^$"),
+          "sub": re.compile(r"^/r/[A-Za-z0-9_]{2,21}/(?:hot|new|top\?t=week|top\?t=month)$"), "subs": re.compile(r"^$"), "e621": re.compile(r"^.{1,300}$")}
     if (not isinstance(stages, list) or len(stages) > 40 or not isinstance(c.get("i"), int)
             or any(not (isinstance(x, list) and len(x) == 2 and x[0] in ok and isinstance(x[1], str) and ok[x[0]].match(x[1]))
                    for x in stages)
-            or (site == "e621") != all(x[0] == "e621" for x in stages)):
+            or (site == "e621") != all(x[0] == "e621" for x in stages)
+            or (site == "bsky") != all(x[0].startswith("bsky-") for x in stages)):
         raise ValueError("bad cursor")      # (it comes back from the page: only what this made)
     at = c.get("at")
-    if at is not None and not (isinstance(at, int) if site == "e621" else isinstance(at, str) and re.fullmatch(r"t3_\w{1,20}", at)):
+    if at is not None and not (isinstance(at, int) if site == "e621" else isinstance(at, str) and len(at) < 1000 if site == "bsky"
+                               else isinstance(at, str) and re.fullmatch(r"t3_\w{1,20}", at)):
         raise ValueError("bad cursor")
     out, reads, seen = [], 0, set(str(x) for x in (c.get("seen") or [])[:300])
     while c["i"] < len(stages) and len(out) < MORE_VIDEOS and reads < MORE_READS:
@@ -1358,6 +1365,11 @@ def more_videos(post_id: str, cursor: str) -> dict:
         try:
             if kind == "e621":
                 posts, nxt = livefeeds.e621_page(f"{where} ~type:webm ~type:mp4", c["at"])
+            elif kind.startswith("bsky-"):
+                try:
+                    posts, nxt = livefeeds.bsky_videos(kind[5:], where, c["at"])
+                except LookupError:      # (a feed that won't load: on to the next)
+                    posts, nxt = [], None
             else:
                 if kind == "subs":
                     s = follow_settings()

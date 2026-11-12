@@ -669,6 +669,27 @@ def bsky_page(kind: str, cursor: str | None) -> tuple[list[dict], str | None]:
     return _cached(f"bsky:{kind}:{cursor}", fetch)
 
 
+BSKY_VIDEOS = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/thevids"     # Bluesky's own "Video" feed
+
+
+def bsky_videos(kind: str, where: str, cursor: str | None) -> tuple[list[dict], str | None]:
+    """Bluesky videos for More videos: someone's ("author", their handle), its Video feed
+    ("feed") or your timeline's ("home"), each with its next page."""
+    def fetch():
+        if kind == "author":
+            if not BSKY_HANDLE.match(where):
+                raise ValueError("bad Bluesky handle")
+            d = _bsky("app.bsky.feed.getAuthorFeed", {"actor": where, "filter": "posts_with_video", "limit": BSKY_PAGE, "cursor": cursor})
+        elif kind == "feed":
+            d = _bsky("app.bsky.feed.getFeed", {"feed": BSKY_VIDEOS, "limit": BSKY_PAGE, "cursor": cursor})
+        elif kind == "home":
+            d = _bsky("app.bsky.feed.getTimeline", {"limit": BSKY_PAGE, "cursor": cursor})
+        else:
+            raise ValueError("bad Bluesky videos")
+        return _bsky_list(d.get("feed") or [], "videos"), d.get("cursor") or None
+    return _cached(f"bsky:videos:{kind}:{where}:{cursor}", fetch)
+
+
 def bsky_user(handle: str) -> dict:
     """Who they are on Bluesky: {"handle", "nick", "bio", "avatar", "followers", "following", "posts"}."""
     if not BSKY_HANDLE.match(handle):

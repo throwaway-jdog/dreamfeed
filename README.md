@@ -366,7 +366,8 @@ remembered in this browser; Following and For you both take it.
   Discover), up to 10, a page of each taken in turns, each post saying which feed it's from
   (pin adult feeds such as After Dark, 🐾 Hot 🌙 or Hentai Illust on Bluesky to have them here). Posts with pictures or a video
   (Bluesky's own HLS, played and kept like Reddit's), their replies, and profiles (tap a name:
-  their posts with media, at `/bsky/HANDLE`). Adult posts only come when adult content is on
+  their posts with media, at `/bsky/HANDLE`). More videos on a Bluesky video: theirs, then
+  Bluesky's own Video feed, then your timeline's. Adult posts only come when adult content is on
   in Bluesky's own settings (on its website).
 - **X:** with your cookies (the Dashboard's Sign-ins, or `X_COOKIES_FILE`; the same ones styles use), through gallery-dl's
   metadata (`-j`: what a post is and where its files are, nothing downloaded), 30 media files
