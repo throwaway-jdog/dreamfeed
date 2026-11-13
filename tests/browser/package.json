@@ -1,0 +1,1 @@
+{ "name": "dreamfeed-browser-tests", "private": true, "dependencies": { "playwright": "1.48.2" } }

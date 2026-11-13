@@ -40,6 +40,8 @@ I2V for clips. Civitai downloads that need an account use `CIVITAI_API_KEY`.
   its style in `static/app.css` and its script in parts by what they do in `static/js/` (served
   joined, as one `static/app.js`); `dvr.py` talks to your recorder.
 - `browserpower/`: starts and stops the server's browser (systemd on the host; Sign-ins).
+- `tests/`: the checks: `tests/check` before a deploy, `tests/check --live` after (with the iOS app's
+  contract), `--browser URL` for real Firefox (tests/README.md).
 - `trainer/`, `video-trainer/`, `comfyui/`, `agecheck/`: the other services.
 
 ## Personas

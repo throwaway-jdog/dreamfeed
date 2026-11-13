@@ -1,0 +1,4 @@
+# test tools and what the tests write (generated: not kept)
+page/node_modules/
+browser/node_modules/
+out/

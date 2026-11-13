@@ -1,0 +1,1 @@
+{ "name": "dreamfeed-page-tests", "private": true, "dependencies": { "jsdom": "24.1.3" } }

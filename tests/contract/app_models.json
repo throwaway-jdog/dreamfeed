@@ -1,0 +1,1806 @@
+{
+ "from": "dream-feed-ios",
+ "types": {
+  "Browse": {
+   "fields": {
+    "after": {
+     "optional": true,
+     "type": "String"
+    },
+    "posts": {
+     "optional": false,
+     "type": "[FollowPost]"
+    },
+    "sort": {
+     "optional": false,
+     "type": "String"
+    },
+    "sub": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Comic": {
+   "fields": {
+    "animations": {
+     "optional": false,
+     "type": "[Animation]"
+    },
+    "cast": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "created": {
+     "optional": true,
+     "type": "String"
+    },
+    "id": {
+     "optional": false,
+     "type": "Int"
+    },
+    "imported": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "name": {
+     "optional": true,
+     "type": "String"
+    },
+    "outlines": {
+     "optional": true,
+     "type": "[String: [[[Double]]]]"
+    },
+    "pages": {
+     "optional": false,
+     "type": "Int"
+    },
+    "panels": {
+     "optional": true,
+     "type": "[String: [[Double]]]"
+    },
+    "persona": {
+     "optional": true,
+     "type": "String"
+    },
+    "story": {
+     "optional": false,
+     "type": "String"
+    },
+    "title": {
+     "optional": false,
+     "type": "String"
+    },
+    "updated": {
+     "optional": true,
+     "type": "JSONObject"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Comic.Animation": {
+   "fields": {
+    "box": {
+     "optional": false,
+     "type": "[Double]"
+    },
+    "mask": {
+     "optional": true,
+     "type": "String"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "page": {
+     "optional": false,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "ComicFailure": {
+   "fields": {
+    "finished": {
+     "optional": true,
+     "type": "String"
+    },
+    "job": {
+     "optional": false,
+     "type": "Int"
+    },
+    "message": {
+     "optional": false,
+     "type": "String"
+    },
+    "title": {
+     "optional": false,
+     "type": "String"
+    },
+    "what": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "ComicJob": {
+   "fields": {
+    "box": {
+     "optional": true,
+     "type": "[Double]"
+    },
+    "cast": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "comic": {
+     "optional": true,
+     "type": "Int"
+    },
+    "imported": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "job": {
+     "optional": false,
+     "type": "Int"
+    },
+    "page": {
+     "optional": true,
+     "type": "Int"
+    },
+    "pages": {
+     "optional": true,
+     "type": "Int"
+    },
+    "progress": {
+     "optional": true,
+     "type": "Progress"
+    },
+    "status": {
+     "optional": false,
+     "type": "String"
+    },
+    "story": {
+     "optional": true,
+     "type": "String"
+    },
+    "title": {
+     "optional": true,
+     "type": "String"
+    },
+    "url": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "ComicList": {
+   "fields": {
+    "comics": {
+     "optional": false,
+     "type": "[Comic]"
+    },
+    "failed": {
+     "optional": true,
+     "type": "[ComicFailure]"
+    },
+    "making": {
+     "optional": false,
+     "type": "[ComicJob]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "ComicSearch": {
+   "fields": {
+    "more": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "results": {
+     "optional": false,
+     "type": "[Result]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "ComicSearch.Result": {
+   "fields": {
+    "pages": {
+     "optional": true,
+     "type": "Int"
+    },
+    "thumb": {
+     "optional": true,
+     "type": "String"
+    },
+    "title": {
+     "optional": false,
+     "type": "String"
+    },
+    "url": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "CookieSection.Reply": {
+   "fields": {
+    "check": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Dashboard/SignInsView.swift",
+   "kind": "struct"
+  },
+  "Dashboard": {
+   "fields": {
+    "jobs": {
+     "optional": false,
+     "type": "[Job]"
+    },
+    "liked": {
+     "optional": false,
+     "type": "Int"
+    },
+    "runs": {
+     "optional": false,
+     "type": "[Run]"
+    },
+    "window": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Dashboard.Job": {
+   "fields": {
+    "id": {
+     "optional": false,
+     "type": "Int"
+    },
+    "message": {
+     "optional": true,
+     "type": "String"
+    },
+    "night": {
+     "optional": true,
+     "type": "String"
+    },
+    "params": {
+     "optional": false,
+     "type": "JSONObject"
+    },
+    "status": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Dashboard.Run": {
+   "fields": {
+    "finished_at": {
+     "optional": true,
+     "type": "String"
+    },
+    "message": {
+     "optional": true,
+     "type": "String"
+    },
+    "night": {
+     "optional": false,
+     "type": "String"
+    },
+    "progress": {
+     "optional": true,
+     "type": "Progress"
+    },
+    "retry": {
+     "optional": true,
+     "type": "Int"
+    },
+    "started_at": {
+     "optional": true,
+     "type": "String"
+    },
+    "stats": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "status": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "DiscoverPeople": {
+   "fields": {
+    "people": {
+     "optional": false,
+     "type": "[Person]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "DiscoverPeople.Person": {
+   "fields": {
+    "by": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "foryou": {
+     "optional": true,
+     "type": "Int"
+    },
+    "handle": {
+     "optional": false,
+     "type": "String"
+    },
+    "mentions": {
+     "optional": false,
+     "type": "Int"
+    },
+    "rooms": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "thumb": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "DiscoverRooms": {
+   "fields": {
+    "more": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "note": {
+     "optional": true,
+     "type": "String"
+    },
+    "rooms": {
+     "optional": false,
+     "type": "[LiveRoom]"
+    },
+    "tags": {
+     "optional": true,
+     "type": "[String]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "DraftStatus": {
+   "fields": {
+    "ahead": {
+     "optional": true,
+     "type": "Int"
+    },
+    "draft": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "message": {
+     "optional": true,
+     "type": "String"
+    },
+    "night_running": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "status": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "DvrInfo": {
+   "fields": {
+    "error": {
+     "optional": true,
+     "type": "String"
+    },
+    "free": {
+     "optional": true,
+     "type": "String"
+    },
+    "on": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "room": {
+     "optional": true,
+     "type": "DvrRoom"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "DvrRoom": {
+   "fields": {
+    "once": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "running": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "state": {
+     "optional": false,
+     "type": "String"
+    },
+    "status": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FeedEntry": {
+   "kind": "enum"
+  },
+  "FeedEntry.Wrapped": {
+   "fields": {
+    "post": {
+     "optional": false,
+     "type": "FollowPost"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FeedItem": {
+   "fields": {
+    "animated": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "caption": {
+     "optional": false,
+     "type": "String"
+    },
+    "id": {
+     "optional": false,
+     "type": "Int"
+    },
+    "kind": {
+     "optional": true,
+     "type": "String"
+    },
+    "liked": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "medium": {
+     "optional": true,
+     "type": "String"
+    },
+    "night": {
+     "optional": true,
+     "type": "String"
+    },
+    "persona": {
+     "optional": true,
+     "type": "Who"
+    },
+    "posted": {
+     "optional": true,
+     "type": "String"
+    },
+    "seconds": {
+     "optional": true,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FeedItem.Who": {
+   "fields": {
+    "avatar": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "handle": {
+     "optional": false,
+     "type": "String"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FeedPage": {
+   "fields": {},
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "custom"
+  },
+  "FollowPost": {
+   "fields": {
+    "author": {
+     "optional": false,
+     "type": "String"
+    },
+    "avatar": {
+     "optional": true,
+     "type": "String"
+    },
+    "comments": {
+     "optional": true,
+     "type": "Double"
+    },
+    "id": {
+     "optional": false,
+     "type": "String"
+    },
+    "keep": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "link": {
+     "optional": true,
+     "type": "String"
+    },
+    "media": {
+     "optional": false,
+     "type": "[Media]"
+    },
+    "nick": {
+     "optional": true,
+     "type": "String"
+    },
+    "ours": {
+     "optional": true,
+     "type": "Double"
+    },
+    "place": {
+     "optional": true,
+     "type": "String"
+    },
+    "posted_at": {
+     "optional": true,
+     "type": "String"
+    },
+    "saved": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "score": {
+     "optional": true,
+     "type": "Double"
+    },
+    "source": {
+     "optional": false,
+     "type": "String"
+    },
+    "sync": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "text": {
+     "optional": true,
+     "type": "String"
+    },
+    "votable": {
+     "optional": true,
+     "type": "Bool"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FollowPost.Media": {
+   "fields": {
+    "fallback": {
+     "optional": true,
+     "type": "String"
+    },
+    "full": {
+     "optional": true,
+     "type": "String"
+    },
+    "kind": {
+     "optional": false,
+     "type": "String"
+    },
+    "poster": {
+     "optional": true,
+     "type": "String"
+    },
+    "url": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FollowPostCard.Reply": {
+   "fields": {
+    "saved": {
+     "optional": true,
+     "type": "Bool; let sync: JSONObject?; let keep: JSONObject"
+    }
+   },
+   "file": "Dreamfeed/Feed/PostsView.swift",
+   "kind": "struct"
+  },
+  "FollowPosts": {
+   "fields": {
+    "cursor": {
+     "optional": true,
+     "type": "String"
+    },
+    "errors": {
+     "optional": true,
+     "type": "[String: String]"
+    },
+    "more": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "posts": {
+     "optional": false,
+     "type": "[FollowPost]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FollowSettings": {
+   "fields": {
+    "e621": {
+     "optional": false,
+     "type": "E621"
+    },
+    "reddit": {
+     "optional": false,
+     "type": "Reddit"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FollowSettings.E621": {
+   "fields": {
+    "searches": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "top": {
+     "optional": false,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "FollowSettings.Reddit": {
+   "fields": {
+    "follow": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "subscribed": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "top": {
+     "optional": false,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Following": {
+   "fields": {
+    "dvr": {
+     "optional": true,
+     "type": "DvrInfo"
+    },
+    "rooms": {
+     "optional": false,
+     "type": "[LiveRoom]"
+    },
+    "status": {
+     "optional": true,
+     "type": "JSONObject"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "JSONValue": {
+   "kind": "enum"
+  },
+  "JobReply": {
+   "fields": {
+    "job": {
+     "optional": false,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "LiveRoom": {
+   "fields": {
+    "discovered": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "dvr": {
+     "optional": true,
+     "type": "DvrRoom"
+    },
+    "followed": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "info": {
+     "optional": false,
+     "type": "JSONObject"
+    },
+    "last_live": {
+     "optional": true,
+     "type": "Double"
+    },
+    "live": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "source": {
+     "optional": true,
+     "type": "String"
+    },
+    "thumb": {
+     "optional": true,
+     "type": "String"
+    },
+    "times": {
+     "optional": false,
+     "type": "[[Double]]"
+    },
+    "videos": {
+     "optional": true,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "LiveStream": {
+   "fields": {
+    "hls": {
+     "optional": true,
+     "type": "String"
+    },
+    "status": {
+     "optional": false,
+     "type": "String"
+    },
+    "title": {
+     "optional": true,
+     "type": "String"
+    },
+    "viewers": {
+     "optional": true,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "MoreVideos": {
+   "fields": {
+    "cursor": {
+     "optional": true,
+     "type": "String"
+    },
+    "posts": {
+     "optional": false,
+     "type": "[FollowPost]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonPosts": {
+   "fields": {
+    "cursor": {
+     "optional": true,
+     "type": "String"
+    },
+    "posts": {
+     "optional": false,
+     "type": "[FollowPost]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonProfile": {
+   "fields": {
+    "action": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "artist": {
+     "optional": true,
+     "type": "Artist"
+    },
+    "bio": {
+     "optional": false,
+     "type": "JSONObject"
+    },
+    "bsky": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "bskyuser": {
+     "optional": true,
+     "type": "XUser"
+    },
+    "dvr": {
+     "optional": true,
+     "type": "DvrInfo"
+    },
+    "e621": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "followed": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "following_x": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "info": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "last_live": {
+     "optional": true,
+     "type": "Double"
+    },
+    "linking": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "links": {
+     "optional": false,
+     "type": "[Link]"
+    },
+    "live": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "reddit": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "reddituser": {
+     "optional": true,
+     "type": "RedditUser"
+    },
+    "redgifs": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "room": {
+     "optional": true,
+     "type": "String"
+    },
+    "times": {
+     "optional": true,
+     "type": "[[Double]]"
+    },
+    "videos": {
+     "optional": false,
+     "type": "Int"
+    },
+    "x": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "xusers": {
+     "optional": true,
+     "type": "[String: XUser]"
+    },
+    "xvideos": {
+     "optional": true,
+     "type": "[String]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonProfile.Artist": {
+   "fields": {
+    "links": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "other_names": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "posts": {
+     "optional": true,
+     "type": "Int"
+    },
+    "x": {
+     "optional": true,
+     "type": "[String]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonProfile.Link": {
+   "fields": {
+    "handle": {
+     "optional": false,
+     "type": "String"
+    },
+    "source": {
+     "optional": false,
+     "type": "String"
+    },
+    "state": {
+     "optional": false,
+     "type": "String"
+    },
+    "via": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonProfile.RedditUser": {
+   "fields": {
+    "avatar": {
+     "optional": true,
+     "type": "String"
+    },
+    "karma": {
+     "optional": true,
+     "type": "Double"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "since": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonProfile.XUser": {
+   "fields": {
+    "avatar": {
+     "optional": true,
+     "type": "String"
+    },
+    "bio": {
+     "optional": true,
+     "type": "String"
+    },
+    "followers": {
+     "optional": true,
+     "type": "Double"
+    },
+    "following": {
+     "optional": true,
+     "type": "Double"
+    },
+    "handle": {
+     "optional": false,
+     "type": "String"
+    },
+    "location": {
+     "optional": true,
+     "type": "String"
+    },
+    "nick": {
+     "optional": true,
+     "type": "String"
+    },
+    "posts": {
+     "optional": true,
+     "type": "Double"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Persona": {
+   "fields": {
+    "avatar": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "bio": {
+     "optional": true,
+     "type": "String"
+    },
+    "handle": {
+     "optional": false,
+     "type": "String"
+    },
+    "likes": {
+     "optional": false,
+     "type": "Int"
+    },
+    "medium": {
+     "optional": true,
+     "type": "String"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "posts": {
+     "optional": false,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonaConfig": {
+   "fields": {
+    "error": {
+     "optional": true,
+     "type": "String"
+    },
+    "personas": {
+     "optional": false,
+     "type": "[JSONObject]"
+    },
+    "styles": {
+     "optional": false,
+     "type": "[TrainedStyle]"
+    },
+    "voices": {
+     "optional": true,
+     "type": "[String: Int]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PersonaList": {
+   "fields": {
+    "personas": {
+     "optional": false,
+     "type": "[Persona]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Pick": {
+   "fields": {
+    "sub": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Feed/PostsView.swift",
+   "kind": "struct"
+  },
+  "PostComment": {
+   "fields": {
+    "at": {
+     "optional": true,
+     "type": "String"
+    },
+    "author": {
+     "optional": false,
+     "type": "String"
+    },
+    "avatar": {
+     "optional": true,
+     "type": "String"
+    },
+    "id": {
+     "optional": false,
+     "type": "String"
+    },
+    "media": {
+     "optional": true,
+     "type": "[FollowPost.Media]"
+    },
+    "replies": {
+     "optional": false,
+     "type": "[PostComment]"
+    },
+    "score": {
+     "optional": true,
+     "type": "Double"
+    },
+    "text": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PostComments": {
+   "fields": {
+    "comments": {
+     "optional": false,
+     "type": "[PostComment]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "PostsView.Pick": {
+   "fields": {
+    "sub": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Feed/PostsView.swift",
+   "kind": "struct"
+  },
+  "Progress": {
+   "fields": {
+    "done": {
+     "optional": true,
+     "type": "Double"
+    },
+    "medium": {
+     "optional": true,
+     "type": "String"
+    },
+    "message": {
+     "optional": true,
+     "type": "String"
+    },
+    "phase": {
+     "optional": true,
+     "type": "String"
+    },
+    "share": {
+     "optional": true,
+     "type": "Double"
+    },
+    "total": {
+     "optional": true,
+     "type": "Double"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "RecentBrowses": {
+   "fields": {
+    "browses": {
+     "optional": false,
+     "type": "[Item]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "RecentBrowses.Item": {
+   "fields": {
+    "id": {
+     "optional": false,
+     "type": "Int"
+    },
+    "sort": {
+     "optional": false,
+     "type": "String"
+    },
+    "sub": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "RecordingActions.Undo": {
+   "fields": {
+    "undo": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Live/RecordingsView.swift",
+   "kind": "struct"
+  },
+  "RedGifsPage": {
+   "fields": {
+    "clips": {
+     "optional": false,
+     "type": "[Clip]"
+    },
+    "more": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "total": {
+     "optional": true,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "RedGifsPage.Clip": {
+   "fields": {
+    "duration": {
+     "optional": true,
+     "type": "Double"
+    },
+    "id": {
+     "optional": false,
+     "type": "String"
+    },
+    "poster": {
+     "optional": true,
+     "type": "String"
+    },
+    "url": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "RoomVideo": {
+   "fields": {
+    "duration": {
+     "optional": true,
+     "type": "Double"
+    },
+    "has_highlight": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "highlight": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "job": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "mtime": {
+     "optional": false,
+     "type": "Double"
+    },
+    "of": {
+     "optional": true,
+     "type": "Double"
+    },
+    "path": {
+     "optional": false,
+     "type": "String"
+    },
+    "poster": {
+     "optional": true,
+     "type": "String"
+    },
+    "size": {
+     "optional": false,
+     "type": "Double"
+    },
+    "title": {
+     "optional": false,
+     "type": "String"
+    },
+    "url": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "RoomVideos": {
+   "fields": {
+    "folder": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "videos": {
+     "optional": false,
+     "type": "[RoomVideo]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SavedImport": {
+   "fields": {
+    "bsky": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "e621": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "files": {
+     "optional": true,
+     "type": "[String: Int]"
+    },
+    "reddit": {
+     "optional": true,
+     "type": "JSONObject"
+    },
+    "running": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "x": {
+     "optional": true,
+     "type": "JSONObject"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SceneActs": {
+   "fields": {
+    "kind": {
+     "optional": true,
+     "type": "String"
+    },
+    "slots": {
+     "optional": false,
+     "type": "[Slot]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SceneActs.Slot": {
+   "fields": {
+    "label": {
+     "optional": false,
+     "type": "String"
+    },
+    "options": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "slot": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SignIns": {
+   "fields": {
+    "browser": {
+     "optional": true,
+     "type": "String"
+    },
+    "bsky": {
+     "optional": false,
+     "type": "Account"
+    },
+    "e621": {
+     "optional": false,
+     "type": "Account"
+    },
+    "reddit": {
+     "optional": false,
+     "type": "Reddit"
+    },
+    "sites": {
+     "optional": false,
+     "type": "[Site]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SignIns.Account": {
+   "fields": {
+    "blacklist": {
+     "optional": true,
+     "type": "Int"
+    },
+    "error": {
+     "optional": true,
+     "type": "String"
+    },
+    "favorites": {
+     "optional": true,
+     "type": "Int"
+    },
+    "from": {
+     "optional": true,
+     "type": "String"
+    },
+    "handle": {
+     "optional": true,
+     "type": "String"
+    },
+    "signed_in": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "username": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SignIns.Reddit": {
+   "fields": {
+    "app": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "client_id": {
+     "optional": true,
+     "type": "String"
+    },
+    "from": {
+     "optional": true,
+     "type": "String"
+    },
+    "redirect": {
+     "optional": true,
+     "type": "String"
+    },
+    "signed_in": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "username": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "SignIns.Site": {
+   "fields": {
+    "browser": {
+     "optional": true,
+     "type": "Bool"
+    },
+    "count": {
+     "optional": true,
+     "type": "Int"
+    },
+    "expires": {
+     "optional": true,
+     "type": "Double"
+    },
+    "missing": {
+     "optional": true,
+     "type": "[String]"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "set": {
+     "optional": true,
+     "type": "String"
+    },
+    "site": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "StyleInfo": {
+   "fields": {
+    "job": {
+     "optional": true,
+     "type": "JobRef"
+    },
+    "kept": {
+     "optional": true,
+     "type": "Int"
+    },
+    "limit": {
+     "optional": true,
+     "type": "Int"
+    },
+    "medium": {
+     "optional": true,
+     "type": "String"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "source": {
+     "optional": true,
+     "type": "String"
+    },
+    "status": {
+     "optional": true,
+     "type": "Progress"
+    },
+    "steps": {
+     "optional": true,
+     "type": "Int"
+    },
+    "trained": {
+     "optional": true,
+     "type": "Double"
+    },
+    "used_by": {
+     "optional": false,
+     "type": "[String]"
+    },
+    "video": {
+     "optional": true,
+     "type": "Video"
+    },
+    "voice": {
+     "optional": true,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "StyleInfo.JobRef": {
+   "fields": {
+    "status": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "StyleInfo.Video": {
+   "fields": {
+    "clips": {
+     "optional": true,
+     "type": "Int"
+    },
+    "job": {
+     "optional": true,
+     "type": "JobRef"
+    },
+    "limit": {
+     "optional": true,
+     "type": "Int"
+    },
+    "status": {
+     "optional": true,
+     "type": "Progress"
+    },
+    "steps": {
+     "optional": true,
+     "type": "Int"
+    },
+    "trained": {
+     "optional": true,
+     "type": "Double"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "StyleList": {
+   "fields": {
+    "styles": {
+     "optional": false,
+     "type": "[StyleInfo]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Summary": {
+   "fields": {
+    "last_run": {
+     "optional": true,
+     "type": "Run"
+    },
+    "liked": {
+     "optional": false,
+     "type": "Int"
+    },
+    "live": {
+     "optional": true,
+     "type": "Int"
+    },
+    "unrated": {
+     "optional": false,
+     "type": "Int"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Summary.Run": {
+   "fields": {
+    "night": {
+     "optional": true,
+     "type": "String; let status: String; let finished_at: String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "TrainedStyle": {
+   "fields": {
+    "file": {
+     "optional": false,
+     "type": "String"
+    },
+    "medium": {
+     "optional": false,
+     "type": "String"
+    },
+    "name": {
+     "optional": false,
+     "type": "String"
+    },
+    "trigger": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "Undo": {
+   "fields": {
+    "undo": {
+     "optional": false,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Live/ProfileView.swift",
+   "kind": "struct"
+  },
+  "VideoPage.Reply": {
+   "fields": {
+    "saved": {
+     "optional": false,
+     "type": "Bool"
+    }
+   },
+   "file": "Dreamfeed/Feed/VideoFeed.swift",
+   "kind": "struct"
+  },
+  "XVideoFiles": {
+   "fields": {
+    "hls": {
+     "optional": true,
+     "type": "String"
+    },
+    "mp4": {
+     "optional": true,
+     "type": "String"
+    },
+    "mp4_low": {
+     "optional": true,
+     "type": "String"
+    },
+    "poster": {
+     "optional": true,
+     "type": "String"
+    },
+    "title": {
+     "optional": true,
+     "type": "String"
+    }
+   },
+   "file": "Dreamfeed/Live/XVideosPlayer.swift",
+   "kind": "struct"
+  },
+  "XVideosPage": {
+   "fields": {
+    "more": {
+     "optional": false,
+     "type": "Bool"
+    },
+    "total": {
+     "optional": true,
+     "type": "Int"
+    },
+    "videos": {
+     "optional": false,
+     "type": "[Video]"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  },
+  "XVideosPage.Video": {
+   "fields": {
+    "duration": {
+     "optional": true,
+     "type": "JSONValue"
+    },
+    "id": {
+     "optional": false,
+     "type": "String"
+    },
+    "thumb": {
+     "optional": true,
+     "type": "String"
+    },
+    "title": {
+     "optional": false,
+     "type": "String"
+    },
+    "views": {
+     "optional": true,
+     "type": "JSONValue"
+    }
+   },
+   "file": "Dreamfeed/Core/Models.swift",
+   "kind": "struct"
+  }
+ }
+}

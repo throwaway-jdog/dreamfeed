@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# dreamfeed's checks. Before a deploy (this checkout's code, nothing running needed but Docker
+# and the built dreamfeed-web image):
+#   tests/check                 static, page (jsdom), server (offline)
+# After a deploy (the running web app, and the sites it reads):
+#   tests/check --live          + the iOS app's contract (every address it reads, against the app's own types)
+#   tests/check --live --browser https://YOUR.DOMAIN/dreamfeed
+#                               + real Firefox against the site (drawing, its security policy, video)
+# Each part says ok or FAIL; the run fails if any part does. What they write goes in tests/out/.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+LIVE=0; URL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --live) LIVE=1 ;;
+    --browser) LIVE=1; URL="${2:?--browser needs the address of the site, e.g. https://example/dreamfeed}"; shift ;;
+    *) echo "usage: tests/check [--live] [--browser URL]" >&2; exit 2 ;;
+  esac
+  shift
+done
+failed=()
+part() { echo; echo "== $1"; }
+NODE=node:20-alpine
+PW=mcr.microsoft.com/playwright:v1.48.2-jammy
+me="$(id -u):$(id -g)"
+
+part "static"
+python3 tests/static/check_static.py || failed+=(static)
+
+part "page (jsdom)"
+python3 tests/page/build.py web tests/out/page.html || failed+=(page-build)
+[ -d tests/page/node_modules/jsdom ] || docker run --rm -u "$me" -e HOME=/tmp -v "$PWD/tests":/t -w /t/page "$NODE" \
+  sh -c 'npm install --silent --no-audit --no-fund >/dev/null 2>&1'
+for f in tests/page/*.test.js; do
+  docker run --rm -u "$me" -v "$PWD/tests":/t -w /t/page -e PAGE=/t/out/page.html "$NODE" timeout 180 node "$(basename "$f")" \
+    || failed+=("page:$(basename "$f" .test.js)")
+done
+
+part "server (offline, this checkout's code in the web image)"
+docker run --rm -u "$me" --network none -e DATA_DIR=/tmp/data -e STATE_DIR=/tmp/state -e LORA_DIR=/tmp -e GENERATE_WINDOW=00:00-06:00 -e HOME=/tmp \
+  -v "$PWD/web/app.py":/app/app.py:ro -v "$PWD/web/webapp":/app/webapp:ro \
+  -v "$PWD/worker/dreamfeed/core":/app/dreamfeed/core:ro -v "$PWD/worker/dreamfeed/feed":/app/dreamfeed/feed:ro \
+  -v "$PWD/worker/dreamfeed/live":/app/dreamfeed/live:ro -v "$PWD/tests":/tests:ro -w /tests --entrypoint sh dreamfeed-web:local \
+  -c 'mkdir -p /tmp/data /tmp/state && python -m unittest discover -s server' || failed+=(server)
+
+if [ "$LIVE" = 1 ]; then
+  part "the iOS app's contract (the running web app)"
+  docker exec dreamfeed-web mkdir -p /tmp/contract && docker cp tests/contract/. dreamfeed-web:/tmp/contract/ >/dev/null \
+    && docker exec -w /app dreamfeed-web python /tmp/contract/check.py || failed+=(contract)
+  docker exec dreamfeed-web rm -rf /tmp/contract
+fi
+
+if [ -n "$URL" ]; then
+  part "browser (real Firefox, $URL)"
+  [ -d tests/browser/node_modules/playwright ] || docker run --rm -u "$me" -e HOME=/tmp -v "$PWD/tests":/t -w /t/browser "$PW" \
+    sh -c 'npm install --silent --no-audit --no-fund >/dev/null 2>&1'
+  cookie=$(docker exec -w /app dreamfeed-web python -c "
+import formlogin
+from webapp.common import STATE
+L = formlogin.Login.from_env('DREAMFEED', 'dreamfeed', STATE, title='dreamfeed')
+print(L.cookie_name + '=' + L.new_session())")
+  started=$(date +%s)
+  docker run --rm --network host -e URL="$URL" -e COOKIE="$cookie" -v "$PWD/tests":/t -w /t/browser "$PW" timeout 300 node browser.test.js \
+    || failed+=(browser)
+  # (what the test watched isn't yours: it's taken out of what Videos learns from)
+  docker exec -w /app dreamfeed-web python -c "
+from webapp import videos
+c = videos._conn()
+with c:
+    ids = [r[0] for r in c.execute('SELECT id FROM xv_watch WHERE first_at >= ?', ($started - 5,))]
+    for i in ids:
+        c.execute('DELETE FROM xv_watch WHERE id = ?', (i,)); c.execute('DELETE FROM xv_videos WHERE id = ?', (i,))
+" || true
+fi
+
+echo
+if [ ${#failed[@]} -eq 0 ]; then echo "all ok"; else echo "FAILED: ${failed[*]}"; exit 1; fi
