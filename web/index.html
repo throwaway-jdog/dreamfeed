@@ -20,7 +20,7 @@
     <span class="stat" id="stat"></span>
     <div class="views" role="group" aria-label="View">
       <button type="button" data-view="posts" aria-pressed="true">Feed</button>
-      <button type="button" data-view="liked" aria-pressed="false">Saved</button>
+      <button type="button" data-view="vids" aria-pressed="false">Videos</button>
       <button type="button" data-view="comics" aria-pressed="false">Comics</button>
       <button type="button" data-view="follow" aria-pressed="false">Live<span class="n" id="live-n"></span></button>
       <button type="button" data-view="dash" aria-pressed="false"><span class="long">Dashboard</span><span class="short">Dash</span></button>
@@ -34,6 +34,7 @@
 
 <div class="sheet" id="sheet" hidden>
   <p id="sheet-info"></p>
+  <button type="button" id="sheet-saved">★ Saved</button>
   <form method="post" action="logout"><button type="submit">Sign out</button></form>
 </div>
 
@@ -224,9 +225,19 @@
     <div class="panel" id="c-failed-panel" hidden><h2>Didn't work</h2><p class="hint">In the last day.</p><ul class="plist" id="c-failed"></ul></div>
     <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
   </section>
+  <section class="vids" id="vids" hidden aria-label="Videos">
+    <form class="vs-form" id="vs-form" role="search">
+      <input class="in" id="vs-q" type="search" placeholder="Search videos" maxlength="100" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <select class="in" id="vs-len" aria-label="Length"><option value="">Any length</option><option value="10">10+ min</option><option value="20">20+ min</option></select>
+      <button type="submit" class="primary">Search</button></form>
+    <div class="vs-section" id="vc-sec" hidden><h2>Continue watching</h2><div class="vrow" id="vc-row"></div></div>
+    <div class="vs-section"><div class="vs-head"><h2 id="vg-title">For you</h2><button type="button" class="secondary" id="vg-back" hidden>Back to For you</button></div>
+      <p class="note" id="vg-note"></p><div class="pf-grid" id="vg"></div>
+      <button type="button" class="secondary more" id="vg-more" hidden>More</button></div>
+  </section>
   <section class="timeline fposts" id="posts" hidden aria-label="Feed">
-    <div class="seg" id="f-mode" role="group" aria-label="Feed">
-      <button type="button" data-m="following" aria-pressed="true">Following</button><button type="button" data-m="foryou" aria-pressed="false">For you</button></div>
+    <div class="seg three" id="f-mode" role="group" aria-label="Feed">
+      <button type="button" data-m="following" aria-pressed="true">Following</button><button type="button" data-m="foryou" aria-pressed="false">For you</button><button type="button" id="f-saved">★ Saved</button></div>
     <div class="seg five" id="f-source" role="group" aria-label="From (tap several)">
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
       <button type="button" data-s="bsky" aria-pressed="false">Bluesky</button>
@@ -318,10 +329,16 @@
   </div>
   <div class="xv-player" id="xv-player" hidden role="dialog" aria-modal="true" aria-label="xvideos video">
     <div class="reader-bar"><span id="xv-title"></span>
+      <button type="button" class="secondary" id="xv-up" title="More like this" aria-pressed="false" hidden>👍</button>
+      <button type="button" class="secondary" id="xv-down" title="Less like this" aria-pressed="false" hidden>👎</button>
       <a class="secondary" id="xv-open" target="_blank" rel="noreferrer noopener">xvideos</a>
       <button type="button" class="secondary" id="xv-close">Close</button></div>
     <video id="xv-video" controls playsinline></video>
     <p class="note" id="xv-msg" hidden></p>
+    <div class="xv-next" id="xv-next" hidden><span class="hint">Up next</span>
+      <button type="button" class="xv-next-card" id="xv-next-card"></button>
+      <div class="si-acts"><button type="button" class="primary" id="xv-next-go">Play now</button>
+        <button type="button" class="secondary" id="xv-next-cancel">Cancel</button></div></div>
   </div>
   <div class="multi" id="multi" hidden role="dialog" aria-modal="true" aria-label="Several rooms">
     <div class="reader-bar"><span id="mv-hint">Tap one for its sound</span>

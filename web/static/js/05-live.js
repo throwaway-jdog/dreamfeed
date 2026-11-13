@@ -330,9 +330,9 @@ function usualHours(times) {
   return `usually live ${at(best.h)}–${at(best.h + best.n)}`;
 }
 const fp = { source: "all", mode: "following", tags: "", cursor: "", more: false, loading: false, gen: 0, shown: 0 };
-document.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => {
+document.querySelectorAll("#f-mode button[data-m]").forEach(b => b.onclick = () => {
   fp.mode = b.dataset.m; remember("feedMode", fp.mode); setUrl(tabPath("posts"));
-  document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  document.querySelectorAll("#f-mode button[data-m]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   loadPosts(true);
 });
 // From: All, or the sites you tap (several at once: X and Reddit, say); tap one again to drop it.
@@ -358,7 +358,7 @@ function recalled(k, ok) { try { const v = localStorage.getItem(k); return ok.in
   const m = recalled("feedMode", ["following", "foryou"]);
   let src = null; try { src = localStorage.getItem("feedSource"); } catch {}
   if (src !== "all" && !(src && src.split(",").every(x => FEED_SITES.includes(x)))) src = null;
-  if (m) { fp.mode = m; document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m))); }
+  if (m) { fp.mode = m; document.querySelectorAll("#f-mode button[data-m]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m))); }
   if (src) { fp.source = src; showSources(); }
 }
 // e621's tag filter: only posts with these tags (Following: newest; For you: top today)

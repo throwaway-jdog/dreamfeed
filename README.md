@@ -428,7 +428,8 @@ the **Saved** tab, below):
   subreddit each time (hot, new, the week's or month's top). Above it, people you might
   like: X accounts you don't follow, from your rooms' bios, mentions by people you follow and
   X's For you (from the last 30 days of your timelines, `x_seen`).
-- **Saved** (its own tab, with the persona posts you liked, newest first): what you tapped Save
+- **Saved** (★ Saved on the Feed page, beside Following and For you, or in the ⋮ menu; at
+  `/saved`; with the persona posts you liked, newest first): what you tapped Save
   on, kept: the follow service downloads its pictures and
   videos in full quality (X's original pictures and biggest video, e621's original or its
   full-size MP4, Reddit's own videos with sound through ffmpeg, redgifs' HD) into
@@ -522,6 +523,27 @@ first wherever dreamfeed signs in (the Feed, styles, comic imports, the Live tab
   copies them to the dashboard. Without a sign-in, Reddit is left out of the Feed. (The older
   `follow reddit-login` command still prints a token for `.env`, with the redirect uri
   `http://localhost:6414/`.)
+
+### Videos (xvideos)
+
+The Videos tab: long videos, played in dreamfeed's own player (each video's stream, up to 1080p,
+read from xvideos when you open it: no xvideos page, no ads; nothing is downloaded).
+
+- **For you** learns from what you watch here: how far you get, whether you finish one or leave
+  in the first 30 seconds, and 👍 / 👎 in the player become weights on its tags and uploaders
+  (watching a month ago counts half). It's drawn from the related videos of what you liked,
+  more from the uploaders you watch, and your top tags (and, until there's enough to go on, your
+  Chaturbate rooms' tags and their linked xvideos accounts), ranked by those weights, at most 3
+  from one uploader, each saying why it's there. What you've finished or turned down is left out.
+- **Continue watching** picks up where you left off; **Up next** (a related video) plays when
+  one ends, unless you cancel it.
+- **Search**, with a length filter (10+ or 20+ minutes; remembered, and used for For you too).
+- Titles and tags with words that only mean minors (underage, child, loli ...) are left out, and
+  never searched for; adult-site words like "teen" aren't filtered (nearly every title has one).
+- A room profile's xvideos tab plays in the same player, and what you watch there counts too.
+- `web/webapp/videos.py` (what you watch is kept in feed.db: `xv_watch`, `xv_videos`,
+  `xv_votes`), `worker/dreamfeed/feed/xvideos.py` (reading xvideos' pages). Real people: nothing
+  from it goes to training or generation.
 
 ### Live: Chaturbate
 

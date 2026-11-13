@@ -40,6 +40,11 @@ GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after tha
 GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
 POST /api/profile/relink {"room"}  look for the room's accounts across sites again (linking.py)
 GET  /api/xvideos      ?name=PROFILE&page=N  an xvideos profile's videos (a room's linked one), live
+GET  /api/vids        ?length=|10|20&offset=N  the Videos tab: Continue watching, and For you (from what you watch here)
+GET  /api/vids/search ?q=WORDS&page=N&length=&sort=relevance|uploaddate|rating|views  xvideos' search
+GET  /api/vids/video  ?url=/video.ID/title  one to play: its stream, tags, related, where you left off, your vote
+POST /api/vids/watch  {"id", "position", "duration", "delta"}  how far you are (the player says, as you watch)
+POST /api/vids/vote   {"id", "vote": 1|-1|0}  more like this, less like this, or neither
 GET  /api/xvideos/video ?id=ID  one of them: its stream and files, for dreamfeed's own player (no xvideos page, no ads)
 GET  /api/post         ?id=x:ID|reddit:ID|e621:ID  one post (its own page): your kept copy if you saved it, else live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
@@ -97,6 +102,7 @@ from dreamfeed.feed import e621, livefeeds, savedposts
 from dreamfeed.live import cbprofile, cbvideos, linking
 
 from webapp.comics import comic_animation, comic_cover, comic_page, comic_search, comics, delete_comic, delete_comic_animation, queue_comic, queue_comic_animation, queue_comic_import, queue_comic_update, rename_comic
+from webapp import videos
 from webapp.common import CSP, DATA, HANDLE, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
 from webapp.editor import cancel_style, cancel_video, delete_persona, draft_status, new_avatar, persona_config, queue_draft, queue_style, queue_video, save_persona, style_list
 from webapp.feed import FRESH_READS, _mark_saved, _seen, _unshown, browse, e621_vote, follow_posts, follow_settings, import_saved, import_status, more_videos, one_post, person_posts, random_subreddit, recent_browses, save_follow_settings, save_post, saved_file, saved_view
@@ -118,7 +124,7 @@ def page_script() -> bytes:
     return _script["body"]
 # Each part of the page has its own address (the page reads it and opens that part):
 PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
-         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos", "bsky"}
+         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos", "bsky", "vids"}
 
 
 PORT = 8000
@@ -335,6 +341,18 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
             return self.send(200, {"clip": clip}) if clip else self.send(404, {"error": "that clip isn't there"})
+        if path in ("/api/vids", "/api/vids/search", "/api/vids/video"):
+            q = self.query()
+            try:
+                if path == "/api/vids":
+                    return self.send(200, videos.home(q.get("length", ""), int(q.get("offset", "0") or 0)))
+                if path == "/api/vids/search":
+                    return self.send(200, videos.search(q.get("q", ""), int(q.get("page", "0") or 0), q.get("length", ""), q.get("sort", "")))
+                return self.send(200, videos.video(q.get("url", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path == "/api/xvideos/video":
             try:
                 return self.send(200, livefeeds.xvideos_video(self.query().get("id", "")))
@@ -481,7 +499,8 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
-                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/browser/start": browser_start, "/api/e621/vote": e621_vote, "/api/profile/relink": relink}
+                   "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/browser/start": browser_start, "/api/e621/vote": e621_vote,
+                   "/api/vids/watch": videos.watch, "/api/vids/vote": videos.vote, "/api/profile/relink": relink}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.

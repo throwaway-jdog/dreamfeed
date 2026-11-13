@@ -390,6 +390,26 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .xv-player[hidden] { display: none; }
 .xv-player iframe, .xv-player video { flex: 1; width: 100%; min-height: 0; border: 0; background: #000; }
 .xv-player [hidden] { display: none !important; }
+/* The Videos tab */
+.vids { max-width: 1100px; margin: 0 auto; padding: 14px 16px 40px; display: grid; gap: 18px; }
+.vids h2 { margin: 0 0 10px; font-size: 18px; }
+.vs-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+.vs-form .primary { width: auto; padding: 0 18px; min-height: 44px; }
+.vs-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.vs-head .secondary { width: auto; padding: 0 14px; min-height: 36px; }
+.vrow { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 240px); gap: 14px; overflow-x: auto; padding-bottom: 6px; }
+.pf-vid .why { color: var(--accent); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-vid .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgb(0 0 0 / .4); border-radius: 0 0 10px 10px; overflow: hidden; }
+.pf-vid .bar i { display: block; height: 100%; background: var(--accent); }
+.pf-vid.seen { opacity: .6; }
+.xv-player .reader-bar .secondary[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.xv-next { position: absolute; right: 16px; bottom: 80px; width: min(340px, calc(100% - 32px)); background: rgb(20 20 20 / .92); color: #fff;
+  border-radius: 14px; padding: 12px; display: grid; gap: 8px; }
+.xv-next[hidden] { display: none; }
+.xv-next .hint { color: #bbb; }
+.xv-next-card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; align-items: center; text-align: left; background: none; border: 0; color: #fff; padding: 0; font: inherit; cursor: pointer; }
+.xv-next-card img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; }
+.xv-next .primary, .xv-next .secondary { width: auto; min-height: 36px; padding: 0 14px; }
 .xv-player .note { color: #ddd; padding: 16px; text-align: center; margin: 0; }
 .xv-player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 .pf-body { padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; }

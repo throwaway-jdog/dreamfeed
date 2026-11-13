@@ -4,8 +4,8 @@ function setView(v) {
   if (state.view === v) return;
   state.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
-  const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", page = dash || com || fol || posts;
-  $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("posts").hidden = !posts;
+  const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", vids = v === "vids", page = dash || com || fol || posts || vids;
+  $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("posts").hidden = !posts; $("vids").hidden = !vids;
   $("grid").hidden = page; $("sentinel").hidden = page && !posts;
   $("saved-bar").hidden = v !== "liked"; if (v === "liked") importStatus();
   if (v !== "feed") state.persona = "";
@@ -15,6 +15,7 @@ function setView(v) {
   else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
   else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
+  else if (vids) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadVids(); }
   else reset();
 }
 // Saved: bring in what you saved on the sites you pick (X's and Bluesky's bookmarks, Reddit's saved
@@ -102,12 +103,12 @@ function leave() { if (((history.state || {}).n || 0) > 0) history.back(); else 
 function tabPath(v) {
   return { posts: fp.mode === "foryou" ? "feed/foryou" : "feed",
            liked: state.savedSource !== "all" ? `saved/${state.savedSource}` : "saved",
-           comics: "comics", follow: livePage.page === "discover" ? "live/discover" : "live", dash: "dashboard",
+           comics: "comics", follow: livePage.page === "discover" ? "live/discover" : "live", dash: "dashboard", vids: "vids",
            feed: state.persona ? `p/${enc(state.persona)}` : "personas" }[v] || "feed";
 }
 function lastTab() {
   let v = "posts"; try { v = localStorage.getItem("dreamfeed-view") || "posts"; } catch {}
-  return ["dash", "liked", "comics", "follow", "posts"].includes(v) ? v : "posts";
+  return ["dash", "liked", "comics", "follow", "posts", "vids"].includes(v) ? v : "posts";
 }
 function playerPath() {
   const f = pl.rooms[pl.i];
@@ -160,7 +161,7 @@ function route() {
       const m = b === "foryou" ? "foryou" : "following";
       if (fp.mode !== m) {
         fp.mode = m; remember("feedMode", m);
-        document.querySelectorAll("#f-mode button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m)));
+        document.querySelectorAll("#f-mode button[data-m]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.m === m)));
         if (state.view === "posts") loadPosts(true);
       }
       return setView("posts");
@@ -177,6 +178,7 @@ function route() {
     case "live": showLivePage(b === "discover" ? "discover" : "following", state.view === "follow"); return setView("follow");
     case "comics": setView("comics"); if (b) showComicId(b); return;
     case "dashboard": return setView("dash");
+    case "vids": return setView("vids");
     case "personas": return showPersona("");
     case "p": return showPersona(b);
     case "item":
