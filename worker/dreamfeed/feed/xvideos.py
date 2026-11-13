@@ -6,6 +6,7 @@ These are real people: nothing here goes to training, styles, comics or generati
 """
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -123,6 +124,9 @@ def _signed_in_opener():
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
+LAST = {"at": None, "error": None}       # how the last request to xvideos went (the Dashboard's Health)
+
+
 def _get(url: str, json_: bool = False, data: bytes | None = None, opener=None, headers: dict | None = None):
     req = urllib.request.Request(url, data=data, headers={"User-Agent": "Mozilla/5.0 (dreamfeed)" if not opener else AGENT,
                                                           "Accept": "application/json" if json_ else "text/html", **(headers or {})})
@@ -130,7 +134,9 @@ def _get(url: str, json_: bool = False, data: bytes | None = None, opener=None, 
         with (opener.open(req, timeout=20) if opener else urllib.request.urlopen(req, timeout=20)) as r:
             raw = r.read(4 << 20)
     except OSError as e:
+        LAST.update(at=time.time(), error=str(e)[:200])
         raise LookupError(f"xvideos didn't answer ({e})") from e
+    LAST.update(at=time.time(), error=None)
     return json.loads(raw) if json_ else raw.decode("utf-8", "replace")
 
 

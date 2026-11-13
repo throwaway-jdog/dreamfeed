@@ -19,6 +19,7 @@ GET  /api/reddit/browse  ?sub=NAME&sort=hot|new|top&after=A  Browse now: a subre
 GET  /api/reddit/browses   the last few subreddits browsed
 GET  /api/person/posts  ?source=x|bsky|reddit|e621&handle=H&cursor=C  someone's latest posts, live (their profile)
 GET  /cb-thumb/<room>.jpg  a discovered room's thumbnail (fetched from Chaturbate)
+GET  /api/health       whether each part is working (the Dashboard's Health): sign-ins, the Feed's sites, the recorder ...
 GET  /api/signins      your sign-ins to the sites (cookies.py): which are set, when they run out (never the values)
 GET  /reddit/login     Sign in with Reddit (your app's keys from the dashboard): off to reddit.com to approve it,
 GET  /reddit/callback  and back here, where the sign-in is kept
@@ -103,7 +104,7 @@ from dreamfeed.feed import e621, livefeeds, savedposts
 from dreamfeed.live import cbprofile, cbvideos, linking
 
 from webapp.comics import comic_animation, comic_cover, comic_page, comic_search, comics, delete_comic, delete_comic_animation, queue_comic, queue_comic_animation, queue_comic_import, queue_comic_update, rename_comic
-from webapp import videos
+from webapp import health, videos
 from webapp.common import CSP, DATA, HANDLE, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
 from webapp.editor import cancel_style, cancel_video, delete_persona, draft_status, new_avatar, persona_config, queue_draft, queue_style, queue_video, save_persona, style_list
 from webapp.feed import FRESH_READS, _mark_saved, _seen, _unshown, browse, e621_vote, follow_posts, follow_settings, import_saved, import_status, more_videos, one_post, person_posts, random_subreddit, recent_browses, save_follow_settings, save_post, saved_file, saved_view
@@ -380,6 +381,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(502, {"error": str(e)[:200]})
         if path == "/api/signins":
             return self.send(200, signins(self.headers))
+        if path == "/api/health":
+            return self.send(200, health.health(self.headers))
         if path == "/api/auth-check":          # (the proxy asks, before the server's browser: signed in here?)
             return self.send(200, {"ok": True})
         if path in ("/reddit/login", "/reddit/callback"):

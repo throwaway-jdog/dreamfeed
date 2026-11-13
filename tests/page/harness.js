@@ -13,6 +13,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // what most addresses answer when a test doesn't say (enough for the page to start)
 function quiet(u) {
   if (u.includes("api/post/comments")) return { comments: [] };
+  if (u.includes("api/health")) return { parts: [], worst: "ok", at: 0 };
   if (u.includes("api/following/posts")) return { posts: [], more: false, cursor: null, errors: {} };
   if (u.includes("api/following/settings")) return { reddit: { follow: [], subscribed: [], top: 0 }, e621: { searches: [], top: 0 } };
   if (u.includes("api/following")) return { rooms: [], status: {}, dvr: {} };

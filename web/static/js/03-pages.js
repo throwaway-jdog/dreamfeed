@@ -11,7 +11,7 @@ function setView(v) {
   if (v !== "feed") state.persona = "";
   renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
-  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); loadReddit(); loadSignins(); }
+  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); loadReddit(); loadSignins(); loadHealth(); }
   else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
   else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }

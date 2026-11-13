@@ -212,6 +212,9 @@ def _unshown(posts: list[dict]) -> list[dict]:
     return out
 
 
+SITE_STATE: dict[str, dict] = {}     # site -> {"at", "error"}: how its last reading went (Health)
+
+
 def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = "") -> dict:
     """A page of the Feed, live from the sites (livefeeds). tags: e621 only shows posts with
     these tags (e.g. "anal" or "anal canine")."""
@@ -223,6 +226,8 @@ def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = 
         e621.query(tags)            # a search e621 and dreamfeed take (raises ValueError)
     s = follow_settings(subscribed=False)
     d = livefeeds.feed(mode, source, _cursor(cursor), s["reddit"]["follow"], s["e621"]["searches"], tags)
+    for site in (FEED_SOURCES if source == "all" else picked):     # (Health: each site's last answer)
+        SITE_STATE[site] = {"at": time.time(), "error": d["errors"].get(site)}
     _seen(d["posts"], d["users"])
     if mode == "foryou":            # something new each time: what you were shown before is passed over
         posts, reads = _unshown(d["posts"]), 1
