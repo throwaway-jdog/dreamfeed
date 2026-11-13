@@ -236,6 +236,27 @@ def bsky_videos(kind: str, where: str, cursor: str | None) -> tuple[list[dict], 
     return _cached(f"bsky:videos:{kind}:{where}:{cursor}", fetch)
 
 
+def bsky_saved(limit: int = 2000) -> list[dict]:
+    """Your Bluesky bookmarks with pictures or a video, newest first (Saved's import), each with
+    when you bookmarked it."""
+    out, cursor = [], None
+    while len(out) < limit:
+        d = _bsky("app.bsky.bookmark.getBookmarks", {"limit": 100, "cursor": cursor})
+        for b in d.get("bookmarks") or []:
+            p = _bsky_post(b.get("item") or {}, "saved")
+            if p:
+                try:
+                    p["saved_at"] = dt.datetime.fromisoformat(str(b.get("createdAt")).replace("Z", "+00:00")).astimezone(
+                        dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
+                out.append(p)
+        cursor = d.get("cursor")
+        if not cursor or not d.get("bookmarks"):
+            break
+    return out[:limit]
+
+
 def bsky_user(handle: str) -> dict:
     """Who they are on Bluesky: {"handle", "nick", "bio", "avatar", "followers", "following", "posts"}."""
     if not BSKY_HANDLE.match(handle):

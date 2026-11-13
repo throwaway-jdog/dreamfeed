@@ -387,7 +387,14 @@
       <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="personas" aria-pressed="false">Personas</button>
       <button type="button" data-s="x" aria-pressed="false">X</button><button type="button" data-s="bsky" aria-pressed="false">Bluesky</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button><button type="button" data-s="e621" aria-pressed="false">e621</button></div>
-    <button type="button" class="secondary" id="saved-import">Bring in what you saved on X, Reddit and e621</button>
+    <button type="button" class="secondary" id="saved-import">Bring in what you saved on the sites…</button>
+    <div class="saved-pick" id="saved-pick" hidden>
+      <span class="hint">Which sites? (bookmarks on X and Bluesky, saved posts on Reddit, favorites on e621)</span>
+      <div class="seg" id="saved-pick-sites" role="group" aria-label="Bring in from">
+        <button type="button" data-s="x" aria-pressed="true">X</button><button type="button" data-s="bsky" aria-pressed="true">Bluesky</button>
+        <button type="button" data-s="reddit" aria-pressed="true">Reddit</button><button type="button" data-s="e621" aria-pressed="true">e621</button></div>
+      <div class="si-acts"><button type="button" class="primary" id="saved-pick-go">Bring in</button>
+        <button type="button" class="secondary" id="saved-pick-cancel">Cancel</button></div></div>
     <small class="note" id="saved-note"></small></div>
   <div class="timeline" id="grid"></div>
   <div class="empty" id="empty" hidden></div>

@@ -17,23 +17,38 @@ function setView(v) {
   else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
   else reset();
 }
-// Saved: bring in your X bookmarks, Reddit saved posts and e621 favorites (their files are then kept in full quality).
+// Saved: bring in what you saved on the sites you pick (X's and Bluesky's bookmarks, Reddit's saved
+// posts, e621's favorites); their files are then kept in full quality. The pick is remembered.
 let importTimer = null;
 async function importStatus(started) {
   clearTimeout(importTimer);
   let d;
-  try { d = started ? await api("api/saved/import", {}) : await api("api/saved/import"); } catch (err) { $("saved-note").textContent = err.message; return; }
+  try { d = started ? await api("api/saved/import", { sites: started }) : await api("api/saved/import"); } catch (err) { $("saved-note").textContent = err.message; return; }
   const one = (name, r) => !r ? "" : r.error ? `${name}: ${r.error}` : `${name}: ${r.added} new of ${r.found}`;
   const f = d.files || {}, waiting = (f.queued || 0) + (f.running || 0);
   $("saved-import").disabled = d.running;
-  $("saved-note").textContent = [d.running ? "Reading what you saved…" : "", one("X", d.x), one("Reddit", d.reddit), one("e621", d.e621),
+  $("saved-note").textContent = [d.running ? "Reading what you saved…" : "", one("X", d.x), one("Bluesky", d.bsky), one("Reddit", d.reddit), one("e621", d.e621),
     waiting ? `keeping ${waiting} post${waiting === 1 ? "" : "s"} in full quality…` : "", f.failed ? `${f.failed} couldn't be kept` : ""]
     .filter(Boolean).join(" · ");
   if (state.view === "liked" && (d.running || waiting)) importTimer = setTimeout(() => importStatus(), 5000);
   if (started === undefined && d.running === false && importStatus.was) { importStatus.was = false; reset(); }
   if (d.running) importStatus.was = true;
 }
-$("saved-import").onclick = () => importStatus(true);
+const pickSites = () => [...document.querySelectorAll("#saved-pick-sites button")].filter(b => b.getAttribute("aria-pressed") === "true").map(b => b.dataset.s);
+{
+  let was = null; try { was = JSON.parse(localStorage.getItem("importSites") || "null"); } catch {}
+  if (Array.isArray(was)) document.querySelectorAll("#saved-pick-sites button").forEach(b => b.setAttribute("aria-pressed", String(was.includes(b.dataset.s))));
+}
+document.querySelectorAll("#saved-pick-sites button").forEach(b => b.onclick = () => {
+  b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
+  $("saved-pick-go").disabled = !pickSites().length;
+});
+$("saved-import").onclick = () => { $("saved-pick").hidden = !$("saved-pick").hidden; $("saved-pick-go").disabled = !pickSites().length; };
+$("saved-pick-cancel").onclick = () => { $("saved-pick").hidden = true; };
+$("saved-pick-go").onclick = () => {
+  const sites = pickSites(); if (!sites.length) return;
+  remember("importSites", JSON.stringify(sites)); $("saved-pick").hidden = true; importStatus(sites);
+};
 {
   const v = recalled("savedSource", [...document.querySelectorAll("#saved-src button")].map(b => b.dataset.s));
   if (v) { state.savedSource = v; document.querySelectorAll("#saved-src button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.s === v))); }

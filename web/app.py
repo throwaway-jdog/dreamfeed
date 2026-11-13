@@ -74,7 +74,8 @@ POST /api/profile/link  {"room", "source": "x"|"reddit", "handle", "remove": boo
 POST /api/following/save {"post": {...}, "save": bool} keep a post in Saved, its files downloaded in full quality
                         (the follow service; and saved on Reddit too, for Reddit's)
 GET  /saved-media/<source>/<post>/<file>  a saved post's kept picture or video
-POST /api/saved/import  {} bring your X bookmarks and Reddit saved posts into Saved (in the background)
+POST /api/saved/import  {"sites": ["x", "bsky", "reddit", "e621"]} bring what you saved there into Saved (in the background;
+                        X's and Bluesky's bookmarks, Reddit's saved posts, e621's favorites; all when not given)
 GET  /api/saved/import  how that went, and how many saved posts' files are kept
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
 POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;

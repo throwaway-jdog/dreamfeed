@@ -386,7 +386,9 @@ def save_post(req: dict) -> dict:
     return {"saved": save, "sync": sync, "keep": dict(r) if r else None}
 
 
-_import = {"running": False, "at": None, "x": None, "reddit": None, "e621": None}
+_import = {"running": False, "at": None, "x": None, "bsky": None, "reddit": None, "e621": None}
+_import_lock = threading.Lock()
+IMPORT_SITES = ("x", "bsky", "reddit", "e621")      # (what Saved's import can read)
 
 
 def e621_vote(req: dict) -> dict:
@@ -396,24 +398,33 @@ def e621_vote(req: dict) -> dict:
     if not m or score not in (1, -1):
         raise ValueError("bad vote")
     return e621.vote(m.group(1), score)
-_import_lock = threading.Lock()
 
 
 def import_saved(req: dict) -> dict:
-    """Bring what you saved on the sites into Saved: your X bookmarks and your Reddit saved posts
-    (with pictures or videos), their files then kept like any you save here. Ones you unsaved
-    here stay out. In the background; GET /api/saved/import says how it went."""
+    """{"sites": ["x", "bsky", "reddit", "e621"] (those to read; all when not given)}: bring what
+    you saved on them into Saved: your X and Bluesky bookmarks, your Reddit saved posts and your
+    e621 favorites (with pictures or videos), their files then kept like any you save here. Ones
+    you unsaved here stay out. In the background; GET /api/saved/import says how it went."""
+    sites = req.get("sites", list(IMPORT_SITES))
+    if not isinstance(sites, list) or not sites or any(s not in IMPORT_SITES for s in sites):
+        raise ValueError("pick the sites to bring in")
     with _import_lock:
         if _import["running"]:
             return dict(_import)
-        _import.update(running=True, x=None, reddit=None, e621=None)
-    threading.Thread(target=_run_import, daemon=True).start()
+        _import.update(running=True, **{s: None for s in IMPORT_SITES})
+    threading.Thread(target=_run_import, args=([s for s in IMPORT_SITES if s in sites],), daemon=True).start()
     return dict(_import)
 
 
-def _run_import() -> None:
+def _run_import(sites: list[str]) -> None:
+    readers = {"x": livefeeds.x_bookmarks, "bsky": livefeeds.bsky_saved, "reddit": livefeeds.reddit_saved,
+               "e621": livefeeds.e621_favorites}
     try:
-        for source, read in (("x", livefeeds.x_bookmarks), ("reddit", livefeeds.reddit_saved), ("e621", livefeeds.e621_favorites)):
+        for source in sites:
+            read = readers[source]
+            if source == "bsky" and not livefeeds.bsky_ready():
+                _import["bsky"] = {"error": "Bluesky isn't signed in"}
+                continue
             if source == "reddit" and not livefeeds.reddit_ready():
                 _import["reddit"] = {"error": "Reddit isn't signed in"}
                 continue
@@ -427,7 +438,7 @@ def _run_import() -> None:
                 continue
             added = 0
             with db() as conn:
-                # saved when you saved it on the site (X bookmarks say when); else (Reddit doesn't) now,
+                # saved when you saved it on the site (X's and Bluesky's bookmarks say when); else now,
                 # each a second older than the one before, so they keep the site's order
                 for n, p in enumerate(posts):
                     keep = {k: p.get(k) for k in ("id", "source", "author", "nick", "avatar", "place", "text", "posted_at", "link", "media")}

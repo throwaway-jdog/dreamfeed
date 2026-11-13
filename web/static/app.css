@@ -587,6 +587,8 @@ textarea.in { resize: vertical; min-height: 72px; }
 .rf-row { display: flex; align-items: center; gap: 10px; min-height: 48px; }
 .rf-row b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .rf-row .secondary { width: auto; min-height: 36px; padding: 0 12px; }
+.saved-pick { display: grid; gap: 8px; margin-top: 8px; }
+.saved-pick .primary, .saved-pick .secondary { width: auto; min-height: 40px; padding: 0 16px; }
 .si-row { display: grid; gap: 8px; padding: 10px 0; }
 .si-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .si-head b { flex: 1; min-width: 0; }

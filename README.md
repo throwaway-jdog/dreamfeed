@@ -437,9 +437,10 @@ the **Saved** tab, below):
   the site stays. Unsaving deletes them. A Reddit post is saved on Reddit too, as you, at once.
   An X post is kept in dreamfeed only: bookmarking on X would mean faking X's own web client,
   so use Open on X for that.
-  **Bring in what you saved on X, Reddit and e621** (at the top of Saved) adds your X bookmarks,
-  your Reddit saved posts (the last 1000 Reddit keeps) and your e621 favorites (the last 1000;
-  signed in to e621) with pictures or videos, kept the same
+  **Bring in what you saved on the sites** (at the top of Saved) asks which (the last pick is
+  remembered), then adds your X bookmarks, your Bluesky bookmarks, your Reddit saved posts (the
+  last 1000 Reddit keeps) and your e621 favorites (the last 1000; signed in to e621) with
+  pictures or videos, kept the same
   way; the same word rules leave some out, and ones you unsaved here stay out. Run it again any
   time for new ones. Reddit's saved list needs the sign-in's `history` permission (signed in
   before it was added: sign in again, below). Unsaving an imported X post doesn't remove the
