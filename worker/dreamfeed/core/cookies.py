@@ -20,6 +20,8 @@ SITES = {
     "x": {"name": "X", "domains": ("x.com", "twitter.com"), "needs": ("auth_token", "ct0"), "home": "https://x.com/home"},
     "chaturbate": {"name": "Chaturbate", "domains": ("chaturbate.com",), "needs": ("sessionid", "csrftoken"),
                    "home": "https://chaturbate.com/followed-cams/"},
+    # (which of its cookies a sign-in needs isn't known: checked by asking xvideos instead)
+    "xvideos": {"name": "xvideos", "domains": ("xvideos.com",), "needs": (), "home": "https://www.xvideos.com/account"},
 }
 MAX_TEXT = 1 << 20          # a paste's size
 NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,200}$")

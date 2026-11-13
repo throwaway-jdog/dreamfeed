@@ -68,7 +68,38 @@ function xvStop() {
   if (xv.hls) { xv.hls.destroy(); xv.hls = null; }
   const v = $("xv-video"); v.pause(); v.removeAttribute("src"); v.removeAttribute("poster"); v.load();
   $("xv-msg").hidden = true; $("xv-up").hidden = $("xv-down").hidden = true;
+  $("xv-info").hidden = true; $("xv-com").hidden = true; $("xv-com-list").replaceChildren(); xv.url = null;
 }
+// Views, 👍 / 👎 (and their ratio), how many comments: as xvideos shows them.
+function xvStats(f) {
+  const n = x => x == null ? null : Number(x).toLocaleString(), total = (f.likes || 0) + (f.dislikes || 0);
+  const parts = [f.views != null && `${n(f.views)} views`, f.likes != null && `👍 ${n(f.likes)}`, f.dislikes != null && `👎 ${n(f.dislikes)}`].filter(Boolean);
+  const stats = $("xv-stats"); stats.replaceChildren(parts.join(" · "));
+  if (total && f.likes != null && f.dislikes != null) { const r = el("span", "ratio"), i = el("i"); i.style.width = `${Math.round(f.likes / total * 100)}%`; r.append(i); stats.append(" ", r, ` ${Math.round(f.likes / total * 100)}%`); }
+  $("xv-com-btn").textContent = `💬 ${f.comments != null ? n(f.comments) : ""}`.trim();
+  $("xv-com-btn").hidden = !f.comments;
+  $("xv-info").hidden = !parts.length && !f.comments;
+}
+$("xv-com-btn").onclick = async () => {
+  if (!$("xv-com").hidden) { $("xv-com").hidden = true; return; }
+  const gen = xv.gen, url = xv.url; if (!url) return;
+  $("xv-com").hidden = false; $("xv-com-list").replaceChildren(el("p", "note", "Reading the comments…"));
+  try {
+    const d = await api(`api/vids/comments?url=${encodeURIComponent(url)}`);
+    if (gen !== xv.gen) return;
+    const list = d.comments.map(c => {
+      const div = el("div", "c"); div.append(el("b", null, c.author || "?"), el("small", null, [" · " + c.at, c.up ? ` · 👍 ${c.up}` : "", c.down ? ` 👎 ${c.down}` : ""].join("")), el("p", null, c.text));
+      return div;
+    });
+    const total = Number(($("xv-com-btn").textContent.match(/[\d,]+/) || ["0"])[0].replace(/,/g, ""));
+    if (total > list.length && list.length) {              // (xvideos gives its top 10 here: the rest on its page)
+      const more = el("a", null, `The other ${total - list.length} on xvideos ↗`); more.href = $("xv-open").href; more.target = "_blank"; more.rel = "noreferrer noopener";
+      list.push(el("p", "note", "")); list.at(-1).append(more);
+    }
+    $("xv-com-list").replaceChildren(...(list.length ? list : [el("p", "note", "No comments.")]));
+  } catch (err) { if (gen === xv.gen) $("xv-com-list").replaceChildren(el("p", "note", err.message)); }
+};
+$("xv-com-close").onclick = () => { $("xv-com").hidden = true; };
 {
   const v = $("xv-video");
   v.addEventListener("timeupdate", () => {          // seconds actually watched (not skipped over)
@@ -85,7 +116,13 @@ function xvMarkVote() {
 async function xvVote(n) {
   if (!xv.id) return;
   const want = xv.vote === n ? 0 : n;
-  try { xv.vote = (await api("api/vids/vote", { id: xv.id, vote: want })).vote; xvMarkVote(); if (want === -1) toast("Less like this: noted."); }
+  try {
+    const r = await api("api/vids/vote", { id: xv.id, vote: want, url: xv.url });
+    xv.vote = r.vote; xvMarkVote();
+    const s = r.site || {};
+    toast(s.status === "failed" ? `Noted here, but xvideos: ${s.error}` : want === 0 ? "Vote taken back (here)."
+      : `${want === 1 ? "More like this" : "Less like this"}: noted${s.status === "done" ? ", and voted on xvideos" : ""}.`);
+  }
   catch (err) { toast(err.message); }
 }
 $("xv-up").onclick = () => xvVote(1);
@@ -115,7 +152,8 @@ async function showXvideo(it) {
   if (f.title) $("xv-title").textContent = f.title;
   if (f.poster) v.poster = f.poster;
   if (it.url) {                                     // (one with its page: watched, voted on, followed by another)
-    Object.assign(xv, { id: f.id, sent: 0, played: 0, last: null, vote: f.vote || 0, next: (f.related || [])[0] || null });
+    Object.assign(xv, { id: f.id, url: it.url, sent: 0, played: 0, last: null, vote: f.vote || 0, next: (f.related || [])[0] || null });
+    xvStats(f);
     $("xv-up").hidden = $("xv-down").hidden = false; xvMarkVote();
     for (const r of f.related || []) nav.xv.set(r.id, r);
     xv.timer = setInterval(() => { if (!v.paused) xvReport(); }, 20000);

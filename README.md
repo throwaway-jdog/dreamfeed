@@ -490,7 +490,7 @@ e621 lists them, and their X posts too when one of those is an X account.
 files or restarting anything; each says when it was set and when it runs out (never the values).
 They're kept in `data/cookies/` (readable only by dreamfeed's user, left out of git), and used
 first wherever dreamfeed signs in (the Feed, styles, comic imports, the Live tab's follow list).
-- **X and Chaturbate:** Update, then paste an export of the site's cookies made while signed in
+- **X, Chaturbate and xvideos:** Update, then paste an export of the site's cookies made while signed in
   (cookies.txt or JSON from a browser extension like Cookie-Editor, or a Cookie header copied
   from the developer tools), or pick the file. Only that site's cookies are kept, the ones a
   sign-in needs must be there (X: `auth_token`, `ct0`; Chaturbate: `sessionid`, `csrftoken`),
@@ -535,6 +535,10 @@ read from xvideos when you open it: no xvideos page, no ads; nothing is download
   more from the uploaders you watch, and your top tags (and, until there's enough to go on, your
   Chaturbate rooms' tags and their linked xvideos accounts), ranked by those weights, at most 3
   from one uploader, each saying why it's there. What you've finished or turned down is left out.
+- **In the player**: its views, 👍 / 👎 (and their ratio) and 💬 its comments (xvideos' top 10,
+  with a link to the rest on its page). Signed in to xvideos (Sign-ins: on the server's browser,
+  then Take its cookies; dreamfeed checks xvideos sees you signed in), 👍 / 👎 here vote on
+  xvideos too, as you (taking one back only takes it back here).
 - **Continue watching** picks up where you left off; **Up next** (a related video) plays when
   one ends, unless you cancel it.
 - **Search**, with a length filter (10+ or 20+ minutes; remembered, and used for For you too).

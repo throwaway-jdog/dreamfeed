@@ -44,7 +44,8 @@ GET  /api/vids        ?length=|10|20&offset=N  the Videos tab: Continue watching
 GET  /api/vids/search ?q=WORDS&page=N&length=&sort=relevance|uploaddate|rating|views  xvideos' search
 GET  /api/vids/video  ?url=/video.ID/title  one to play: its stream, tags, related, where you left off, your vote
 POST /api/vids/watch  {"id", "position", "duration", "delta"}  how far you are (the player says, as you watch)
-POST /api/vids/vote   {"id", "vote": 1|-1|0}  more like this, less like this, or neither
+GET  /api/vids/comments ?url=  a video's comments, top first
+POST /api/vids/vote   {"id", "url", "vote": 1|-1|0}  more like this, less like this, or neither (on xvideos too, signed in there)
 GET  /api/xvideos/video ?id=ID  one of them: its stream and files, for dreamfeed's own player (no xvideos page, no ads)
 GET  /api/post         ?id=x:ID|reddit:ID|e621:ID  one post (its own page): your kept copy if you saved it, else live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
@@ -341,13 +342,15 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
             return self.send(200, {"clip": clip}) if clip else self.send(404, {"error": "that clip isn't there"})
-        if path in ("/api/vids", "/api/vids/search", "/api/vids/video"):
+        if path in ("/api/vids", "/api/vids/search", "/api/vids/video", "/api/vids/comments"):
             q = self.query()
             try:
                 if path == "/api/vids":
                     return self.send(200, videos.home(q.get("length", ""), int(q.get("offset", "0") or 0)))
                 if path == "/api/vids/search":
                     return self.send(200, videos.search(q.get("q", ""), int(q.get("page", "0") or 0), q.get("length", ""), q.get("sort", "")))
+                if path == "/api/vids/comments":
+                    return self.send(200, videos.comments(q.get("url", "")))
                 return self.send(200, videos.video(q.get("url", "")))
             except ValueError as e:
                 return self.send(400, {"error": str(e)})

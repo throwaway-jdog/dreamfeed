@@ -40,11 +40,14 @@ def _signin_check(site: str) -> str | None:
     import http.cookiejar
     import urllib.request
     try:
+        if site == "xvideos":
+            from dreamfeed.feed import xvideos
+            return xvideos.signed_in()
         if site == "x":
             livefeeds.forget("x:")
             items = livefeeds._x("https://x.com/home", 1, 1, timeout=60)
             return None if any(isinstance(i, list) and i and i[0] == 3 for i in items) else "X showed nothing: the cookies may be out of date"
-        file = cookies.path(site, MOUNTED_COOKIES[site])
+        file = cookies.path(site, MOUNTED_COOKIES.get(site))
         if not file:
             return "no cookies set"
         jar = http.cookiejar.MozillaCookieJar(str(file))
@@ -240,7 +243,7 @@ def _e621_status() -> dict:
 
 
 def signins(headers=None) -> dict:
-    return {"sites": [{**cookies.status(s, MOUNTED_COOKIES[s]), "refresh": _browser["refresh"].get(s)} for s in cookies.SITES],
+    return {"sites": [{**cookies.status(s, MOUNTED_COOKIES.get(s)), "refresh": _browser["refresh"].get(s)} for s in cookies.SITES],
             "e621": _e621_status(), "bsky": _bsky_status(),
             "browser": BROWSER_URL if BROWSER_PROFILE and BROWSER_URL else None,
             "reddit": _reddit_status(headers or {})}

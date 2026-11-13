@@ -108,14 +108,50 @@ def _seconds(text: str) -> int:
     return total
 
 
-def _get(url: str, json_: bool = False):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (dreamfeed)", "Accept": "application/json" if json_ else "text/html"})
+AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+
+
+def _signed_in_opener():
+    """An opener with your xvideos cookies (the Dashboard's Sign-ins), or None when there are none."""
+    import http.cookiejar
+    from ..core import cookies
+    file = cookies.path("xvideos")
+    if not file:
+        return None
+    jar = http.cookiejar.MozillaCookieJar(str(file))
+    jar.load(ignore_discard=True, ignore_expires=True)
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+def _get(url: str, json_: bool = False, data: bytes | None = None, opener=None, headers: dict | None = None):
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": "Mozilla/5.0 (dreamfeed)" if not opener else AGENT,
+                                                          "Accept": "application/json" if json_ else "text/html", **(headers or {})})
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with (opener.open(req, timeout=20) if opener else urllib.request.urlopen(req, timeout=20)) as r:
             raw = r.read(4 << 20)
     except OSError as e:
         raise LookupError(f"xvideos didn't answer ({e})") from e
     return json.loads(raw) if json_ else raw.decode("utf-8", "replace")
+
+
+def signed_in() -> str | None:
+    """None when xvideos sees you signed in with your cookies, else what's wrong."""
+    opener = _signed_in_opener()
+    if not opener:
+        return "no xvideos cookies set"
+    page = _get(f"{XVIDEOS}/account", opener=opener)
+    return None if re.search(r'"is_logged":\s*true', page) else "xvideos doesn't see you signed in with these"
+
+
+def _num(text: str) -> int | None:
+    """ "1,234" or "1.1k" or "2M" as a number (the short ones, about)."""
+    m = re.fullmatch(r"([\d.]+)\s*([kKmM]?)", str(text or "").replace(",", "").strip())
+    if not m:
+        return None
+    try:
+        return int(float(m.group(1)) * {"k": 1_000, "m": 1_000_000}.get(m.group(2).lower(), 1))
+    except ValueError:
+        return None
 
 
 def _ok(v: dict) -> dict | None:
@@ -228,9 +264,58 @@ def xv_details(url: str) -> dict:
             related = []
         up = re.search(r'<a href="(/[A-Za-z0-9_-]+)" class="[^"]*uploader-tag[^"]*"><span class="name">(?:<span[^>]*></span>)?\s*([^<]+)</span>', page)
         dur = re.search(r'<meta property="og:duration" content="(\d+)"', page)
+        num = re.search(r'"id_video":\s*(\d+)', page)
+        views = re.search(r'id="v-views">(?:<[^>]+>)*\s*([\d,]+)', page)
+        good, bad = (re.search(r'class="rating-' + k + r'-nbr"[^>]*>([\d,.]+[kKmM]?)<', page) for k in ("good", "bad"))
+        com = re.search(r'"pub_comments":\s*(\d+)', page)
         return {"id": url.split("/")[1][6:], "url": url, "title": title, "duration": int(dur.group(1)) if dur else 0,
+                "num": num.group(1) if num else None, "views": _num(views.group(1)) if views else None,
+                "likes": _num(good.group(1)) if good else None, "dislikes": _num(bad.group(1)) if bad else None,
+                "comments": int(com.group(1)) if com else None,
                 "tags": [t for t in dict.fromkeys(tags) if t][:40], "uploader": html_.unescape(up.group(2)) if up else None,
                 "uploader_path": up.group(1) if up and XV_UPLOADER.match(up.group(1)) else None,
                 "related": related, "hls": cdn(call("setVideoHLS")), "mp4": cdn(call("setVideoUrlHigh")),
                 "mp4_low": cdn(call("setVideoUrlLow")), "poster": cdn(call("setThumbUrl169")) or cdn(call("setThumbUrl"))}
     return _cached(f"xvideos:details:{url}", fetch, 300)
+
+
+def xv_comments(url: str) -> list[dict]:
+    """A video's top comments (its first page: 10), top first: [{"id", "author", "text", "at" (as
+    xvideos says it: "2 years ago"), "up", "down"}]. Their text is plain (xvideos' markup taken out)."""
+    import html as html_
+    num = xv_details(url).get("num")
+    if not num:
+        return []
+    def fetch():
+        d = _get(f"{XVIDEOS}/threads/video-comments/get-posts/top/{num}/0/0", json_=True, data=b"",
+                 headers={"X-Requested-With": "XMLHttpRequest"})
+        posts = ((d.get("posts") or {}).get("posts") or {}) if isinstance(d.get("posts"), dict) else {}
+        out = []
+        for p in posts.values():
+            text = html_.unescape(re.sub(r"<br\s*/?>", "\n", str(p.get("message") or "")))
+            text = re.sub(r"<[^>]+>", "", text).strip()
+            if not text or youth(text):
+                continue
+            votes = p.get("votes") if isinstance(p.get("votes"), dict) else {}
+            out.append({"id": str(p.get("id")), "author": html_.unescape(str(p.get("name") or "")), "text": text[:2000],
+                        "at": str(p.get("time_diff") or p.get("date") or ""), "up": votes.get("nb"), "down": votes.get("nbb")})
+        return out
+    return _cached(f"xvideos:comments:{num}", fetch, 600)
+
+
+def xv_vote(url: str, good: bool) -> None:
+    """👍 (good) or 👎 on xvideos as you: your page's own vote address (it's tied to your session),
+    sent with your cookies."""
+    if not XV_PATH.match(url or ""):
+        raise ValueError("bad xvideos video")
+    opener = _signed_in_opener()
+    if not opener:
+        raise LookupError("xvideos isn't signed in (the Dashboard: Sign-ins)")
+    page = _get(f"{XVIDEOS}{url}", opener=opener)
+    m = re.search(r'"vote_' + ("good" if good else "bad") + r'":"((?:\\/|[A-Za-z0-9_=+-])+)"', page)
+    if not m:
+        raise LookupError("xvideos didn't offer a vote on that video")
+    path = m.group(1).replace("\\/", "/")
+    if not re.fullmatch(r"/video-vote/\d+/(?:GOOD|BAD)/[A-Za-z0-9_=+/-]+", path):
+        raise LookupError("xvideos' vote address looks wrong")
+    _get(f"{XVIDEOS}{path}", data=b"", opener=opener, headers={"X-Requested-With": "XMLHttpRequest", "Referer": f"{XVIDEOS}{url}"})

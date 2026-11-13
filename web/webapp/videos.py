@@ -88,10 +88,20 @@ def watch(req: dict) -> dict:
 
 
 def vote(req: dict) -> dict:
-    """{"id", "vote": 1 (more like this) | -1 (less) | 0 (take it back)}."""
-    vid, v = str(req.get("id", "")), req.get("vote")
-    if not xv.XVIDEOS_ID.match(vid) or v not in (1, -1, 0):
+    """{"id", "vote": 1 (more like this) | -1 (less) | 0 (take it back), "url"}: here, and on
+    xvideos too when you're signed in there (👍 / 👎 as you; taking it back stays here)."""
+    vid, v, url = str(req.get("id", "")), req.get("vote"), str(req.get("url") or "")
+    if not xv.XVIDEOS_ID.match(vid) or v not in (1, -1, 0) or (url and not xv.XV_PATH.match(url)):
         raise ValueError("bad vote")
+    site = None
+    if v and url:
+        from dreamfeed.core import cookies
+        if cookies.path("xvideos"):
+            try:
+                xv.xv_vote(url, v == 1)
+                site = {"status": "done"}
+            except (LookupError, OSError) as e:
+                site = {"status": "failed", "error": str(e)[:200]}
     with _conn() as conn:
         if v:
             conn.execute("INSERT OR REPLACE INTO xv_votes (id, vote, at) VALUES (?, ?, ?)", (vid, v, time.time()))
@@ -99,7 +109,11 @@ def vote(req: dict) -> dict:
             conn.execute("DELETE FROM xv_votes WHERE id = ?", (vid,))
     with _lock:
         _ranked.clear()                            # (For you, ranked again with it)
-    return {"vote": v}
+    return {"vote": v, "site": site}
+
+
+def comments(url: str) -> dict:
+    return {"comments": xv.xv_comments(url)}
 
 
 def _watched_ids() -> set:
