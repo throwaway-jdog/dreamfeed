@@ -15,7 +15,7 @@ async function showPerson(key) {
   pf.xv = pf.rg = null; $("pf-tabs").hidden = true; clearTimeout(pf.ltimer);
   for (const id of ["pf-prev-sec", "pf-vid-sec", "pf-post-sec"]) $(id).hidden = true;
   $("pf-live").hidden = true; $("pf-open").hidden = true;
-  $("profile").hidden = false; $("profile").scrollTop = 0;
+  $("pf-view").hidden = false; $("pf-view").scrollTop = 0;
   await loadPerson(gen);
 }
 async function loadPerson(gen) {
@@ -37,7 +37,7 @@ async function loadPerson(gen) {
   fb.textContent = pending ? (act.action === "follow" ? "Following…" : "Unfollowing…") : d.followed ? "Following ✓" : "Follow";
   fb.classList.toggle("following", !!d.followed);
   if (act && act.status === "failed" && !pf.toldFail) { pf.toldFail = true; toast(`Chaturbate didn't take it: ${act.error || "?"}`); }
-  if (pending) pf.ftimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 3000);
+  if (pending) pf.ftimer = setTimeout(() => { if (gen === pf.gen && !$("pf-view").hidden) loadPerson(gen); }, 3000);
   else if (act && act.status === "done" && pf.waitingFollow) { pf.waitingFollow = false; refreshFollowing(); }
   const b = d.bio || {}, times = d.times || card.times || [];
   const when = !room ? "" : live ? "Live now" : d.last_live ? `Last live ${relTime(new Date(d.last_live * 1000).toISOString())} ago`
@@ -103,7 +103,7 @@ function linkLabel(src, h) {
 // While the room's accounts are being looked for: the profile again in a bit.
 function pfLinkWait(gen) {
   clearTimeout(pf.ltimer);
-  pf.ltimer = setTimeout(() => { if (gen === pf.gen && !$("profile").hidden) loadPerson(gen); }, 6000);
+  pf.ltimer = setTimeout(() => { if (gen === pf.gen && !$("pf-view").hidden) loadPerson(gen); }, 6000);
 }
 function renderLinks(d) {
   const chips = [];
@@ -354,7 +354,7 @@ function renderProfile(gen) {
   if (working) pf.timer = setTimeout(() => reloadProfile(gen), 5000);
 }
 async function reloadProfile(gen) {
-  if (gen !== pf.gen || $("profile").hidden) return;
+  if (gen !== pf.gen || $("pf-view").hidden) return;
   try { const d = await api(`api/live/videos?name=${encodeURIComponent(pf.room.name)}`); if (gen !== pf.gen) return; pf.videos = d.videos; }
   catch { /* next time */ }
   renderProfile(gen);
@@ -396,7 +396,7 @@ async function deleteVideo(f) {
     reloadProfile(pf.gen); refreshFollowing();
   });
 }
-function closeProfile() { pf.gen++; clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); $("profile").hidden = true; }
+function closeProfile() { pf.gen++; clearTimeout(pf.timer); clearTimeout(pf.ptimer); clearTimeout(pf.ftimer); $("pf-view").hidden = true; }
 $("pf-close").onclick = leave;
 $("pf-live").onclick = () => openRoom(pf.card && pf.card.name === pf.room.name ? pf.card : { ...pf.room, info: (pf.data || {}).info || {} }, null);
 function closeRoom() { pl.gen++; clearTimeout(pl.timer); stopVideo(); $("player").hidden = true; }

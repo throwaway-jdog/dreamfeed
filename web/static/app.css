@@ -334,9 +334,11 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .pf-dvr-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .pf-dvr-row .secondary { width: auto; padding: 0 14px; }
 .pf-dvr-row small { color: var(--muted); flex-basis: 100%; }
-.profile { position: fixed; inset: 0; z-index: 29; background: var(--bg); overflow-y: auto; }
-.profile[hidden] { display: none; }
-.profile .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
+/* (the room profile is a window over the page; the persona Feed's .profile header isn't) */
+.pf-view { position: fixed; inset: 0; z-index: 29; background: var(--bg); overflow-y: auto;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .55); }     /* (on wide screens, the page beside it dimmed) */
+.pf-view[hidden] { display: none; }
+.pf-view .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 /* a room's profile: Follow (filled until you follow), Watch live, Chaturbate */
 .pf-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .pf-chip.maybe { border-style: dashed; opacity: .85; }

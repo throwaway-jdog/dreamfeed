@@ -138,7 +138,7 @@ function openComic(c) { go(`comics/${enc(c.id)}`); }
 function closePages() {
   if (!viewer.hidden) closeViewer(true);
   closePicture(true);
-  if (!$("profile").hidden) closeProfile();
+  if (!$("pf-view").hidden) closeProfile();
   if (!$("browse").hidden) closeBrowse();
   if (!$("post-view").hidden) closePost();
   if (!$("player").hidden) closeRoom();
