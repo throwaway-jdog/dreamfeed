@@ -569,6 +569,9 @@ textarea.in { resize: vertical; min-height: 72px; }
 .comic-card { display: grid; gap: 6px; text-align: left; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; }
 .comic-card img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; border-radius: 10px; background: var(--bg); }
 .comic-card b { font-size: 14px; } .comic-card small { color: var(--muted); font-size: 12px; }
+.comic-card .why { color: var(--accent); }
+.comics .vrow { grid-auto-columns: minmax(130px, 150px); }
+.rd-msg { margin: 6px 16px; }
 .reader { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow-y: auto; }
 .reader-bar { position: sticky; top: 0; display: flex; gap: 12px; align-items: center; justify-content: space-between;
   padding: 10px max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px));

@@ -53,7 +53,7 @@ FEED_IMAGES = ("https://pbs.twimg.com https://i.redd.it https://preview.redd.it 
                " https://styles.redditmedia.com https://a.thumbs.redditmedia.com https://b.thumbs.redditmedia.com"
                " https://*.xvideos-cdn.com"
                " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com"
-               " https://cdn.bsky.app https://video.bsky.app")
+               " https://cdn.bsky.app https://video.bsky.app https://multporn.net")
 FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it https://i.imgur.com"
               " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com https://video.bsky.app"
               " https://*.xvideos-cdn.com")       # (xvideos' files, played in dreamfeed's own player)

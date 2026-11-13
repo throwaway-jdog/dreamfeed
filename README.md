@@ -310,62 +310,26 @@ dreamfeed/
 
 ## Comics
 
-The **Comics** tab makes comics about two characters: two personas (each with a trained
-character style), or a persona and her partner. Give it a story in a few sentences and a page
-count (1 to 4, 4 panels a page). The worker (`worker/dreamfeed/comics/comic.py`, also
-`python -m dreamfeed comic A B --story "..."`) draws a clean picture of the two of them first,
-plans the panels (build-up, then acts, cuddling at the end), has the text model write each page's
-lines in their voices from the story, draws all panels like a scene's shots (one cast, one room,
-the same checks), and letters them: speech bubbles are drawn by the code where nobody is, with
-the tail toward the speaker (the image model can't write). About 6 minutes a page. Stories and
-lines are checked like captions, and must be consensual (`safety.story_blocked`). Comics stay
-until deleted; they aren't in the feed and don't expire.
+A feed like the rest, read live from e621's pools (its comics) and multporn, nothing downloaded
+(`worker/dreamfeed/feed/comics.py`, `web/webapp/comics.py`):
 
-**Importing** a comic (the same tab; `comics/comicimport.py`): paste the gallery's link (anything
-gallery-dl reads, and multporn comics) and say whether it's furry or anime. Every page gets the
-strict adults-only checks; failing pages are dropped, and if more than a fifth fail nothing is
-imported. Pages are kept as drawn, to read and animate panels of. (Colouring black-and-white
-comics from their cover was tried and taken out: it wasn't good enough.)
+- **For you**: chosen from what you read here (how far you get in each, what you follow: their
+  tags) and your e621 taste (the artists and species you favorite and vote up, signed in), from
+  e621's comics with your kind of posts, its latest updated, multporn's newest and searches for
+  your tags; each says why. What you've finished or follow is left out (it shows above).
+- **Updated**: comics you follow with new pages since you last read them (looked at every six
+  hours; the reader says from which page they're new). **Continue reading**, **Following**.
+- **Follow** in the reader; where you are is remembered as you read.
+- **Search** multporn or e621's comics by title, artist or character.
+- **Your comics**: the ones kept here before (imported, or made), still readable, renamed or
+  deleted from their grid of pages. Those imported from multporn are followed there, so their new
+  pages come in under Updated.
 
-**Find a comic** (the same tab) searches multporn or e621 (its pools of the "series" kind) and
-lists their comics with covers (the covers come through dreamfeed; an e621 pool whose cover has
-a tag dreamfeed never allows is left out); **Import** queues one like a pasted link. A search
-with words the dashboard never takes is refused, and results whose title Import would refuse
-are left out; the pages get the same checks either way.
-
-**New pages.** Once a day the worker looks at every imported comic's source again (a
-`comic_update` job, "New comic pages" on Recent runs): the source's pages are listed without
-downloading, and only the ones it hasn't listed before are downloaded, checked like an
-import's (one by one: a few failing doesn't stop the rest) and added at the end, with their
-panels and outlines. The comic shows "N new pages" for 3 days. **Check for new pages** in the
-reader's grid does it for one comic now. Comics imported before this have their pages' names to
-go by (a page the checks dropped back then is looked at once more, and dropped again).
-
-**Reading.** A comic opens a page at a time, fitted to the screen: swipe (or the arrows, or the
-arrow keys) between pages. **Grid** shows every page small (thumbnails made when the comic is
-saved) to jump to one; the comic's delete button is there too. A comic's card in the list has
-**Rename** and **Delete**.
-
-**Animated panels.** In the reader, **Animate a panel** shows each page's panels (found when the
-comic is saved: cut along the gutters, white, black or coloured; drag a box for panels that
-overlap or touch).
-Pick one, optionally say what moves, and a job (`comic_animate`, `comics/comicanim.py`) cuts the panel
-out and has Wan 2.2 animate it for about four seconds (as asked, or by the act's motion LoRA;
-a sex panel with no position thrusts), then cuts it to a cycle within the clip, blended at the
-seam, played at 12 fps. The clip gets the video checks (stricter ones for imported comics) and
-plays over its panel in the reader, looping; **Remove animation** takes it off again.
-Panels can be queued one after another without leaving the picker (queued ones show as such).
-Speech bubbles and text never move: `comics/lettering.py` finds them (ogkalu's comic text and bubble
-detector, Apache 2.0, on the CPU; each bubble traced to its shape from its box) and the clip
-shows the drawing there. The outlines say what moves (one loop per character, reaching past the
-panel for a character breaking out of it): only that moves, the rest is the drawing itself.
-When a panel is picked, the characters found in it (BiRefNet, less the lettering, worked out
-when the comic is saved) are outlined to start with; **Undo**, **Clear**, **Draw around them**
-and **Outline the characters** change that. The reader masks the clip to what moves (a PNG
-beside it). Works on comics made here and imported ones. `python -m dreamfeed comic-panels`
-finds the panels (and makes the thumbnails) of comics saved before they were kept;
-`comic-panels --outlines [--cpu]` outlines their characters (`--cpu`: slower, leaves the GPU alone);
-`comic-panels --smooth [--cpu]` smooths clips made before smoothing (as new files).
+Drawn work: a comic whose title, tags or categories have a word dreamfeed never allows (e621's
+youth and feral tags, the safety rules) is left out; lists judge comics by their cover, and one
+that turns out to have such a page is refused when opened and left out after. No picture is
+looked at. e621's pictures reach the page through dreamfeed (`/e621-media/`): e621 now turns away
+pictures a browser shows on another site.
 
 ## Following
 

@@ -1,50 +1,85 @@
-"""Comics: searching and importing them (multporn, e621's pools), making them, their pages and
-animated panels.
+"""Comics: a feed like the rest, read live from e621's pools and multporn (feed/comics.py).
+
+- **For you**: comics chosen from what you read here (how far you get, what you follow: their
+  tags) and your e621 taste (the artists and species you favorite), from e621's comics with your
+  kind of posts, its latest updated, multporn's newest and searches for your tags; ranked, each
+  saying why, what you've finished or follow left out (they show above).
+- **Updated**: comics you follow with new pages since you last read them (looked for every few
+  hours). **Continue reading**: where you left off.
+- **Your comics**: the ones kept here before (imported, or made), still readable; those imported
+  from a site you can still read there are followed, so their new pages come in above.
+- **Search** (multporn's, e621's pools).
+
+Drawn work: comics with words dreamfeed never allows are left out (feed/comics.py); no picture is
+looked at, and nothing is downloaded.
 """
 import json
+import math
 import re
 import shutil
+import threading
+import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from dreamfeed.core import acts, cookies, personas as people, safety
-from dreamfeed.feed import e621, livefeeds, savedposts
+from dreamfeed.core import safety
+from dreamfeed.feed import comics as live
+from dreamfeed.feed import e621
 
-from .common import GENERATED, MEDIUMS, db, item, read_json
-from .editor import read_personas
-from .posts import _retried
-
+from .common import GENERATED, db, read_json
+from .feed import _now_shown, _stale
 
 MULTPORN = "https://multporn.net"
 COMIC_PATHS = ("/comics/", "/hentai_manga/")
 SEARCH_AGENT = {"User-Agent": "dreamfeed (comic search)"}
+COMIC_TITLE = 100
+PAGE = 24
+CHECK_EVERY = 6 * 3600     # followed comics: looked at for new pages this often
 _covers: dict[str, bytes] = {}      # search covers already fetched (a few hundred at most)
+_ranked: dict = {"at": 0.0, "list": []}
+_lock = threading.Lock()
 
 
+def _tables(conn) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS comic_follows (id TEXT PRIMARY KEY, data TEXT NOT NULL, pages INTEGER NOT NULL DEFAULT 0,
+        seen INTEGER NOT NULL DEFAULT 0, new_at REAL, checked_at REAL, at REAL NOT NULL)""")
+    conn.execute("CREATE TABLE IF NOT EXISTS comic_refused (id TEXT PRIMARY KEY, at REAL NOT NULL)")   # (a page with a word never allowed: left out after)
+    conn.execute("""CREATE TABLE IF NOT EXISTS comic_reads (id TEXT PRIMARY KEY, data TEXT NOT NULL, page INTEGER NOT NULL DEFAULT 1,
+        furthest INTEGER NOT NULL DEFAULT 1, pages INTEGER NOT NULL DEFAULT 0, opened INTEGER NOT NULL DEFAULT 0,
+        first_at REAL NOT NULL, last_at REAL NOT NULL)""")
+
+
+def _conn():
+    conn = db()
+    _tables(conn)
+    return conn
+
+
+def _card(c: dict) -> dict:
+    """What's kept of a comic for its card (and taste): no pages."""
+    return {k: c.get(k) for k in ("id", "source", "title", "pages", "cover", "tags", "artists", "updated", "link")}
+
+
+# ---- search (multporn's own, e621's pools by name) ----
 def comic_search(q: str, page: int, site: str = "multporn") -> dict:
-    """multporn's search for q: its comics and manga (not videos or games), each {"title", "url",
-    "thumb"}. A search with words the dashboard never takes is refused, and so is a result
-    whose title has them."""
+    """{"results": [comic cards ({"id", "title", "thumb", "url"} ...)], "more"}."""
     import html
-    import urllib.parse
     import urllib.request
-    if site == "e621":
-        try:
-            d = e621.pools(q, page)
-        except OSError as e:
-            raise LookupError(f"e621 didn't answer ({e})")
-        d["results"] = [r for r in d["results"] if not safety.story_blocked(r["title"])]   # (what Import takes)
-        for r in d["results"]:
-            r["thumb"] = "comic-search/thumb?u=" + urllib.parse.quote(r.pop("cover") or "", safe="") if r.get("cover") else None
-        return d
-    if site != "multporn":
-        raise ValueError("bad site")
-    q = q.strip()
+    q = " ".join(str(q or "").split())
     if not 1 <= len(q) <= 100:
         raise ValueError("type what to look for (up to 100 characters)")
-    bad = safety.request_blocked(q)
-    if bad:
-        raise ValueError(f"not something to look for: {', '.join(bad)}")
+    if live.blocked(q):
+        raise ValueError("not something to look for")
+    if site == "e621":
+        try:
+            found = live.e621_pools(name=q, page=page + 1)
+        except OSError as e:
+            raise LookupError(f"e621 didn't answer ({e})")
+        return {"results": [{**c, "url": c["link"], "thumb": "comic-search/thumb?u=" + urllib.parse.quote(c["cover"], safe="") if c.get("cover") else None}
+                            for c in found], "more": len(found) >= live.PAGE - 6}
+    if site != "multporn":
+        raise ValueError("bad site")
     url = f"{MULTPORN}/search?" + urllib.parse.urlencode({"search_api_views_fulltext": q, "page": page})
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers=SEARCH_AGENT), timeout=30) as r:
@@ -53,24 +88,24 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         raise LookupError(f"multporn didn't answer ({e})")
     out = []
     for row in re.split(r'<div class="masonry-item views-row', page_html)[1:]:
-        # the title's own link; its text can have the searched words in <strong>
-        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="([^"]+)">(.*?)</a>', row, re.S)
+        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="/comics/([a-z0-9_-]+)">(.*?)</a>', row, re.S)
         img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"', row)
-        if not link or not link.group(1).startswith(COMIC_PATHS):
+        if not link:
             continue
         title = html.unescape(re.sub(r"<[^>]+>", "", link.group(2))).strip()
-        if safety.story_blocked(title):     # what Import would refuse isn't offered
+        if live.blocked(title):
             continue
-        out.append({"title": title, "url": MULTPORN + link.group(1),
-                    "thumb": "comic-search/thumb?u=" + urllib.parse.quote(html.unescape(img.group(1)), safe="") if img else None})
+        cover = html.unescape(img.group(1)) if img else None
+        out.append({"id": f"mp:{link.group(1)}", "source": "multporn", "title": title, "cover": cover,
+                    "thumb": "comic-search/thumb?u=" + urllib.parse.quote(cover, safe="") if cover else None,
+                    "url": f"{MULTPORN}/comics/{link.group(1)}", "link": f"{MULTPORN}/comics/{link.group(1)}", "tags": []})
     return {"results": out, "more": f"page={page + 1}" in page_html}
 
 
 def comic_cover(u: str) -> bytes | None:
-    """A search result's cover: multporn's, or the preview of an e621 pool's first post (whose
-    tags e621.pools already checked)."""
+    """A cover, fetched here (for the iOS app, which can't load multporn's pictures itself)."""
     import urllib.request
-    multporn, e6 = u.startswith(MULTPORN + "/sites/default/files/"), u.startswith("https://static1.e621.net/data/preview/")
+    multporn, e6 = u.startswith(MULTPORN + "/sites/default/files/"), u.startswith("https://static1.e621.net/data/")
     if not (multporn or e6) or ".." in u:
         return None
     if u not in _covers:
@@ -78,11 +113,11 @@ def comic_cover(u: str) -> bytes | None:
             if e6:
                 data = e621.fetch(u, 4 << 20)
             else:
-                with urllib.request.urlopen(urllib.request.Request(u, headers=SEARCH_AGENT), timeout=30) as r:
+                with urllib.request.urlopen(urllib.request.Request(u, headers=live.MP_AGENT), timeout=30) as r:
                     data = r.read(4 << 20)
         except (OSError, ValueError):
             return None
-        if data[:3] != b"\xff\xd8\xff":     # covers are JPEGs
+        if data[:3] != b"\xff\xd8\xff" and data[:8] != b"\x89PNG\r\n\x1a\n":
             return None
         if len(_covers) > 400:
             _covers.clear()
@@ -90,263 +125,254 @@ def comic_cover(u: str) -> bytes | None:
     return _covers[u]
 
 
-COMIC_STORY = 600
-COMIC_PAGES = 4
-COMIC_TITLE = 100
+# ---- reading one, following ----
+def read(cid: str) -> dict:
+    """A comic to read: its pages (straight from the site), where you left off, whether you follow it.
+    One with a page dreamfeed never allows (only seen once it's opened: lists judge by covers) is
+    refused, and left out of For you from then on."""
+    try:
+        c = live.comic(cid)
+    except LookupError as e:
+        if "leaves that comic out" in str(e):
+            with _conn() as conn:
+                conn.execute("INSERT OR REPLACE INTO comic_refused (id, at) VALUES (?, ?)", (str(cid), time.time()))
+            with _lock:
+                _ranked["at"] = 0
+        raise
+    now = time.time()
+    with _conn() as conn:
+        conn.execute("INSERT INTO comic_reads (id, data, pages, opened, first_at, last_at) VALUES (?, ?, ?, 1, ?, ?)"
+                     " ON CONFLICT(id) DO UPDATE SET data = excluded.data, pages = excluded.pages, opened = opened + 1, last_at = excluded.last_at",
+                     (c["id"], json.dumps(_card(c)), len(c["images"]), now, now))
+        r = conn.execute("SELECT page FROM comic_reads WHERE id = ?", (c["id"],)).fetchone()
+        f = conn.execute("SELECT seen FROM comic_follows WHERE id = ?", (c["id"],)).fetchone()
+    return {**c, "page": r["page"] if r else 1, "followed": bool(f), "new_from": (f["seen"] + 1) if f and f["seen"] else None}
 
 
+def progress(req: dict) -> dict:
+    """{"id", "page"}: where you are in it."""
+    cid = str(req.get("id", ""))
+    try:
+        page = int(req.get("page"))
+    except (TypeError, ValueError):
+        raise ValueError("bad page")
+    if not re.fullmatch(r"(?:e621:\d{1,9}|mp:[a-z0-9_-]{1,120})", cid) or not 1 <= page <= 1000:
+        raise ValueError("bad page")
+    with _conn() as conn:
+        conn.execute("UPDATE comic_reads SET page = ?, furthest = max(furthest, ?), last_at = ? WHERE id = ?", (page, page, time.time(), cid))
+        conn.execute("UPDATE comic_follows SET seen = max(seen, ?) WHERE id = ?", (page, cid))
+    return {"ok": True}
+
+
+def follow(req: dict) -> dict:
+    """{"id", "follow": bool}: its new pages come in Updated."""
+    cid = str(req.get("id", ""))
+    if not re.fullmatch(r"(?:e621:\d{1,9}|mp:[a-z0-9_-]{1,120})", cid):
+        raise ValueError("bad comic")
+    with _conn() as conn:
+        if req.get("follow"):
+            c = live.comic(cid)
+            r = conn.execute("SELECT furthest FROM comic_reads WHERE id = ?", (cid,)).fetchone()
+            conn.execute("INSERT OR REPLACE INTO comic_follows (id, data, pages, seen, checked_at, at) VALUES (?, ?, ?, ?, ?, ?)",
+                         (cid, json.dumps(_card(c)), len(c["images"]), r["furthest"] if r else 0, time.time(), time.time()))
+        else:
+            conn.execute("DELETE FROM comic_follows WHERE id = ?", (cid,))
+    with _lock:
+        _ranked["at"] = 0
+    return {"followed": bool(req.get("follow"))}
+
+
+def _check_follows() -> None:
+    """New pages of the comics you follow (each looked at every CHECK_EVERY)."""
+    with _conn() as conn:
+        rows = conn.execute("SELECT id, pages FROM comic_follows WHERE checked_at IS NULL OR checked_at < ?",
+                            (time.time() - CHECK_EVERY,)).fetchall()
+    for r in rows:
+        try:
+            n = live.page_count(r["id"])
+        except (LookupError, ValueError, OSError):
+            n = None
+        with _conn() as conn:
+            if n and n > r["pages"]:
+                conn.execute("UPDATE comic_follows SET pages = ?, new_at = ?, checked_at = ? WHERE id = ?", (n, time.time(), time.time(), r["id"]))
+            else:
+                conn.execute("UPDATE comic_follows SET checked_at = ? WHERE id = ?", (time.time(), r["id"]))
+        time.sleep(2)
+
+
+def watch_follows() -> None:
+    """The web app's thread: followed comics looked at for new pages; your kept comics imported
+    from a site followed there (once)."""
+    time.sleep(60)
+    try:
+        _follow_library()
+    except Exception as e:                       # (it's only a convenience: logged, not fatal)
+        print(time.strftime("%F %T"), f"web: following your imported comics: {e}", flush=True)
+    while True:
+        try:
+            _check_follows()
+        except Exception as e:
+            print(time.strftime("%F %T"), f"web: followed comics: {e}", flush=True)
+        time.sleep(1800)
+
+
+def _follow_library() -> None:
+    with _conn() as conn:
+        done = conn.execute("SELECT count(*) FROM comic_follows WHERE json_extract(data, '$.from_library')").fetchone()[0]
+        if done:
+            return
+        for lib in library():
+            m = re.match(r"https://multporn\.net/comics/([a-z0-9_-]+)", lib.get("source") or "")
+            if not m:
+                continue
+            cid = f"mp:{m.group(1)}"
+            if conn.execute("SELECT 1 FROM comic_follows WHERE id = ?", (cid,)).fetchone():
+                continue
+            card = {"id": cid, "source": "multporn", "title": lib["title"], "pages": lib["pages"], "cover": None, "tags": [],
+                    "link": lib["source"], "from_library": True}
+            conn.execute("INSERT INTO comic_follows (id, data, pages, seen, checked_at, at) VALUES (?, ?, ?, ?, NULL, ?)",
+                         (cid, json.dumps(card), lib["pages"], lib["pages"], time.time()))
+
+
+# ---- your taste, and For you ----
+def taste() -> dict:
+    """{"tags": {tag: weight}, "n"}: from how far you read comics here, and what you follow."""
+    tags, n, now = {}, 0, time.time()
+    with _conn() as conn:
+        reads = conn.execute("SELECT data, furthest, pages, opened, last_at FROM comic_reads").fetchall()
+        follows = conn.execute("SELECT data, at FROM comic_follows").fetchall()
+    for r in reads:
+        d, pages = json.loads(r["data"]), max(1, r["pages"])
+        share = r["furthest"] / pages
+        s = 1.0 if share >= 0.9 else 0.6 if share >= 0.3 else -0.3 if r["furthest"] <= 2 and pages > 5 else 0.2
+        s *= 0.5 ** ((now - r["last_at"]) / 86400 / 30)
+        vt = d.get("tags") or []
+        for t in vt:
+            tags[t] = tags.get(t, 0.0) + s / math.sqrt(len(vt))
+        n += 1
+    for f in follows:
+        vt = json.loads(f["data"]).get("tags") or []
+        for t in vt:
+            tags[t] = tags.get(t, 0.0) + 1.5 / math.sqrt(len(vt))
+        n += 1
+    return {"tags": tags, "n": n}
+
+
+def _candidates(t: dict) -> list[tuple[dict, float, str]]:
+    top = [g for g, w in sorted(t["tags"].items(), key=lambda kv: -kv[1]) if w > 0.3][:6]
+    jobs = [(0.5, "Just updated on e621", lambda: live.e621_pools()),
+            (0.45, "New on multporn", lambda: live.multporn_new()),
+            (0.4, "New on multporn", lambda: live.multporn_new(1))]
+    mine = e621.taste() if e621.creds() else None
+    if mine and (mine["artists"] or mine["species"]):
+        jobs.append((0.9, "Artists you favorite on e621", lambda: live.e621_pools_like(mine["artists"] or mine["species"])))
+    if top:
+        jobs.append((0.8, f"Because you read {', '.join(top[:3])}", lambda: live.e621_pools_like([g.replace(" ", "_") for g in top])))
+        for g in top[:2]:
+            jobs.append((0.7, f"You like {g}", lambda g=g: comic_search(g, 0)["results"]))
+
+    def run(job):
+        prior, why, read_ = job
+        try:
+            return [(c, prior, why) for c in read_()]
+        except (LookupError, ValueError, OSError):
+            return []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return [c for got in pool.map(run, jobs) for c in got]
+
+
+def _rank() -> list[dict]:
+    t = taste()
+    with _conn() as conn:
+        skip = {r[0] for r in conn.execute("SELECT id FROM comic_follows")} | {r[0] for r in conn.execute("SELECT id FROM comic_refused")} | \
+               {r[0] for r in conn.execute("SELECT id FROM comic_reads WHERE furthest * 10 >= pages * 9 AND pages > 0")}
+    best = {}
+    for c, prior, why in _candidates(t):
+        if c["id"] in skip:
+            continue
+        tags = {x.replace("_", " ") for x in c.get("tags") or []}
+        s = prior + 0.25 * sum(w for g, w in t["tags"].items() if g.replace("_", " ") in tags)
+        if c["id"] not in best or best[c["id"]][0] < s:
+            best[c["id"]] = (s, c, why)
+    return [{**_card(c), "why": why} for s, c, why in sorted(best.values(), key=lambda x: -x[0])]
+
+
+def feed(offset: int) -> dict:
+    """{"updated", "continue", "comics": a page of For you, "more", "library" (first page only)}."""
+    if not 0 <= offset < 2000:
+        raise ValueError("bad page")
+    with _lock:
+        fresh = time.time() - _ranked["at"] < 600 and offset > 0
+        ranked = _ranked["list"] if fresh else None
+    if ranked is None:
+        ranked = _rank()
+        old = _stale(f"comic:{c['id']}" for c in ranked)
+        ranked = [c for c in ranked if f"comic:{c['id']}" not in old] + [c for c in ranked if f"comic:{c['id']}" in old]
+        with _lock:
+            _ranked.update(at=time.time(), list=ranked)
+    page = ranked[offset:offset + PAGE]
+    _now_shown([{"id": f"comic:{c['id']}"} for c in page])
+    out = {"comics": page, "more": offset + PAGE < len(ranked)}
+    if offset == 0:
+        with _conn() as conn:
+            out["updated"] = [{**json.loads(r["data"]), "pages": r["pages"], "new": r["pages"] - r["seen"]}
+                              for r in conn.execute("SELECT * FROM comic_follows WHERE pages > seen ORDER BY coalesce(new_at, at) DESC LIMIT 20")]
+            out["following"] = [{**json.loads(r["data"]), "pages": r["pages"]}
+                                for r in conn.execute("SELECT * FROM comic_follows WHERE pages <= seen ORDER BY at DESC LIMIT 40")]
+            out["continue"] = [{**json.loads(r["data"]), "page": r["page"], "pages": r["pages"]}
+                               for r in conn.execute("SELECT * FROM comic_reads WHERE furthest * 10 < pages * 9 AND furthest > 1"
+                                                     " AND id NOT IN (SELECT id FROM comic_follows) ORDER BY last_at DESC LIMIT 12")]
+        out["library"] = library()
+        t = taste()
+        out["taste"] = {"tags": [g for g, w in sorted(t["tags"].items(), key=lambda kv: -kv[1]) if w > 0.3][:8], "n": t["n"]}
+    return out
+
+
+# ---- your comics (kept here before: imported, or made) ----
 def _comic_meta(file: str) -> dict:
     return read_json((GENERATED / file).parent / "comic.json")
 
 
-def comics() -> dict:
-    """Finished comics (newest first), and the ones being made."""
-    out = {"comics": [], "making": []}
+def library() -> list[dict]:
+    out = []
     with db() as conn:
-        for r in conn.execute("SELECT g.id, g.caption, g.persona, g.file, g.created_at, g.status, p.name FROM generations g"
-                              " LEFT JOIN personas p ON p.handle = g.persona"
-                              " WHERE g.kind = 'comic' AND g.status = 'comic'"
-                              " ORDER BY g.id DESC LIMIT 100"):
+        for r in conn.execute("SELECT g.id, g.caption, g.file, g.created_at FROM generations g"
+                              " WHERE g.kind = 'comic' AND g.status = 'comic' ORDER BY g.id DESC LIMIT 200"):
             meta = _comic_meta(r["file"])
-            out["comics"].append({"id": r["id"], "title": r["caption"] or "", "persona": r["persona"],
-                                  "name": r["name"] or r["persona"], "pages": len(meta.get("pages") or [1]),
-                                  "cast": meta.get("cast") or [], "story": meta.get("story", ""),
-                                  "imported": bool(meta.get("imported")),
-                                  "updated": meta.get("updated"),
-                                  "panels": meta.get("panels") or {},
-                                  "outlines": meta.get("outlines") or {},
-                                  "animations": [{"page": a["page"], "box": a["box"], "name": Path(a["file"]).name,
-                                                  "mask": Path(a["mask"]).name if a.get("mask") else None}
-                                                 for a in meta.get("animations") or []],
-                                  "created": r["created_at"]})
-        # Comic jobs that failed in the last day, with why: they'd otherwise just vanish from "being made".
-        out["failed"] = []
-        for r in conn.execute("SELECT id, params, message, finished_at FROM jobs WHERE status = 'failed'"
-                              " AND params LIKE '%\"kind\": \"comic%' AND finished_at >= datetime('now', '-1 day')"
-                              " ORDER BY id DESC LIMIT 10"):
-            if _retried(conn, r["id"], r["params"]):   # tried again since: that one shows instead
-                continue
-            params = json.loads(r["params"])
-            what = {"comic": "Making a comic", "comic_import": "Importing a comic",
-                    "comic_update": "Looking for new pages",
-                    "comic_animate": f"Animating a panel on page {params.get('page')}"}.get(params.get("kind"))
-            if not what:
-                continue
-            title = ""
-            if params.get("id"):
-                row = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
-                title = row["caption"] if row else ""
-            out["failed"].append({"job": r["id"], "what": what, "title": title or params.get("url", ""),
-                                  "message": r["message"] or "", "finished": r["finished_at"]})
-        for r in conn.execute("SELECT j.id, j.params, j.status, r.progress FROM jobs j LEFT JOIN runs r ON r.night = j.night"
-                              " WHERE j.status IN ('queued', 'running') AND j.params LIKE '%\"kind\": \"comic%'"):
-            params = json.loads(r["params"])
-            if params.get("kind") not in ("comic", "comic_import", "comic_animate", "comic_update"):
-                continue
-            item = {"job": r["id"], "status": r["status"], "progress": json.loads(r["progress"]) if r["progress"] else None}
-            if params["kind"] == "comic_import":
-                item |= {"imported": True, "title": params.get("title") or "", "url": params["url"]}
-            elif params["kind"] == "comic_update":
-                title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone() \
-                    if params.get("id") else None
-                item |= {"imported": True, "title": title["caption"] if title else "Every imported comic",
-                         "url": "looking for new pages"}
-            elif params["kind"] == "comic_animate":
-                title = conn.execute("SELECT caption FROM generations WHERE id = ?", (params["id"],)).fetchone()
-                item |= {"imported": True, "title": title["caption"] if title else "",
-                         "url": f"animating a panel of page {params['page']}",
-                         "comic": params["id"], "page": params["page"], "box": params["box"]}
-            else:
-                item |= {"cast": params["cast"], "story": params["story"], "pages": params["pages"]}
-            out["making"].append(item)
+            out.append({"id": r["id"], "title": r["caption"] or meta.get("title") or "", "pages": len(meta.get("pages") or [1]),
+                        "imported": bool(meta.get("imported")), "source": meta.get("source"), "created": r["created_at"]})
     return out
 
 
+def comics() -> dict:
+    """Your comics (the iOS app's list: they're its library now)."""
+    return {"comics": [{**c, "cast": [], "story": "", "animations": [], "panels": {}, "outlines": {}} for c in library()],
+            "making": [], "failed": []}
+
+
 def comic_page(gid: int, n: int, thumb: bool = False) -> Path | None:
-    """Page n of a comic; thumb: its small copy (the page itself if there's none yet)."""
+    """Page n of one of your comics; thumb: its small copy (the page itself if there's none)."""
     with db() as conn:
         row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic'", (gid,)).fetchone()
     if not row:
         return None
     meta = _comic_meta(row["file"])
-    pages = (meta.get("thumbs") if thumb else None) \
-        or meta.get("pages") or [row["file"]]
+    pages = (meta.get("thumbs") if thumb else None) or meta.get("pages") or [row["file"]]
     if not 1 <= n <= len(pages):
         return None
     path = (GENERATED / pages[n - 1]).resolve()
     return path if path.is_relative_to(GENERATED.resolve()) and path.is_file() else None
 
 
-def queue_comic(req: dict) -> dict:
-    """{"cast": [persona, persona | "partner"], "story", "pages"}: checked here as the worker checks it."""
-    cast = req.get("cast")
-    if not isinstance(cast, list) or len(cast) != 2:
-        raise ValueError("pick two characters")
-    every = {p.handle: p for p in people.parse(read_personas())}
-    a = every.get(str(cast[0]))
-    if not a or not a.lora:
-        raise ValueError("the first character must be a persona with a trained style")
-    if cast[1] != "partner":
-        b = every.get(str(cast[1]))
-        if not b or b.handle == a.handle:
-            raise ValueError("pick a second persona, or her partner")
-        if b.medium != a.medium:
-            raise ValueError(f"@{a.handle} is {a.medium} and @{b.handle} is {b.medium}")
-        if a.strict or b.strict:
-            raise ValueError("personas using the strict checks can't be in a comic together")
-    story = " ".join(str(req.get("story") or "").split())
-    if not story:
-        raise ValueError("write a few words of story")
-    if len(story) > COMIC_STORY:
-        raise ValueError(f"keep the story under {COMIC_STORY} characters")
-    bad = safety.story_blocked(story)
-    if bad:
-        raise ValueError(f"the story can't include: {', '.join(bad)}")
-    try:
-        pages = int(req.get("pages", 1))
-    except (TypeError, ValueError):
-        raise ValueError("bad page count")
-    if not 1 <= pages <= COMIC_PAGES:
-        raise ValueError(f"1 to {COMIC_PAGES} pages")
-    with db() as conn:
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
-            {"kind": "comic", "cast": [a.handle, str(cast[1])], "story": story, "pages": pages}),)).lastrowid
-    return {"job": jid}
-
-
-def queue_comic_import(req: dict) -> dict:
-    """{"url", "title", "medium"}: a comic from its gallery's link, kept as drawn."""
-    url = str(req.get("url") or "").strip()
-    if not re.match(r"https?://[^\s/]+\.[^\s/]+/\S*$", url):
-        raise ValueError("paste a link to the comic's gallery")
-    if re.match(r"https?://(www\.)?multporn\.net/sites/", url):
-        raise ValueError("that's multporn's full-screen viewer, which doesn't say which comic it shows: "
-                         "paste the comic's own page instead (multporn.net/comics/...)")
-    title = " ".join(str(req.get("title") or "").split())[:COMIC_TITLE]
-    medium = req.get("medium")
-    if medium not in MEDIUMS:
-        raise ValueError("pick furry or anime")
-    bad = safety.story_blocked(f"{title} {url}")
-    if bad:
-        raise ValueError(f"the comic can't include: {', '.join(bad)}")
-    with db() as conn:
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(
-            {"kind": "comic_import", "url": url, "title": title, "medium": medium}),)).lastrowid
-    return {"job": jid}
-
-
-def queue_comic_update(req: dict) -> dict:
-    """{"id": N}: look for new pages of that imported comic now (they're looked for daily anyway)."""
-    try:
-        gid = int(req["id"])
-    except (KeyError, TypeError, ValueError):
-        raise ValueError('send {"id": number}')
-    _, meta = _finished_comic(gid)
-    if not meta.get("imported"):
-        raise ValueError("only imported comics have a source to look at")
-    with db() as conn:
-        if conn.execute("SELECT 1 FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
-                        (json.dumps({"kind": "comic_update", "id": gid}),)).fetchone():
-            raise ValueError("already looking")
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')",
-                           (json.dumps({"kind": "comic_update", "id": gid}),)).lastrowid
-    return {"job": jid}
-
-
-ANIMATE_MOTION = 200      # characters of "what moves"
-ANIMATE_CASTS = ("woman", "women", "woman and man", "man", "men")   # comicanim.CASTS
-OUTLINE_LOOPS = 8         # loops drawn around what moves, per panel
-OUTLINE_POINTS = 2000     # per loop
-
-
 def _finished_comic(gid: int) -> tuple[Path, dict]:
     with db() as conn:
-        row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic' AND status = 'comic'",
-                           (gid,)).fetchone()
+        row = conn.execute("SELECT file FROM generations WHERE id = ? AND kind = 'comic' AND status = 'comic'", (gid,)).fetchone()
     if not row:
         raise LookupError("no such comic")
     folder = (GENERATED / row["file"]).parent.resolve()
     if not folder.is_relative_to(GENERATED.resolve()):
         raise LookupError("no such comic")
     return folder, read_json(folder / "comic.json")
-
-
-def queue_comic_animation(req: dict) -> dict:
-    """{"id", "page" (from 1), "box": [x0, y0, x1, y1] shares of the page, "motion", "cast",
-    "outline": [[[x, y], ...], ...] loops drawn around what moves, shares of the page (optional;
-    they may reach past the panel)}: one panel animated into a short loop."""
-    gid = int(req.get("id", 0))
-    folder, meta = _finished_comic(gid)
-    try:
-        page = int(req.get("page", 0))
-    except (TypeError, ValueError):
-        raise ValueError("bad page")
-    if not 1 <= page <= len(meta.get("pages") or []):
-        raise ValueError("bad page")
-    box = req.get("box")
-    if not isinstance(box, list) or len(box) != 4 or not all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in box):
-        raise ValueError("bad panel")
-    x0, y0, x1, y1 = (round(float(v), 4) for v in box)
-    if x1 - x0 < 0.05 or y1 - y0 < 0.05:
-        raise ValueError("that panel is too small")
-    motion = " ".join(str(req.get("motion") or "").split())
-    if len(motion) > ANIMATE_MOTION:
-        raise ValueError(f"keep it under {ANIMATE_MOTION} characters")
-    bad = safety.request_blocked(motion)
-    if bad:
-        raise ValueError(f"can't include: {', '.join(bad)}")
-    cast = str(req.get("cast") or "")
-    if cast and cast not in ANIMATE_CASTS:
-        raise ValueError("bad choice of who's in it")
-    outline = req.get("outline") or []
-    if not isinstance(outline, list) or len(outline) > OUTLINE_LOOPS:
-        raise ValueError(f"at most {OUTLINE_LOOPS} outlines")
-    loops = []
-    for loop in outline:
-        if not isinstance(loop, list) or not 3 <= len(loop) <= OUTLINE_POINTS or not all(
-                isinstance(q, list) and len(q) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in q) for q in loop):
-            raise ValueError("bad outline")
-        loops.append([[round(float(x), 4), round(float(y), 4)] for x, y in loop])
-    params = {"kind": "comic_animate", "id": gid, "page": page, "box": [x0, y0, x1, y1], "motion": motion, "cast": cast}
-    if loops:
-        params["outline"] = loops
-    with db() as conn:
-        if conn.execute("SELECT count(*) FROM jobs WHERE status IN ('queued', 'running') AND params = ?",
-                        (json.dumps(params),)).fetchone()[0]:
-            raise ValueError("this exact animation is already waiting")
-        jid = conn.execute("INSERT INTO jobs(params, status) VALUES (?, 'queued')", (json.dumps(params),)).lastrowid
-    return {"job": jid}
-
-
-def delete_comic_animation(req: dict) -> dict:
-    """{"id", "index"}: an animated panel back to the still page."""
-    gid, index = int(req.get("id", 0)), int(req.get("index", -1))
-    folder, meta = _finished_comic(gid)
-    anims = meta.get("animations") or []
-    if not 0 <= index < len(anims):
-        raise LookupError("no such animation")
-    gone = anims.pop(index)
-    for file in (gone["file"], gone.get("mask")):
-        path = (GENERATED / file).resolve() if file else None
-        if path and path.is_relative_to(folder):
-            path.unlink(missing_ok=True)
-    (folder / "comic.json").write_text(json.dumps(meta | {"animations": anims}, ensure_ascii=False, indent=1))
-    return {"ok": True}
-
-
-def comic_animation(gid: int, name: str) -> Path | None:
-    """A comic's clip, or the mask of what moves in it, by its file name (names are never
-    reused, so a cached copy is the right one)."""
-    try:
-        folder, meta = _finished_comic(gid)
-    except LookupError:
-        return None
-    for a in meta.get("animations") or []:
-        for file in (a["file"], a.get("mask")):
-            if file and Path(file).name == name:
-                path = (GENERATED / file).resolve()
-                return path if path.is_relative_to(folder) and path.is_file() else None
-    return None
 
 
 def rename_comic(req: dict) -> dict:

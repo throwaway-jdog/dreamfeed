@@ -132,6 +132,41 @@ class Refusals(unittest.TestCase):
                 videos.vote(bad)
 
 
+class Comics(unittest.TestCase):
+    """Drawn work: words dreamfeed never allows leave a comic out; what's asked is checked."""
+    def test_words(self):
+        from dreamfeed.feed import comics
+        for t in ("loli comic", "young", "cub", "feral", "shota"):
+            self.assertTrue(comics.blocked(t), t)
+        for t in ("wolf solo", "Youngblood", "big tits", "furry"):
+            self.assertFalse(comics.blocked(t), t)
+
+    def test_refused(self):
+        from webapp import comics
+        for bad in ({"id": "x", "page": 1}, {"id": "e621:1", "page": 0}, {"id": "mp:../x", "page": 2}):
+            with self.assertRaises(ValueError):
+                comics.progress(bad)
+        for bad in ("", "x:1", "e621:abc", "mp:A B"):
+            with self.assertRaises(ValueError):
+                from dreamfeed.feed import comics as live
+                live.comic(bad)
+
+
+class E621Files(unittest.TestCase):
+    """Only e621's own file paths are passed on (the page's e621 pictures and videos)."""
+    def test_paths(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("app_under_test", "/app/app.py")
+        src = open("/app/app.py").read()
+        import re
+        pat = re.compile(re.search(r'E621_FILE = re.compile\(r"(.+?)"\)', src).group(1))
+        for ok in ("data/sample/58/bf/58bfd70175a849bdbef85ccefe1ee8e5.jpg", "data/0b/8f/0b8f0b8f0b8f0b8f0b8f0b8f0b8f0b8f.webm",
+                   "data/sample/0b/8f/0b8f0b8f0b8f0b8f0b8f0b8f0b8f0b8f_720p.mp4", "data/preview/a4/17/a417d12a5ae2b82f6f8d2db5962e3c03.jpg"):
+            self.assertTrue(pat.fullmatch(ok), ok)
+        for bad in ("data/../etc/passwd", "data/sample/58/bf/x.jpg", "api/posts.json", "data/58/bf/58bfd70175a849bdbef85ccefe1ee8e5.php"):
+            self.assertFalse(pat.fullmatch(bad), bad)
+
+
 class Contract(unittest.TestCase):
     """The app-contract checker itself finds what's wrong."""
     def test_finds_problems(self):

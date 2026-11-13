@@ -62,7 +62,7 @@ print(L.cookie_name + '=' + L.new_session())")
   started=$(date +%s)
   docker run --rm --network host -e URL="$URL" -e COOKIE="$cookie" -v "$PWD/tests":/t -w /t/browser "$PW" timeout 300 node browser.test.js \
     || failed+=(browser)
-  # (what the test watched isn't yours: it's taken out of what Videos learns from)
+  # (what the test watched and read isn't yours: it's taken out of what Videos and Comics learn from)
   docker exec -w /app dreamfeed-web python -c "
 from webapp import videos
 c = videos._conn()
@@ -70,6 +70,10 @@ with c:
     ids = [r[0] for r in c.execute('SELECT id FROM xv_watch WHERE first_at >= ?', ($started - 5,))]
     for i in ids:
         c.execute('DELETE FROM xv_watch WHERE id = ?', (i,)); c.execute('DELETE FROM xv_videos WHERE id = ?', (i,))
+from webapp import comics
+cc = comics._conn()
+with cc:
+    cc.execute('DELETE FROM comic_reads WHERE first_at >= ?', ($started - 5,))
 " || true
 fi
 

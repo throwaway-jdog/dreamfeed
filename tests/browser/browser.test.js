@@ -46,6 +46,36 @@ async function page(browser, opts) {
     await p.click("#xv-close");
     assert.deepStrictEqual(p.errs, []);
   });
+  await step("Feed: e621's pictures load (through dreamfeed: e621 turns away other sites' pages)", async () => {
+    const p = await page(browser, { viewport: { width: 1280, height: 900 } });
+    await p.goto(`${base}/feed`, { waitUntil: "networkidle" });
+    await p.evaluate(() => { try { localStorage.setItem("feedSource", "e621"); } catch {} });
+    await p.goto(`${base}/feed`, { waitUntil: "networkidle" }); await p.waitForTimeout(5000);
+    const ok = await p.evaluate(() => [...document.querySelectorAll("#f-posts img")].slice(0, 8).map(i => i.naturalWidth > 0));
+    await p.evaluate(() => { try { localStorage.removeItem("feedSource"); } catch {} });
+    if (!ok.length) { console.log("     (no e621 posts: skipped)"); return; }
+    assert.ok(ok.some(Boolean), `none of ${ok.length} e621 pictures loaded`);
+  });
+  await step("Comics: covers and pages load from the sites", async () => {
+    const p = await page(browser, { viewport: { width: 1280, height: 900 } });
+    await p.goto(`${base}/comics`, { waitUntil: "networkidle" });
+    await p.waitForSelector("#cg .comic-card", { timeout: 60000 }); await p.waitForTimeout(3000);
+    const covers = await p.evaluate(() => [...document.querySelectorAll("#cg .comic-card img")].slice(0, 12).map(i => ({ host: new URL(i.src, location.href).hostname, ok: i.complete && i.naturalWidth > 0 })));
+    for (const host of new Set(covers.map(c => c.host))) {
+      const mine = covers.filter(c => c.host === host);
+      assert.ok(mine.some(c => c.ok), `no cover from ${host} loaded (${mine.length} tried)`);
+    }
+    // (a comic can be refused once opened: a page with a word dreamfeed never allows. Then the next.)
+    const loaded = () => p.evaluate(() => { const i = document.querySelector("#rd-track img"); return !document.getElementById("reader").hidden && !!i && i.complete && i.naturalWidth > 0; });
+    let ok = false;
+    for (let n = 0; n < 3 && !ok; n++) {
+      await p.locator("#cg .comic-card").nth(n).click();
+      for (let i = 0; i < 20 && !(ok = await loaded()); i++) await p.waitForTimeout(1000);
+      if (!ok) { await p.goto(`${base}/comics`, { waitUntil: "networkidle" }); await p.waitForSelector("#cg .comic-card"); }
+    }
+    assert.ok(ok, "none of the first 3 comics showed its first page");
+    assert.deepStrictEqual(p.errs, []);
+  });
   await browser.close();
   process.exit(failed ? 1 : 0);
 })();

@@ -49,8 +49,8 @@ function vfAdd(posts) {
     const slide = el("section", "vf-slide"), v = el("video");
     v.playsInline = v.loop = true; v.muted = vf.muted; v.preload = vf.posts.length < 2 ? "auto" : "metadata";
     if (vf.posts.length < 2) v.dataset.warm = "1";
-    if (m.poster) v.poster = m.poster;
-    if (m.kind === "hls") feedHls(v, m); else v.src = m.url;
+    if (m.poster) v.poster = viaUs(m.poster);
+    if (m.kind === "hls") feedHls(v, m); else v.src = viaUs(m.url);
     v.onclick = () => { if (v.paused) v.play().catch(() => {}); else v.pause(); };
     const info = el("div", "vf-info"), who = el("span", "vf-who"), av = el("span", "av", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
     if (p.avatar) { const im = el("img"); im.alt = ""; im.src = p.avatar; av.append(im); }

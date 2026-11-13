@@ -176,7 +176,7 @@ function route() {
       return setView("liked");
     }
     case "live": showLivePage(b === "discover" ? "discover" : "following", state.view === "follow"); return setView("follow");
-    case "comics": setView("comics"); if (b) showComicId(b); return;
+    case "comics": setView("comics"); if (b) showComicId(b, c); return;
     case "dashboard": return setView("dash");
     case "vids": return setView("vids");
     case "personas": return showPersona("");
@@ -240,12 +240,6 @@ async function showRoomVideo(room, path) {
   if (i < 0) return go(`room/${enc(room)}`, true);
   pf.room = pf.room && pf.room.name === room ? pf.room : { name: room }; pf.videos = vids;
   pl.mode = "file"; pl.rooms = vids.slice(); pl.i = i; $("player").hidden = false; playFile();
-}
-// a comic by its address (once the list says what it is)
-async function showComicId(id) {
-  let d; try { d = await api("api/comics"); } catch (err) { return toast(err.message); }
-  const c = d.comics.find(x => String(x.id) === String(id));
-  if (c && here() === `comics/${enc(id)}`) showComic(c); else if (!c) go("comics", true);
 }
 
 

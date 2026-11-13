@@ -51,8 +51,12 @@ GET  /api/xvideos/video ?id=ID  one of them: its stream and files, for dreamfeed
 GET  /api/post         ?id=x:ID|reddit:ID|e621:ID  one post (its own page): your kept copy if you saved it, else live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
+GET  /e621-media/data/...  one of e621's files, passed on (the page shows e621's pictures and videos through here)
 GET  /vendor/hls.min.js the Live player's HLS library (hls.js, Apache 2.0)
-GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, link, cover), to import
+GET  /api/comics/feed  ?offset=N  Comics: Updated (followed, with new pages), Continue reading, For you, your comics
+GET  /api/comics/read  ?id=e621:POOL|mp:SLUG  one to read: its pages (straight from the site), where you left off
+POST /api/comics/follow {"id", "follow": bool}; POST /api/comics/progress {"id", "page"}  (what For you learns from)
+GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, cover)
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
 POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
@@ -74,7 +78,7 @@ POST /api/styles/cancel {"name": N} stop a style job
 POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
 POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
 POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
-POST /api/comics/update {"id": N} look for new pages of an imported comic now
+
 POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of a room's videos down to its action
 POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
 POST /api/live/restore  {"undo": token} put it back
@@ -103,7 +107,8 @@ import formlogin.httpserver
 from dreamfeed.feed import e621, livefeeds, savedposts
 from dreamfeed.live import cbprofile, cbvideos, linking
 
-from webapp.comics import comic_animation, comic_cover, comic_page, comic_search, comics, delete_comic, delete_comic_animation, queue_comic, queue_comic_animation, queue_comic_import, queue_comic_update, rename_comic
+from webapp import comics as comicfeed
+from webapp.comics import comic_cover, comic_page, comic_search, comics, delete_comic, rename_comic
 from webapp import health, videos
 from webapp.common import CSP, DATA, HANDLE, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
 from webapp.editor import cancel_style, cancel_video, delete_persona, draft_status, new_avatar, persona_config, queue_draft, queue_style, queue_video, save_persona, style_list
@@ -145,6 +150,41 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    E621_FILE = re.compile(r"data/(?:sample/|preview/)?[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{32}(?:_[a-z0-9]{1,12})?\.(?:jpe?g|png|gif|webp|webm|mp4)")
+
+    def send_e621(self, rest: str) -> None:
+        """One of e621's files, passed on (by ranges too, for its videos). e621 now turns away
+        pictures a browser shows on another site; the page asks here instead (the iOS app, which
+        doesn't say so, still loads them from e621 itself). Only e621's own file paths."""
+        import urllib.error
+        import urllib.request
+        if not self.E621_FILE.fullmatch(rest):
+            return self.send(404, {"error": "not an e621 file"})
+        headers = {"User-Agent": e621.agent()}
+        rng = self.headers.get("Range", "")
+        if re.fullmatch(r"bytes=\d*-\d*", rng):
+            headers["Range"] = rng
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(f"https://static1.e621.net/{rest}", headers=headers), timeout=30)
+        except urllib.error.HTTPError as e:
+            return self.send(e.code if e.code in (404, 416) else 502, {"error": f"e621 said {e.code}"})
+        except OSError as e:
+            return self.send(502, {"error": f"e621 didn't answer ({e})"})
+        with r:
+            self.send_response(r.status)
+            for h in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"):
+                if r.headers.get(h):
+                    self.send_header(h, r.headers[h])
+            self.send_header("Cache-Control", "private, max-age=2592000")      # (its files never change: named by what's in them)
+            for k, v in formlogin.SECURITY_HEADERS:
+                self.send_header(k, v)
+            self.end_headers()
+            try:
+                while chunk := r.read(1 << 16):
+                    self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def send_file(self, file: Path) -> None:
         """Images whole; videos also in byte ranges, which phones need to play them."""
@@ -239,12 +279,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(file)
         if path == "/api/comics":
             return self.send(200, comics())
+        if path in ("/api/comics/feed", "/api/comics/read"):
+            q = self.query()
+            try:
+                if path == "/api/comics/feed":
+                    return self.send(200, comicfeed.feed(int(q.get("offset", "0") or 0)))
+                return self.send(200, comicfeed.read(q.get("id", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except (LookupError, OSError) as e:
+                return self.send(502, {"error": str(e)[:200]})
         if path.startswith("/comic/"):
             parts = path.split("/")
-            if len(parts) == 5 and parts[2].isdigit() and parts[3] == "anim" and re.fullmatch(r"[\w.-]+\.(mp4|png)", parts[4]):
-                file = comic_animation(int(parts[2]), parts[4])
-                if file:
-                    return self.send_file(file)
             if len(parts) in (4, 5) and parts[2].isdigit() and parts[3].isdigit() and parts[4:] in ([], ["thumb"]):
                 file = comic_page(int(parts[2]), int(parts[3]), thumb=parts[4:] == ["thumb"])
                 if file:
@@ -455,6 +501,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ctype or not file.is_relative_to(STATIC) or not file.is_file():
                 return self.send(404, {"error": "not found"})
             return self.send(200, file.read_bytes(), ctype, cache="no-cache")
+        if path.startswith("/e621-media/"):
+            return self.send_e621(path[len("/e621-media/"):])
         if path == "/vendor/hls.min.js":
             return self.send(200, (Path(__file__).parent / "vendor" / "hls.min.js").read_bytes(),
                              "text/javascript; charset=utf-8", cache="private, max-age=604800")
@@ -494,9 +542,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel, "/api/retry": retry_job,
                    "/api/animate": request_animation, "/api/scene-acts": scene_acts,
-                   "/api/comics/create": queue_comic, "/api/comics/delete": delete_comic,
-                   "/api/comics/import": queue_comic_import, "/api/comics/rename": rename_comic,
-                   "/api/comics/animate": queue_comic_animation, "/api/comics/update": queue_comic_update, "/api/comics/animation-delete": delete_comic_animation,
+                   "/api/comics/delete": delete_comic, "/api/comics/rename": rename_comic,
+                   "/api/comics/follow": comicfeed.follow, "/api/comics/progress": comicfeed.progress,
                    "/api/personas/save": save_persona,
                    "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
                    "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
@@ -544,6 +591,7 @@ if __name__ == "__main__":
         icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
              "<circle cx='8' cy='8' r='6' fill='%23e5604a'/></svg>")
     print(time.strftime("%F %T"), f"web: feed on :{PORT}", flush=True)
+    threading.Thread(target=comicfeed.watch_follows, daemon=True).start()
     threading.Thread(target=_link_sweep, daemon=True).start()
     threading.Thread(target=_dvr_once_watch, daemon=True).start()
     if BROWSER_POWER_DIR and BROWSER_PROFILE and BROWSER_SCREEN:

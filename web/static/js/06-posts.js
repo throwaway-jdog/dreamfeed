@@ -63,7 +63,7 @@ function commentEl(c, source) {
   if (c.text) main.append(el("p", "cm-text", c.text));
   if ((c.media || []).length) {
     const m = el("div", "cm-media");
-    for (const u of c.media) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = u; m.append(im); }
+    for (const u of c.media) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = viaUs(u); m.append(im); }
     main.append(m);
   }
   box.append(av, main);
@@ -124,12 +124,12 @@ function postCard(p, opened) {
     const box = el("div", "media");
     if (m.kind === "video" || m.kind === "hls") {
       const v = el("video"); v.controls = v.loop = v.playsInline = true; v.preload = "none";
-      if (m.poster) v.poster = m.poster;
-      if (m.kind === "video") v.src = m.url; else feedHls(v, m);
+      if (m.poster) v.poster = viaUs(m.poster);
+      if (m.kind === "video") v.src = viaUs(m.url); else feedHls(v, m);
       box.append(v); playObs.observe(v);
     } else {
-      const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = opened && m.full ? m.full : m.url; box.append(img);
-      if (opened && m.full) img.onerror = () => { if (img.src !== m.url) img.src = m.url; };
+      const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = viaUs(opened && m.full ? m.full : m.url); box.append(img);
+      if (opened && m.full) img.onerror = () => { if (!img.src.endsWith(viaUs(m.url))) img.src = viaUs(m.url); };
       if (canOpen) { box.classList.add("go"); box.onclick = () => openPost(p); }
       else if (opened) { box.classList.add("go"); box.onclick = () => openPicture(img.src); }
     }

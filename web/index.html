@@ -182,53 +182,19 @@
     </div>
   </section>
   <section class="profile" id="profile" hidden></section>
-  <section class="dash" id="comics" hidden aria-label="Comics">
-    <form class="panel" id="c-form" novalidate>
-      <h2>New comic</h2>
-      <p class="note">Two characters and a story. The comic is planned, written in their voices, drawn panel by panel and lettered. Each page has 4 panels and takes about 6 minutes.</p>
-      <label class="field"><span>First character <small>a persona with a trained style</small></span><select class="in" id="c-a"></select></label>
-      <label class="field"><span>Second character</span><select class="in" id="c-b"></select></label>
-      <label class="field"><span>Story <small>a few sentences: where they are, what happens, the mood</small></span>
-        <textarea class="in" id="c-story" rows="4" maxlength="600" placeholder="They come home soaked from the rain and decide to warm up together."></textarea></label>
-      <div class="field"><span>Pages</span>
-        <div class="seg" id="c-pages" role="group" aria-label="Pages">
-          <button type="button" data-n="1" aria-pressed="true">1</button><button type="button" data-n="2" aria-pressed="false">2</button>
-          <button type="button" data-n="3" aria-pressed="false">3</button><button type="button" data-n="4" aria-pressed="false">4</button>
-        </div></div>
-      <div class="ed-err" id="c-err" role="alert"></div>
-      <button class="primary" type="submit" id="c-go">Make the comic</button>
-    </form>
-    <div class="panel" id="cs-panel">
-      <h2>Find a comic</h2>
-      <p class="note">Search multporn or e621's comics and import what you like. Its pages are checked like every import.</p>
-      <div class="seg two" id="cs-site" role="group" aria-label="Where">
-        <button type="button" data-site="multporn" aria-pressed="true">multporn</button><button type="button" data-site="e621" aria-pressed="false">e621</button></div>
-      <form class="mk-row cs-row" id="cs-form" novalidate><input class="in" id="cs-q" type="search" maxlength="100" placeholder="Title, artist or character" enterkeyhint="search">
-        <button class="primary" type="submit" id="cs-go">Search</button></form>
-      <div class="field"><span>Drawn as</span>
-        <div class="seg two" id="cs-medium" role="group" aria-label="Drawn as">
-          <button type="button" data-m="furry" aria-pressed="true">Furry</button><button type="button" data-m="anime" aria-pressed="false">Anime</button>
-        </div></div>
-      <div class="ed-err" id="cs-err" role="alert"></div>
-      <div class="comic-list" id="cs-list"></div>
-      <button type="button" class="secondary" id="cs-more" hidden>More results</button>
-    </div>
-    <form class="panel" id="ci-form" novalidate>
-      <h2>Import a comic</h2>
-      <p class="note">Its pages are downloaded and checked like everything else, then kept as drawn, ready to read and to animate panels of.</p>
-      <label class="field"><span>Link <small>the comic's gallery (multporn, e621 pool, booru, Twitter thread... anything the downloader reads)</small></span>
-        <input class="in" id="ci-url" type="url" placeholder="https://"></label>
-      <label class="field"><span>Title <small>optional</small></span><input class="in" id="ci-title" maxlength="100"></label>
-      <div class="field"><span>Drawn as</span>
-        <div class="seg" id="ci-medium" role="group" aria-label="Drawn as">
-          <button type="button" data-m="furry" aria-pressed="true">Furry</button><button type="button" data-m="anime" aria-pressed="false">Anime</button>
-        </div></div>
-      <div class="ed-err" id="ci-err" role="alert"></div>
-      <button class="primary" type="submit" id="ci-go">Import</button>
-    </form>
-    <div class="panel" id="c-making-panel" hidden><h2>Being made</h2><ul class="plist" id="c-making"></ul></div>
-    <div class="panel" id="c-failed-panel" hidden><h2>Didn't work</h2><p class="hint">In the last day.</p><ul class="plist" id="c-failed"></ul></div>
-    <div class="panel"><h2>Comics</h2><p class="note" id="c-none">No comics yet.</p><div class="comic-list" id="c-list"></div></div>
+  <section class="vids comics" id="comics" hidden aria-label="Comics">
+    <form class="vs-form" id="cs-form" role="search">
+      <input class="in" id="cs-q" type="search" maxlength="100" placeholder="Search comics: a title, an artist, a character" autocomplete="off">
+      <select class="in" id="cs-site" aria-label="Where"><option value="multporn">multporn</option><option value="e621">e621</option></select>
+      <button type="submit" class="primary">Search</button></form>
+    <div class="vs-section" id="cu-sec" hidden><h2>Updated</h2><div class="vrow" id="cu-row"></div></div>
+    <div class="vs-section" id="cc-sec" hidden><h2>Continue reading</h2><div class="vrow" id="cc-row"></div></div>
+    <div class="vs-section"><div class="vs-head"><h2 id="cg-title">For you</h2><button type="button" class="secondary" id="cg-back" hidden>Back to For you</button></div>
+      <p class="note" id="cg-note"></p><div class="comic-list" id="cg"></div>
+      <button type="button" class="secondary more" id="cg-more" hidden>More</button></div>
+    <div class="vs-section" id="cf-sec" hidden><h2>Following</h2><div class="vrow" id="cf-row"></div></div>
+    <div class="vs-section" id="cl-sec" hidden><h2>Your comics</h2><p class="note">Kept here before: read them here, or rename or delete them from their grid of pages.</p>
+      <div class="comic-list" id="c-list"></div></div>
   </section>
   <section class="vids" id="vids" hidden aria-label="Videos">
     <form class="vs-form" id="vs-form" role="search">
@@ -378,10 +344,11 @@
   </div>
   <div class="reader" id="reader" hidden role="dialog" aria-label="Comic">
     <div class="reader-bar"><span id="reader-title"></span>
+      <button type="button" class="secondary" id="reader-follow" hidden aria-pressed="false">Follow</button>
+      <a class="secondary" id="reader-open" target="_blank" rel="noreferrer noopener" hidden>↗</a>
       <button type="button" class="secondary" id="reader-view" aria-pressed="false">Grid</button>
-      <button type="button" class="secondary" id="reader-animate" hidden aria-pressed="false">Animate</button>
       <button type="button" class="secondary" id="reader-close">Close</button></div>
-    <p class="hint rd-help" id="rd-help" hidden>Tap a panel to animate it into a short loop, or drag a box around one. Queue as many as you like; change page with the arrows. Tap Done to leave.</p>
+    <p class="note rd-msg" id="rd-msg" hidden></p>
     <div class="rd-track" id="rd-track" tabindex="-1" aria-label="Pages"></div>
     <div class="rd-grid" id="rd-grid" hidden></div>
     <div class="rd-foot" id="rd-foot">
@@ -389,23 +356,6 @@
       <span id="rd-count"></span>
       <button type="button" class="secondary" id="rd-next" aria-label="Next page">&#8250;</button>
     </div>
-    <form class="rd-ask" id="rd-ask" hidden>
-      <b>Animate this panel</b>
-      <label class="field"><span>What moves <small>optional: e.g. "squirting", "tail swishing, steam rising". Without it, small natural movements (or the act's own motion).</small></span>
-        <input class="in" id="rd-motion" maxlength="200"></label>
-      <div class="field rd-outline"><span>Only these move <small>speech bubbles and text always stay still. Outlined characters move and the background stays still; the characters found are outlined to start with. Undo or clear what's wrong and draw your own. A loop can reach past the panel, for a character breaking out of it.</small></span>
-        <div class="mk-row"><button type="button" class="secondary" id="rd-draw" aria-pressed="false">Draw around them</button>
-          <button type="button" class="secondary" id="rd-undo-loop" hidden>Undo</button>
-          <button type="button" class="secondary" id="rd-clear-loops" hidden>Clear</button>
-          <button type="button" class="secondary" id="rd-found" hidden>Outline the characters</button><span class="hint" id="rd-loops"></span></div></div>
-      <label class="field"><span>Who's in it <small>if the picture is hard to read, e.g. a close-up</small></span>
-        <select class="in" id="rd-cast">
-          <option value="">Work it out from the picture</option><option value="woman">A woman</option><option value="women">Two women</option>
-          <option value="woman and man">A woman and a man</option><option value="man">A man</option><option value="men">Two men</option>
-        </select></label>
-      <div class="ed-err" id="rd-err" role="alert"></div>
-      <div class="mk-row"><button type="button" class="secondary" id="rd-cancel">Cancel</button><button class="primary" type="submit" id="rd-go">Animate</button></div>
-    </form>
   </div>
   <div class="saved-bar" id="saved-bar" hidden>
     <div class="seg" id="saved-src" role="group" aria-label="Show">

@@ -62,4 +62,6 @@ function fillAvatar(a, who) {
   if (who && who.avatar) { const i = new Image(); i.alt = ""; i.loading = "lazy"; i.src = `avatar/${who.handle}`; a.append(i); }
   else a.textContent = (who?.name || "?").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 1).toUpperCase() || "·";
 }
-
+// e621's files, through dreamfeed: e621 turns away pictures a browser shows on another site
+// (the API keeps e621's own addresses: the iOS app loads them itself).
+const viaUs = u => typeof u === "string" && u.startsWith("https://static1.e621.net/data/") ? "e621-media/" + u.slice(25) : u;

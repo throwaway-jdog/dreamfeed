@@ -39,6 +39,10 @@ APP_POSTS = ["api/feedback", "api/live/follow", "api/following/settings", "api/s
              "api/e621/vote", "api/comics/update", "api/comics/rename", "api/comics/create", "api/comics/animation-delete",
              "api/comics/animate", "api/signins", "api/personas/draft"]
 
+# Addresses dreamfeed has stopped answering on purpose (the app is to stop calling them): listed,
+# not failed. (Comics are read live now: they aren't made, imported or animated any more.)
+RETIRED = {"api/comics/create", "api/comics/import", "api/comics/animate", "api/comics/update", "api/comics/animation-delete"}
+
 PRIMS = {"String": (str,), "Int": (int,), "Double": (int, float), "Float": (int, float), "Bool": (bool,),
          "JSONObject": (dict,), "JSONValue": None, "URL": (str,)}
 problems: list[str] = []
@@ -118,9 +122,16 @@ def main() -> int:
     cookie = f"{login.cookie_name}={login.new_session()}"
 
     routes = Path("/app/app.py").read_text()
+    retired = []
     for path in sorted(set(APP_GETS) | set(APP_POSTS)):
-        if f'"/{path}"' not in routes:
+        if f'"/{path}"' in routes:
+            continue
+        if path in RETIRED:
+            retired.append("/" + path)
+        else:
             problems.append(f"/{path}: the app calls it, dreamfeed has no such address")
+    if retired:
+        print("retired (the app is to stop calling these): " + ", ".join(retired))
 
     asked = {}
     def ask(path, **q):
