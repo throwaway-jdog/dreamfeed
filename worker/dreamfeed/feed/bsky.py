@@ -22,6 +22,7 @@ from .common import COMMENT_DEPTH, MAX_COMMENTS, MAX_GALLERY, SUBS_TTL, WHO_TTL,
 # someone's posts with media. Its pictures (cdn.bsky.app) and videos (HLS from video.bsky.app) play here.
 BSKY_ENTRY = "https://bsky.social"
 BSKY_DISCOVER = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
+BSKY_STOCK = "at://did:plc:z72i7hdynmk6r22z27h6tvur/"        # Bluesky's own feeds (its account's)
 BSKY_PAGE = 40
 BSKY_FEEDS = 10           # your feeds mixed into For you, at most
 BSKY_FEED_PAGE = 20       # posts read from each a page
@@ -150,8 +151,9 @@ def _bsky_list(items: list, via: str) -> list[dict]:
 
 
 def _bsky_my_feeds() -> list[dict]:
-    """Your own feeds on Bluesky: those you pinned (in your order), else those you saved; else
-    its Discover. [{"uri", "name"}]."""
+    """Your own feeds on Bluesky: those you pinned (in your order), else those you saved, leaving
+    out Bluesky's own (Discover and the like) when there are others; else its Discover.
+    [{"uri", "name"}]."""
     prefs = _bsky("app.bsky.actor.getPreferences").get("preferences") or []
     pinned, saved = [], []
     for pref in prefs:
@@ -163,7 +165,11 @@ def _bsky_my_feeds() -> list[dict]:
         elif t.endswith("savedFeedsPref"):       # (Bluesky's older form of the same)
             saved += [u for u in pref.get("saved") or [] if str(u).startswith("at://")]
             pinned += [u for u in pref.get("pinned") or [] if str(u).startswith("at://")]
-    uris = list(dict.fromkeys(pinned or saved))[:BSKY_FEEDS] or [BSKY_DISCOVER]
+    uris = list(dict.fromkeys(pinned or saved))
+    # Bluesky's own feeds (Discover, Popular With Friends ...) are pinned for everyone: with feeds of
+    # your own pinned, those are what For you is (Bluesky's only when they're all you have)
+    own = [u for u in uris if not u.startswith(BSKY_STOCK)]
+    uris = (own or uris)[:BSKY_FEEDS] or [BSKY_DISCOVER]
     names = {}
     try:
         for g in _bsky("app.bsky.feed.getFeedGenerators", {"feeds": uris}).get("feeds") or []:
