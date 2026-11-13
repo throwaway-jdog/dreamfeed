@@ -1,13 +1,10 @@
 """dreamfeed feed page. Everything except the sign-in page needs a signed-in session (formlogin).
 
 GET  /                  the page
-GET  /api/feed          ?view=feed|liked&medium=all|anime|furry&persona=HANDLE&offset=N
-GET  /api/personas      the fictional posters, with post and like counts
-GET  /avatar/<handle>   profile picture
-GET  /api/summary       counts and the last run, for the header
-GET  /thumb/<id>        small JPEG for the grid
-GET  /img/<id>          full image for the viewer
-GET  /api/dashboard     queue and recent runs
+GET  /api/feed          ?view=liked&source=all|x|bsky|reddit|e621&offset=N  Saved (the persona posts are gone: other views are empty)
+GET  /api/summary       how many of your rooms are live, for the header (and the iOS app's old fields, empty)
+GET  /api/personas, /api/personas/edit, /api/styles, /api/dashboard, /api/personas/draft  empty: the personas and
+                        the generation pipeline are retired (webapp/retired.py), these only so the iOS app shows nothing
 GET  /api/following     the Chaturbate rooms you follow, live first (kept by the follow service)
 GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
 GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address), or why there isn't one
@@ -65,19 +62,6 @@ GET  /api/following/posts  ?mode=following|foryou&source=all|x,bsky,reddit,e621&
                         (source: all, or the sites you picked, with commas)
                            (tags: e621 only shows posts with them)
                         (its pictures and videos load from them); what you save is in Saved (/api/feed?view=liked)
-GET  /api/personas/edit every persona as stored in data/personas.json, plus the trained styles
-POST /api/personas/save {"persona": {...}, "original": HANDLE|null} add or change one (checked first)
-POST /api/personas/delete  {"handle": H} remove one; their posts leave the timeline
-POST /api/personas/avatar  {"handle": H} new profile picture the next time they post
-POST /api/personas/draft   {"description": "..."} have the worker draft a whole persona from it
-GET  /api/personas/draft   ?job=N its progress, and the draft when ready (opened in the editor)
-GET  /api/styles        trained and in-progress style LoRAs
-POST /api/styles/train  {"name", "medium", "source", "limit", "steps", "videos"} download, check and train one
-                        (videos: the artist only posts animations; frames of them are the pictures)
-POST /api/styles/cancel {"name": N} stop a style job
-POST /api/feedback      {"id": N, "action": "like"|"skip"|"clear"}
-POST /api/generate      {"images": N, "keep": K, "mediums": [...], "personas": [...]} queue a generation run
-POST /api/cancel        {"night": "..."} or {"job": N} stop a run or queued request
 
 POST /api/live/highlights {"name": ROOM, "path": P, "keep": 0.1-0.5} cut one of a room's videos down to its action
 POST /api/live/delete   {"name": ROOM, "path": P} a room's video into the trash ({"undo": token})
@@ -90,8 +74,6 @@ POST /api/saved/import  {"sites": ["x", "bsky", "reddit", "e621"]} bring what yo
                         X's and Bluesky's bookmarks, Reddit's saved posts, e621's favorites; all when not given)
 GET  /api/saved/import  how that went, and how many saved posts' files are kept
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
-POST /api/animate       {"id": N, "prompt": "..."} or {"count": N} make Wan 2.2 clips from feed images;
-                        {"id": N, "scene": true} makes a ~1 minute scene from a post with two characters
 (POSTs are JSON only.)
 """
 import json
@@ -109,12 +91,10 @@ from dreamfeed.live import cbprofile, cbvideos, linking
 
 from webapp import comics as comicfeed
 from webapp.comics import comic_cover, comic_page, comic_search, comics, delete_comic, rename_comic
-from webapp import health, videos
-from webapp.common import CSP, DATA, HANDLE, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
-from webapp.editor import cancel_style, cancel_video, delete_persona, draft_status, new_avatar, persona_config, queue_draft, queue_style, queue_video, save_persona, style_list
+from webapp import health, retired, videos
+from webapp.common import CSP, DATA, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
 from webapp.feed import FRESH_READS, _mark_saved, _seen, _unshown, browse, e621_vote, follow_posts, follow_settings, import_saved, import_status, more_videos, one_post, person_posts, random_subreddit, recent_browses, save_follow_settings, save_post, saved_file, saved_view
 from webapp.live import _dvr_once_watch, _followed, _link_sweep, cb_thumb, delete_room_video, discover_cb, discover_x, dvr_action, follow_room, follow_thumb, following, live_stream, live_videos, profile, queue_highlights, relink, restore_room_video, save_link
-from webapp.posts import avatar_path, cancel, dashboard, feed, image_path, personas, queue_generation, request_animation, retry_job, scene_acts, set_feedback, summary
 from webapp.signins import BROWSER_POWER_DIR, BROWSER_PROFILE, BROWSER_SCREEN, _browser_keeper, browser_start, reddit_callback, reddit_login_url, save_signin, signins
 
 
@@ -249,34 +229,17 @@ class Handler(BaseHTTPRequestHandler):
                 offset = max(0, int(q.get("offset", "0")))
             except ValueError:
                 return self.send(400, {"error": "offset must be a number"})
-            persona = q.get("persona", "")
-            if persona and not HANDLE.match(persona):
-                return self.send(400, {"error": "bad persona"})
             if q.get("view") == "liked":
-                return self.send(200, saved_view(q.get("medium", "all"), offset, q.get("source", "all")))
-            gid = q.get("id", "")
-            if gid and not gid.isdigit():
-                return self.send(400, {"error": "bad id"})
-            return self.send(200, feed(q.get("view", "feed"), q.get("medium", "all"), offset, persona, int(gid) if gid else None))
+                return self.send(200, saved_view(offset, q.get("source", "all")))
+            return self.send(200, {"items": [], "more": False})        # (the persona posts are gone)
         if path == "/api/personas":
-            return self.send(200, personas())
+            return self.send(200, retired.personas())
         if path == "/api/personas/edit":
-            return self.send(200, persona_config())
+            return self.send(200, retired.persona_config())
         if path == "/api/styles":
-            return self.send(200, style_list())
+            return self.send(200, retired.styles())
         if path == "/api/personas/draft":
-            job = self.query().get("job", "")
-            if not job.isdigit():
-                return self.send(400, {"error": "bad job"})
-            try:
-                return self.send(200, draft_status(int(job)))
-            except LookupError as e:
-                return self.send(404, {"error": str(e)})
-        if path.startswith("/avatar/"):
-            file = avatar_path(path[len("/avatar/"):])
-            if not file:
-                return self.send(404, {"error": "no profile picture yet"})
-            return self.send_file(file)
+            return self.send(200, retired.draft_status(0))
         if path == "/api/comics":
             return self.send(200, comics())
         if path in ("/api/comics/feed", "/api/comics/read"):
@@ -297,9 +260,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_file(file)
             return self.send(404, {"error": "page not found"})
         if path == "/api/summary":
-            return self.send(200, summary())
+            return self.send(200, retired.summary())
         if path == "/api/dashboard":
-            return self.send(200, dashboard())
+            return self.send(200, retired.dashboard())
         if path == "/api/following":
             return self.send(200, following())
         if path == "/api/live/stream":
@@ -528,27 +491,15 @@ class Handler(BaseHTTPRequestHandler):
             if not file:
                 return self.send(404, {"error": "no thumbnail"})
             return self.send_file(file)   # its address changes with each new one (?t=)
-        for prefix, thumb in (("/thumb/", True), ("/img/", False)):
-            if path.startswith(prefix) and path[len(prefix):].isdigit():
-                file = image_path(int(path[len(prefix):]), thumb)
-                if not file:
-                    return self.send(404, {"error": "image not found"})
-                return self.send_file(file)
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
         path = self.path.split("?")[0]
         if formlogin.httpserver.handle(self, LOGIN, path):
             return
-        actions = {"/api/feedback": self.feedback, "/api/generate": queue_generation, "/api/cancel": cancel, "/api/retry": retry_job,
-                   "/api/animate": request_animation, "/api/scene-acts": scene_acts,
-                   "/api/comics/delete": delete_comic, "/api/comics/rename": rename_comic,
+        actions = {"/api/comics/delete": delete_comic, "/api/comics/rename": rename_comic,
                    "/api/comics/follow": comicfeed.follow, "/api/comics/progress": comicfeed.progress,
-                   "/api/personas/save": save_persona,
-                   "/api/personas/delete": delete_persona, "/api/personas/avatar": new_avatar,
-                   "/api/styles/train": queue_style, "/api/styles/cancel": cancel_style,
-                   "/api/styles/video": queue_video, "/api/styles/video-cancel": cancel_video,
-                   "/api/personas/draft": queue_draft, "/api/following/settings": save_follow_settings,
+                   "/api/following/settings": save_follow_settings,
                    "/api/live/highlights": queue_highlights, "/api/live/delete": delete_room_video,
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
@@ -571,15 +522,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, {"error": str(e)})
         except (ValueError, TypeError) as e:
             self.send(400, {"error": str(e) or "bad request"})
-
-    def feedback(self, req: dict) -> dict:
-        try:
-            gid, action = int(req["id"]), req["action"]
-        except (KeyError, TypeError, ValueError):
-            raise ValueError('send {"id": number, "action": "like" | "skip" | "clear"}')
-        if action not in ("like", "skip", "clear"):
-            raise ValueError('action must be "like", "skip" or "clear"')
-        return set_feedback(gid, action)
 
     def log_message(self, *args):
         pass

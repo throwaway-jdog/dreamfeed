@@ -20,7 +20,6 @@ def required(name: str) -> str:
 DATA = Path(required("DATA_DIR"))
 STATE = required("STATE_DIR")
 GENERATED = DATA / "generated"
-LIKED = DATA / "liked"
 DB_PATH = DATA / "feed.db"
 WEB = Path(__file__).resolve().parent.parent       # web/: the page, its static files, the vendor scripts
 PAGE = WEB / "index.html"
@@ -30,15 +29,9 @@ STATIC = (WEB / "static").resolve()     # its style and scripts
 # Where the page is served from, as the reverse proxy says (X-Forwarded-Prefix: e.g. Caddy's
 # handle_path strips it, so the page needs it for its own links); none: the site's root.
 PREFIX = re.compile(r"^(?:/[A-Za-z0-9._~-]+)*$")
-PERSONAS = DATA / "personas.json"
-LORA_DIR = Path(required("LORA_DIR"))
-GENERATE_WINDOW = required("GENERATE_WINDOW")
-MAX_IMAGES = 400
 
 
 PAGE_SIZE = 30
-MEDIUMS = ("anime", "furry")
-HANDLE = re.compile(r"^[a-z0-9_]{2,20}$")
 FOLLOW = GENERATED / "follow"
 FEED_SOURCES = ("x", "bsky", "reddit", "e621")
 FEED_MODES = ("following", "foryou")   # your follows; X's For you and Reddit's Best; what you saved
@@ -98,22 +91,6 @@ def db() -> sqlite3.Connection:
 
 
 _migrated: list = []
-
-
-def clip_seconds(checkpoint: str | None) -> int:
-    """A clip's length: scenes carry it in their label ("... 55s"), the rest are 5 seconds."""
-    m = re.search(r" (\d+)s$", checkpoint or "")
-    return int(m.group(1)) if m else 5
-
-
-def item(row) -> dict:
-    return {"id": row["id"], "night": row["night"], "medium": row["medium"], "kind": row["kind"],
-            "score": round(row["score"] or 0, 3), "liked": row["action"] == "like",
-            "animated": bool(row["animated"]), "caption": row["caption"] or "",
-            "seconds": clip_seconds(row["checkpoint"]) if row["kind"] == "video" else None,
-            "posted": row["posted_at"] or row["created_at"],
-            "persona": {"handle": row["persona"], "name": row["name"] or row["persona"],
-                        "avatar": bool(row["avatar"])} if row["persona"] else None}
 
 
 X_HANDLE = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")

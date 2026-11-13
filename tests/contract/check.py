@@ -40,8 +40,14 @@ APP_POSTS = ["api/feedback", "api/live/follow", "api/following/settings", "api/s
              "api/comics/animate", "api/signins", "api/personas/draft"]
 
 # Addresses dreamfeed has stopped answering on purpose (the app is to stop calling them): listed,
-# not failed. (Comics are read live now: they aren't made, imported or animated any more.)
-RETIRED = {"api/comics/create", "api/comics/import", "api/comics/animate", "api/comics/update", "api/comics/animation-delete"}
+# not failed. Comics are read live now (they aren't made, imported or animated any more), and the
+# personas, their generated posts and styles are gone with the generation pipeline. (Their GETs
+# still answer, empty: /api/feed, /api/personas, /api/personas/edit, /api/styles, /api/dashboard,
+# /api/personas/draft, /api/summary; webapp/retired.py.)
+RETIRED = {"api/comics/create", "api/comics/import", "api/comics/animate", "api/comics/update", "api/comics/animation-delete",
+           "api/feedback", "api/animate", "api/generate", "api/cancel", "api/retry", "api/scene-acts",
+           "api/personas/save", "api/personas/delete", "api/personas/avatar",
+           "api/styles/train", "api/styles/cancel", "api/styles/video", "api/styles/video-cancel"}
 
 PRIMS = {"String": (str,), "Int": (int,), "Double": (int, float), "Float": (int, float), "Bool": (bool,),
          "JSONObject": (dict,), "JSONValue": None, "URL": (str,)}

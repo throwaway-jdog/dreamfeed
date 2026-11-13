@@ -4,7 +4,8 @@ const { load, run, assert } = require("./harness");
 
 const POST = { post: { id: "x:1234567", source: "x", author: "someone", text: "t", media: [], posted_at: "2026-01-01 00:00:00" } };
 const answer = u => u.includes("api/post?") ? POST
-  : u.includes("api/comics") ? { comics: [{ id: 7, title: "C", pages: 1, cast: ["a", "b"], panels: [], animations: [], story: "", imported: false }], making: [], failed: [] }
+  : u.includes("api/comics/feed") ? { comics: [], more: false, updated: [], continue: [], following: [], library: [], taste: { tags: [], n: 0 } }
+  : u.includes("api/comics") ? { comics: [{ id: 7, title: "C", pages: 1, cast: [], panels: {}, animations: [], story: "", imported: false }], making: [], failed: [] }
   : u.includes("api/profile") ? { room: u.includes("room=") ? "someroom" : null, followed: true, x: [], reddit: [], links: [], xusers: {}, xvideos: [],
                                   e621: [], redgifs: [], bsky: [], bio: {}, dvr: {} }
   : u.includes("api/reddit/browse") ? { posts: [], after: null, sub: "pics", sort: "hot" } : undefined;
@@ -12,7 +13,7 @@ const answer = u => u.includes("api/post?") ? POST
 const PAGES = [   // address -> the view it shows
   ["/dreamfeed/", "posts"], ["/dreamfeed/feed", "posts"], ["/dreamfeed/feed/foryou", "posts"], ["/dreamfeed/saved", "liked"],
   ["/dreamfeed/saved/x", "liked"], ["/dreamfeed/vids", "vids"], ["/dreamfeed/live", "follow"], ["/dreamfeed/live/discover", "follow"],
-  ["/dreamfeed/comics", "comics"], ["/dreamfeed/dashboard", "dash"], ["/dreamfeed/personas", "feed"],
+  ["/dreamfeed/comics", "comics"], ["/dreamfeed/dashboard", "dash"], ["/dreamfeed/personas", "posts"], ["/dreamfeed/p/someone", "posts"],
   ["/dreamfeed/room/someroom", null], ["/dreamfeed/room/someroom/watch", null], ["/dreamfeed/watch/a+b", null],
   ["/dreamfeed/r/pics/top", null], ["/dreamfeed/post/x/1234567", null], ["/dreamfeed/x/someone", null], ["/dreamfeed/u/someone", null],
   ["/dreamfeed/e621/someartist", null], ["/dreamfeed/bsky/someone.bsky.social", null], ["/dreamfeed/xvideos/abc123456", null],

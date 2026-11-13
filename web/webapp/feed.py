@@ -15,52 +15,28 @@ from pathlib import Path
 
 from dreamfeed.feed import e621, livefeeds, savedposts
 
-from .common import DATA, FEED_MODES, FEED_SOURCES, MEDIUMS, PAGE_SIZE, REDDIT_USER, X_HANDLE, _cached, db, item, read_json
-from .editor import _num
+from .common import DATA, FEED_MODES, FEED_SOURCES, PAGE_SIZE, REDDIT_USER, X_HANDLE, _cached, db, read_json
 
 
-SAVED_SOURCES = ("all", "personas", "x", "bsky", "reddit", "e621")
+SAVED_SOURCES = ("all", "x", "bsky", "reddit", "e621")
 
 
-def saved_view(medium: str, offset: int, source: str = "all") -> dict:
-    """Saved: the persona posts you liked and the Feed posts you saved, newest first, as
-    {"items": [an item, or {"post": a Feed post}]}. source: all, personas (the liked ones) or a
-    site's; a medium (anime, furry) is the personas' only."""
+def saved_view(offset: int, source: str = "all") -> dict:
+    """Saved: the Feed posts you saved (and brought in from the sites), newest first, as
+    {"items": [{"post": a Feed post}], "more"}. source: all, or a site's."""
     if source not in SAVED_SOURCES:
         raise ValueError("bad source")
-    gen_where, args = "f.action = 'like'", []
-    if medium in MEDIUMS:
-        gen_where += " AND g.medium = ?"
-        args.append(medium)
-    posts = ""
-    if medium not in MEDIUMS and source != "personas":
-        posts = " UNION ALL SELECT 'post', id, saved_at FROM saved_posts WHERE status != 'removed'"
-        if source != "all":
-            posts += " AND source = ?"
-    if source not in ("all", "personas"):
-        gen_where += " AND 0"
-    args += [source] if posts and source != "all" else []
+    where, args = "status != 'removed'", []
+    if source != "all":
+        where += " AND source = ?"
+        args.append(source)
     try:
         with db() as conn:
-            keys = conn.execute(f"SELECT 'gen' AS k, CAST(g.id AS TEXT) AS key, f.at AS at FROM feedback f JOIN generations g"
-                                f" ON g.id = f.generation_id WHERE {gen_where}{posts} ORDER BY at DESC LIMIT ? OFFSET ?",
+            rows = conn.execute(f"SELECT * FROM saved_posts WHERE {where} ORDER BY saved_at DESC LIMIT ? OFFSET ?",
                                 (*args, PAGE_SIZE + 1, offset)).fetchall()
-            more, keys = len(keys) > PAGE_SIZE, keys[:PAGE_SIZE]
-            gids = [int(k["key"]) for k in keys if k["k"] == "gen"]
-            gens = {r["id"]: item(r) for r in conn.execute(
-                "SELECT g.id, g.night, g.medium, g.score, g.kind, g.caption, g.persona, g.posted_at, g.created_at, g.checkpoint,"
-                " f.action, p.name, p.avatar,"
-                " EXISTS(SELECT 1 FROM generations v WHERE v.source_generation = g.id AND v.kind = 'video'"
-                "        AND v.status IN ('queued', 'generated', 'feed')) AS animated FROM generations g"
-                " LEFT JOIN feedback f ON f.generation_id = g.id LEFT JOIN personas p ON p.handle = g.persona"
-                f" WHERE g.id IN ({','.join('?' * len(gids)) or 'NULL'})", gids)}
-            pids = [k["key"] for k in keys if k["k"] == "post"]
-            saved = {r["id"]: _saved_json(r) for r in conn.execute(
-                f"SELECT * FROM saved_posts WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", pids)}
-    except sqlite3.OperationalError:   # worker hasn't created its tables yet
+    except sqlite3.OperationalError:   # (its table isn't there yet)
         return {"items": [], "more": False}
-    out = [gens.get(int(k["key"])) if k["k"] == "gen" else ({"post": saved[k["key"]]} if k["key"] in saved else None) for k in keys]
-    return {"items": [x for x in out if x], "more": more}
+    return {"items": [{"post": _saved_json(r)} for r in rows[:PAGE_SIZE]], "more": len(rows) > PAGE_SIZE}
 
 
 FOLLOWING = DATA / "following.json"     # read by the follow service on each round
@@ -210,6 +186,17 @@ def _unshown(posts: list[dict]) -> list[dict]:
     out = [p for p in posts if p["id"] not in old]
     _now_shown(out)
     return out
+
+
+
+def _num(v, lo: float, hi: float, what: str) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a number")
+    if not lo <= x <= hi:
+        raise ValueError(f"{what} must be between {lo:g} and {hi:g}")
+    return round(x, 3)
 
 
 SITE_STATE: dict[str, dict] = {}     # site -> {"at", "error"}: how its last reading went (Health)

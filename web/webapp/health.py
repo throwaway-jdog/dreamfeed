@@ -108,11 +108,9 @@ def health(headers=None) -> dict:
                          ("running" if st.get("running") else "stopped (starts when needed)") if fresh
                          else "not looked after: is browserpower installed? (sudo browserpower/install.sh)", st.get("at")))
 
-    # jobs, linking, disk
+    # linking, disk
     with db() as conn:
-        failed = conn.execute("SELECT count(*) FROM jobs WHERE status = 'failed' AND created_at >= datetime('now', '-1 day')").fetchone()[0]
         checked = conn.execute("SELECT max(at) FROM link_checks").fetchone()[0]
-    rows.append(_row("Jobs", "warn" if failed else "ok", f"{failed} failed in the last day" if failed else "none failed in the last day"))
     rows.append(_row("Linking accounts", "ok" if checked else "off", f"last looked {checked} (UTC)" if checked else "not run yet"))
     if now - _saved_size["at"] > 3600:
         _saved_size.update(at=now, bytes=_size(DATA / "saved"))

@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from dreamfeed.core import acts, cookies, personas as people, safety
+from dreamfeed.core import cookies
 from dreamfeed.feed import e621, livefeeds, savedposts
 
 from .common import PREFIX, read_json

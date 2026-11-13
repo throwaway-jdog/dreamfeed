@@ -11,7 +11,7 @@ import urllib.parse
 from pathlib import Path
 
 import dvr
-from dreamfeed.core import acts, cookies, personas as people, safety
+from dreamfeed.core import safety
 from dreamfeed.feed import e621, livefeeds, savedposts
 from dreamfeed.live import cbprofile, cbvideos, linking
 

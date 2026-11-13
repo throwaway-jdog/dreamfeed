@@ -22,7 +22,6 @@ run("Live: profile, link an account, record, multi view", async () => {
   const prof = [...p.d.querySelectorAll(".live-item .acts button")].find(b => b.textContent.startsWith("Profile"));
   assert.ok(prof, "a live card should have Profile"); await p.click(prof, 400);
   assert.ok(p.shown("pf-view"), "Profile should open the room profile window");
-  assert.ok(p.$("profile").hidden, "the persona Feed's header stays hidden");
   assert.match(p.text("pf-links"), /OnlyFans: someroom/);
   // link one by hand
   p.$("pf-link-src").value = "xvideos"; p.$("pf-link-in").value = "someroom_xv";

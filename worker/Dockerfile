@@ -1,12 +1,9 @@
-# CUDA 13.0 build: the newest the host driver (580) supports.
-FROM pytorch/pytorch:2.14.1-cuda13.0-cudnn9-runtime
+# The follow service (python -m dreamfeed follow): standard-library Python, and ffmpeg for your
+# recordings' posters and highlights and Saved's copies of videos.
+FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt /app/
-# Single-purpose image: install alongside the bundled torch instead of in a venv.
-ENV PIP_BREAK_SYSTEM_PACKAGES=1
-RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY dreamfeed /app/dreamfeed
 WORKDIR /app
 ENV HOME=/tmp PYTHONUNBUFFERED=1
-CMD ["python", "-m", "dreamfeed", "run"]
+CMD ["python", "-m", "dreamfeed", "follow"]

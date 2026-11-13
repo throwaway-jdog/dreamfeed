@@ -29,7 +29,6 @@
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
     </button>
   </div>
-  <nav class="people" id="people" aria-label="Personas"></nav>
 </header>
 
 <div class="sheet" id="sheet" hidden>
@@ -44,42 +43,6 @@
       <div class="vs-head"><h2>Health</h2><button type="button" class="secondary" id="hl-again">Look again</button></div>
       <p class="note" id="hl-note"></p>
       <ul class="plist hl-list" id="hl-list"></ul>
-    </div>
-    <div class="panel" id="gen-panel">
-      <h2>Running now</h2>
-      <div id="live"></div>
-      <p class="note">Comics, panel animations and style training. (The generated feed is gone: the feed is X and Reddit.)</p>
-      <div hidden>
-      <div class="field">
-        <span>How many images</span>
-        <div class="seg" id="g-count" role="group" aria-label="How many images">
-          <button type="button" data-n="12" aria-pressed="true">12</button>
-          <button type="button" data-n="50" aria-pressed="false">50</button>
-          <button type="button" data-n="100" aria-pressed="false">100</button>
-          <button type="button" data-n="200" aria-pressed="false">200</button>
-        </div>
-      </div>
-      <div class="field">
-        <span>Keep the best</span>
-        <div class="stepper">
-          <button type="button" id="g-less" aria-label="Keep fewer">−</button>
-          <output id="g-keep">6</output>
-          <button type="button" id="g-more" aria-label="Keep more">+</button>
-          <small id="g-keep-note">the rest are deleted</small>
-        </div>
-      </div>
-      <label class="field"><span>Who posts</span>
-        <select class="in" id="g-who"><option value="">Everyone</option></select></label>
-      <div class="field" id="g-styles-field">
-        <span>Styles</span>
-        <div class="toggles" id="g-styles" role="group" aria-label="Styles">
-          <button class="toggle" type="button" data-m="anime" aria-pressed="true">Anime</button>
-          <button class="toggle" type="button" data-m="furry" aria-pressed="true">Furry</button>
-        </div>
-      </div>
-      <button class="primary" type="button" id="g-go">Generate</button>
-      <p class="note" id="g-est"></p>
-      </div>
     </div>
 
     <div class="panel" id="si-panel">
@@ -108,72 +71,8 @@
       <div class="ed-err" id="e6-err" role="alert"></div>
     </div>
 
-    <div class="panel" hidden>
-      <h2>Video</h2>
-      <p class="note">Turns your best images into 5-second clips with Wan 2.2, liked images first. About 5 minutes per clip. You can also animate a single image from the viewer, or make a scene of about 40 seconds from it.</p>
-      <div class="field">
-        <span>How many clips</span>
-        <div class="seg" id="a-count" role="group" aria-label="How many clips">
-          <button type="button" data-n="1" aria-pressed="false">1</button>
-          <button type="button" data-n="3" aria-pressed="true">3</button>
-          <button type="button" data-n="10" aria-pressed="false">10</button>
-          <button type="button" data-n="30" aria-pressed="false">30</button>
-        </div>
-      </div>
-      <button class="secondary" type="button" id="a-go">Animate the best images</button>
-    </div>
 
-    <div class="panel">
-      <h2>Personas</h2>
-      <p class="note" id="p-note">The characters comics are made with.</p>
-      <ul class="plist" id="p-list"></ul>
-      <div class="field" style="gap:10px;margin-top:14px">
-        <label class="field"><span>Build one from a description <small>who they are and what they post, like
-          <em>"Chinese femboy. Cosplays, sex with men, wears a face mask"</em>. You check the draft before it's added.</small></span>
-          <textarea class="in" id="p-desc" rows="3" maxlength="2000"></textarea></label>
-        <button class="primary" type="button" id="p-build">Build persona</button>
-        <p class="note" id="p-build-status" hidden></p>
-      </div>
-      <button class="secondary" type="button" id="p-new" style="margin-top:10px">Add one by hand</button>
-    </div>
 
-    <div class="panel" id="s-panel">
-      <h2>Trained styles</h2>
-      <p class="note">Artist styles a persona can post in (turn one on in their editor). Training downloads the artist's
-        images, drops photos and anything the adult checks flag, then trains. Nightly posts wait while it trains.</p>
-      <ul class="plist" id="s-list"></ul>
-      <button class="secondary" type="button" id="s-new">Train a new style</button>
-      <form class="field" id="s-form" hidden style="gap:16px" novalidate>
-        <label class="field"><span>Name <small>a-z, 0-9 and _; the trained file is style-NAME</small></span>
-          <input class="in" id="s-name" maxlength="20" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
-        <div class="field"><span>Medium</span>
-          <div class="seg two" id="s-medium" role="group" aria-label="Medium">
-            <button type="button" data-m="anime" aria-pressed="true">Anime</button>
-            <button type="button" data-m="furry" aria-pressed="false">Furry</button>
-          </div></div>
-        <label class="field"><span>Artist's page <small>an X media page, e621, Pixiv, … (anything gallery-dl reads). Drawings only: photos are dropped.</small></span>
-          <input class="in" id="s-source" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://x.com/artist/media"></label>
-        <label class="check"><input type="checkbox" id="s-videos"><span>From videos <small class="hint">· for artists who only post animations: their videos are downloaded and frames from each are the pictures</small></span></label>
-        <div class="field"><span>Images to download <small>at most; fewer after the checks (videos: each gives up to 8 pictures)</small></span>
-          <div class="seg" id="s-limit" role="group" aria-label="Images to download" style="grid-template-columns:repeat(3,1fr)">
-            <button type="button" data-n="100" aria-pressed="false">100</button>
-            <button type="button" data-n="300" aria-pressed="true">300</button>
-            <button type="button" data-n="600" aria-pressed="false">600</button>
-          </div></div>
-        <div class="field"><span>Training length</span>
-          <div class="seg" id="s-steps" role="group" aria-label="Training length" style="grid-template-columns:repeat(3,1fr)">
-            <button type="button" data-n="1000" aria-pressed="false">Quick</button>
-            <button type="button" data-n="2000" aria-pressed="true">Normal</button>
-            <button type="button" data-n="3000" aria-pressed="false">Long</button>
-          </div></div>
-        <p class="note" id="s-est"></p>
-        <div class="ed-err" id="s-err" role="alert"></div>
-        <div class="form-actions">
-          <button class="secondary" type="button" id="s-no">Cancel</button>
-          <button class="primary" type="submit" id="s-go">Download and train</button>
-        </div>
-      </form>
-    </div>
 
     <div class="panel">
       <h2>Recent runs</h2>
@@ -181,7 +80,6 @@
       <ul class="runs" id="r-list"></ul>
     </div>
   </section>
-  <section class="profile" id="profile" hidden></section>
   <section class="vids comics" id="comics" hidden aria-label="Comics">
     <form class="vs-form" id="cs-form" role="search">
       <input class="in" id="cs-q" type="search" maxlength="100" placeholder="Search comics: a title, an artist, a character" autocomplete="off">
@@ -377,208 +275,11 @@
   <div id="sentinel"></div>
 </main>
 
-<div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-label="Image viewer">
-  <div class="stage" id="stage">
-    <div class="top-row">
-      <button class="close" id="v-close" type="button" aria-label="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
-      </button>
-      <span class="count" id="v-count"></span>
-      <button class="animate" id="v-animate" type="button">
-        <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><path d="M8 5v14l11-7z"/></svg><span>Animate</span>
-      </button>
-    </div>
-    <button class="nav prev" id="v-prev" type="button" aria-label="Previous image"></button>
-    <img id="v-img" alt="">
-    <video id="v-vid" muted loop playsinline preload="auto" hidden></video>
-    <div class="scrub" id="v-scrub" hidden>
-      <button type="button" id="v-pp" aria-label="Pause"></button>
-      <input type="range" id="v-seek" min="0" max="1000" value="0" step="1" aria-label="Position in the clip">
-      <span id="v-time">0:00</span>
-    </div>
-    <button class="nav next" id="v-next" type="button" aria-label="Next image"></button>
-    <div class="heart" id="v-heart"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.5h2c.7-1.3 2.2-2.5 4.3-2.5 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg></div>
-  </div>
-  <form class="motion" id="motion" hidden>
-    <label for="motion-text">Describe the motion <small>(optional)</small></label>
-    <textarea id="motion-text" maxlength="500" placeholder="e.g. she turns toward the camera and smiles, hair blowing in the wind"></textarea>
-    <small>Leave it empty and the clip uses the image's own tags.</small>
-    <fieldset class="lengths" id="motion-len">
-      <legend>Make</legend>
-      <label><input type="radio" name="len" value="clip" checked><span>Clip · 5 s</span></label>
-      <label><input type="radio" name="len" value="scene"><span>Scene · ~40 s</span></label>
-    </fieldset>
-    <small id="motion-time">Takes about 5 minutes.</small>
-    <div class="scene-acts" id="scene-acts" hidden></div>
-    <div class="row">
-      <button class="no" type="button" id="motion-no">Cancel</button>
-      <button class="go" type="submit">Animate</button>
-    </div>
-  </form>
-  <div class="actions">
-    <button class="big skip" id="v-skip" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      <span>Skip</span>
-    </button>
-    <button class="big like" id="v-like" type="button" aria-pressed="false">
-      <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20s-7-4.3-8.9-8.6C1.7 8.2 3.6 5 6.9 5c1.9 0 3.3 1.1 4 2.3h2.2c.7-1.2 2.1-2.3 4-2.3 3.3 0 5.2 3.2 3.8 6.4C19 15.7 12 20 12 20z"/></svg>
-      <span>Like</span>
-    </button>
-  </div>
-</div>
 
-<div class="editor" id="editor" hidden role="dialog" aria-modal="true" aria-labelledby="e-title">
-  <div class="ed-bar">
-    <button class="close" id="e-close" type="button" aria-label="Close without saving">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-    </button>
-    <h2 id="e-title">Persona</h2>
-    <button class="pill-btn solid" id="e-save" type="button">Save</button>
-  </div>
-  <form class="ed-body" id="e-form" novalidate>
-    <div class="ed-err" id="e-err" role="alert"></div>
-    <section class="panel">
-      <h2>Profile</h2>
-      <div class="pic" id="e-pic-row">
-        <span class="av lg" id="e-av"></span>
-        <div class="field"><small id="e-pic-note"></small>
-          <button class="secondary" type="button" id="e-pic">New profile picture</button></div>
-      </div>
-      <label class="field"><span>Name</span><input class="in" id="e-name" maxlength="60" autocomplete="off"></label>
-      <label class="field"><span>Handle</span><input class="in" id="e-handle" maxlength="20" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="a-z, 0-9 and _">
-        <small id="e-handle-note">Can't be changed later.</small></label>
-      <div class="field"><span>Medium</span>
-        <div class="seg two" id="e-medium" role="group" aria-label="Medium">
-          <button type="button" data-m="anime" aria-pressed="true">Anime</button>
-          <button type="button" data-m="furry" aria-pressed="false">Furry</button>
-        </div></div>
-      <label class="field"><span>Bio</span><textarea class="in" id="e-bio" maxlength="300" rows="2"></textarea></label>
-      <label class="field"><span>Private note <small>(never shown or used in prompts)</small></span>
-        <input class="in" id="e-note" maxlength="200" autocomplete="off" placeholder="e.g. who inspired them"></label>
-    </section>
 
-    <section class="panel">
-      <h2>Look</h2>
-      <label class="field"><span>Look <small>booru tags that keep them recognisable</small></span>
-        <textarea class="in" id="e-look" rows="3" placeholder="1girl, adult, mature female, long silver hair, blue eyes"></textarea></label>
-      <label class="field"><span>Characters <small>one per line, for artists who draw different characters (use <code>{character}</code> in a prompt)</small></span>
-        <textarea class="in" id="e-chars" rows="4" placeholder="anthro, female, red fox, orange fur, green eyes"></textarea></label>
-      <label class="field"><span>Profile picture tags</span>
-        <input class="in" id="e-avatar" autocomplete="off" placeholder="portrait, upper body, looking at viewer, smile"></label>
-      <div class="safe-note" id="e-strict"></div>
-    </section>
-
-    <section class="panel">
-      <h2>Trained style (LoRA)</h2>
-      <div class="switch-row">
-        <span class="field"><span>Use a trained style</span><small id="e-lora-note"></small></span>
-        <button class="toggle" type="button" id="e-lora-on" aria-pressed="false">Off</button>
-      </div>
-      <div id="e-lora-box" class="field" style="gap:16px">
-        <label class="field"><span>Style</span><select class="in" id="e-style"></select></label>
-        <div class="field"><span>Strength <small>higher looks more like the training art</small></span>
-          <div class="range"><input type="range" id="e-strength" min="0.2" max="1.2" step="0.05"><output id="e-strength-v"></output></div></div>
-        <label class="check"><input type="checkbox" id="e-female"><span>Female characters only <small class="hint">· posts with a male character skip the style (for styles trained mostly on women)</small></span></label>
-        <label class="field"><span>Artist style too <small>for a character style: the artist's style, which draws everyone else in the picture</small></span><select class="in" id="e-art"></select></label>
-        <div class="field" id="e-art-box"><span>Artist style strength</span>
-          <div class="range"><input type="range" id="e-art-strength" min="0.2" max="1.2" step="0.05"><output id="e-art-strength-v"></output></div></div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Captions</h2>
-      <label class="field"><span>Sound like <small id="e-voice-note"></small></span>
-        <select class="in" id="e-voice"></select></label>
-    </section>
-
-    <section class="panel">
-      <h2>Posting</h2>
-      <div class="field"><span>How often they post <small>share of each night, before your likes and skips adjust it</small></span>
-        <div class="range"><input type="range" id="e-weight" min="0.25" max="3" step="0.25"><output id="e-weight-v"></output></div></div>
-      <div class="field"><span>Video share <small>how much of the nightly clip budget favours them</small></span>
-        <div class="range"><input type="range" id="e-video" min="0" max="1" step="0.05"><output id="e-video-v"></output></div></div>
-      <div class="switch-row">
-        <span class="field"><span>Paused</span><small>Keeps their profile and posts. Makes nothing new except when you tap Post now.</small></span>
-        <button class="toggle" type="button" id="e-paused" aria-pressed="false">No</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Kinds of post</h2>
-      <p class="note">Each night picks one of these per post, by weight. Prompts are booru tags and can use
-        <code>{outfit}</code> <code>{cosplay}</code> <code>{setting}</code> <code>{character}</code> <code>{partner}</code> <code>{girlfriend}</code> <code>{friend}</code>.</p>
-      <div id="e-kinds" class="field" style="gap:10px"></div>
-      <button class="secondary" type="button" id="e-add-kind">Add a kind of post</button>
-    </section>
-
-    <details class="panel" id="e-more">
-      <summary>More</summary>
-      <div class="field" style="gap:16px">
-      <label class="field"><span>Outfits <small>one per line; empty uses a general list</small></span><textarea class="in" id="e-outfits" rows="3"></textarea></label>
-      <label class="field"><span>Partners <small>one per line, for <code>{partner}</code> in duo posts; empty is a faceless man</small></span><textarea class="in" id="e-partners" rows="3"></textarea></label>
-      <label class="field"><span>Girlfriends <small>one per line, for <code>{girlfriend}</code> in girl-girl posts</small></span><textarea class="in" id="e-girlfriends" rows="3"></textarea></label>
-      <label class="field"><span>Must show <small>one trait per line, tags separated by commas, any of which counts (e.g. <code>red hair, orange hair</code>): a post the tagger doesn't see one in is drawn again</small></span><textarea class="in" id="e-must" rows="3" autocapitalize="none"></textarea></label>
-      <label class="field"><span>Must not show <small>tags separated by commas: a post the tagger sees one in is drawn again (e.g. <code>blue fur</code>)</small></span><input class="in" id="e-mustnot" autocomplete="off" autocapitalize="none"></label>
-      <label class="field"><span>Friends <small>other personas' handles, one per line, for <code>{friend}</code>: they appear as themselves, with their own style</small></span><textarea class="in" id="e-friends" rows="2" autocapitalize="none"></textarea></label>
-      <label class="field"><span>Settings <small>one per line; empty uses a general list</small></span><textarea class="in" id="e-settings" rows="3"></textarea></label>
-      <label class="field"><span>Emoji <small>added to some captions</small></span><input class="in" id="e-emoji" autocomplete="off" placeholder="✨ 💕"></label>
-      <label class="field"><span>Hashtags <small>separated by spaces, without #</small></span><input class="in" id="e-tags" autocomplete="off" autocapitalize="none" placeholder="cosplay lewd"></label>
-      <label class="field"><span>Leave out <small>extra negative prompt, e.g. <code>face, eyes</code> for a faceless persona</small></span><input class="in" id="e-neg" autocomplete="off"></label>
-      </div>
-    </details>
-
-    <section class="panel" id="e-danger">
-      <h2>Remove</h2>
-      <p class="note">Their posts leave the timeline. Liked posts stay in Liked.</p>
-      <button class="secondary" type="button" id="e-del">Remove this persona</button>
-      <div class="confirm" id="e-del-confirm" hidden>
-        <p><strong>Remove <span id="e-del-name"></span>?</strong></p>
-        <div class="confirm-actions">
-          <button class="secondary" type="button" id="e-del-no">Keep</button>
-          <button class="danger" type="button" id="e-del-yes">Remove</button>
-        </div>
-      </div>
-    </section>
-  </form>
-</div>
-
-<template id="kind-tpl">
-  <div class="kind">
-    <div class="row3">
-      <label class="field k-kind"><span>Kind</span><input class="in k-name" maxlength="40" placeholder="pinup"></label>
-      <label class="field"><span>Rating</span><select class="in k-rating">
-        <option value="explicit">Explicit</option><option value="questionable">Suggestive</option><option value="general">Safe</option></select></label>
-      <label class="field"><span>Weight</span><input class="in k-weight" type="number" min="0.1" max="10" step="0.5" inputmode="decimal"></label>
-    </div>
-    <label class="field"><span>Prompt</span><textarea class="in k-prompt" rows="3" placeholder="solo, {outfit}, looking at viewer, {setting}"></textarea></label>
-    <label class="field"><span>Example captions <small>one per line; each post gets a new one written like these</small></span><textarea class="in k-caps" rows="3"></textarea></label>
-    <button class="rm" type="button">Remove this kind</button>
-  </div>
-</template>
 
 <div class="toast" id="toast" role="status" hidden></div>
 
-<template id="card-tpl">
-  <article class="post">
-    <button class="who-btn" type="button"><span class="av sm"></span></button>
-    <div>
-      <div class="head"><span class="name"></span><span class="handle"></span><span class="time"></span></div>
-      <p class="text"></p>
-      <button class="media open" type="button" aria-label="Open"></button>
-      <div class="acts">
-        <button class="act like" type="button" aria-label="Like" aria-pressed="false">
-          <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20s-7-4.3-8.9-8.6C1.7 8.2 3.6 5 6.9 5c1.9 0 3.3 1.1 4 2.3h2.2c.7-1.2 2.1-2.3 4-2.3 3.3 0 5.2 3.2 3.8 6.4C19 15.7 12 20 12 20z"/></svg><span>Like</span>
-        </button>
-        <button class="act anim" type="button" aria-label="Animate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg><span>Animate</span>
-        </button>
-        <button class="act skip" type="button" aria-label="Not interested">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Not for me</span>
-        </button>
-      </div>
-    </div>
-  </article>
-</template>
 
 <script src="static/app.js"></script>
 </body>

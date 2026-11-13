@@ -8,14 +8,13 @@ function setView(v) {
   $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("posts").hidden = !posts; $("vids").hidden = !vids;
   $("grid").hidden = page; $("sentinel").hidden = page && !posts;
   $("saved-bar").hidden = v !== "liked"; if (v === "liked") importStatus();
-  if (v !== "feed") state.persona = "";
-  renderPeople();
   try { localStorage.setItem("dreamfeed-view", v); } catch {}
-  if (dash) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshDash(); loadEditable(); loadReddit(); loadSignins(); loadHealth(); }
-  else if (com) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadComics(); }
-  else if (fol) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; refreshFollowing(); }
-  else if (posts) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadPosts(true); }
-  else if (vids) { grid.replaceChildren(); $("empty").hidden = true; $("profile").hidden = true; state.gen++; loadVids(); }
+  if (page) { grid.replaceChildren(); $("empty").hidden = true; state.gen++; }
+  if (dash) { loadReddit(); loadSignins(); loadHealth(); }
+  else if (com) loadComics();
+  else if (fol) refreshFollowing();
+  else if (posts) loadPosts(true);
+  else if (vids) loadVids();
   else reset();
 }
 // Saved: bring in what you saved on the sites you pick (X's and Bluesky's bookmarks, Reddit's saved
@@ -69,18 +68,13 @@ async function refreshSummary() {
   try {
     const s = await api("api/summary");
     $("live-n").textContent = s.live || "";
-    const r = s.last_run;
-    const run = r ? `Last run: ${nightLabel(r.night)}, ${r.status === "done" ? "finished" : r.status}` : "No nightly run yet";
-    $("sheet-info").innerHTML = "";
-    for (const line of [run, `${s.liked} liked`]) {
-      if (!line) continue; const d = document.createElement("div"); d.textContent = line; $("sheet-info").append(d);
-    }
+    $("sheet-info").textContent = s.live ? `${s.live} of the rooms you follow live` : "";
   } catch {}
 }
 
 /* ---------- pages: each part has its own address ----------
-   /feed, /feed/foryou, /saved[/x], /live[/discover], /comics[/ID], /dashboard, /personas, /p/HANDLE,
-   /item/ID (a persona post), /room/NAME[/watch | /video/PATH], /watch/A+B, /x/HANDLE, /u/NAME,
+   /feed, /feed/foryou, /saved[/x], /vids, /live[/discover], /comics[/ID], /dashboard,
+   /room/NAME[/watch | /video/PATH], /watch/A+B, /x/HANDLE, /u/NAME,
    /r/SUB[/new|top], /e621/ARTIST, /post/SITE/ID, /xvideos/ID. Opening one replaces what's shown
    (no stacking): Close and Back go to the page before, or home when the page was opened by link. */
 const BASE = new URL(document.baseURI).pathname;        // where the page is served (the proxy says), e.g. /dreamfeed/
@@ -104,7 +98,7 @@ function tabPath(v) {
   return { posts: fp.mode === "foryou" ? "feed/foryou" : "feed",
            liked: state.savedSource !== "all" ? `saved/${state.savedSource}` : "saved",
            comics: "comics", follow: livePage.page === "discover" ? "live/discover" : "live", dash: "dashboard", vids: "vids",
-           feed: state.persona ? `p/${enc(state.persona)}` : "personas" }[v] || "feed";
+           }[v] || "feed";
 }
 function lastTab() {
   let v = "posts"; try { v = localStorage.getItem("dreamfeed-view") || "posts"; } catch {}
@@ -123,7 +117,6 @@ function roomFor(name) {
 function openPerson(k) {
   go(k.room ? `room/${enc(k.room)}` : k.x ? `x/${enc(k.x)}` : k.e621 ? `e621/${enc(k.e621)}` : k.bsky ? `bsky/${enc(k.bsky)}` : `u/${enc(k.reddit)}`);
 }
-function openProfile(handle) { go(handle ? `p/${enc(handle)}` : "personas"); }      // a persona's posts
 function openBrowse(sub, sort) {
   const name = String(sub || "").trim().replace(/^\/?r\//i, "").replace(/\/+$/, "");
   const same = !$("browse").hidden && br.sub && br.sub.toLowerCase() === name.toLowerCase();
@@ -134,10 +127,8 @@ function openPost(p) { nav.posts.set(p.id, p); go(postPath(p.id)); }
 function openRoom(r, list) { nav.rooms.set(r.name, r); if (list) nav.lists.set(r.name, list); go(`room/${enc(r.name)}/watch`); }
 function openMulti(rooms) { for (const r of rooms) nav.rooms.set(r.name, r); go("watch/" + rooms.map(r => enc(r.name)).join("+")); }
 function openXvideo(v) { nav.xv.set(v.id, v); go(`xvideos/${enc(v.id)}`); }
-function openComic(c) { go(`comics/${enc(c.id)}`); }
 // what each address shows
 function closePages() {
-  if (!viewer.hidden) closeViewer(true);
   closePicture(true);
   if (!$("pf-view").hidden) closeProfile();
   if (!$("browse").hidden) closeBrowse();
@@ -152,9 +143,6 @@ function route() {
   const rel = here(), [a = "", b = "", c = "", ...rest] = segs(rel);
   nav.routed = rel;
   closePages();
-  const wasSingle = state.single;
-  state.single = a === "item" && /^\d+$/.test(b) ? b : null;
-  if (wasSingle && !state.single && state.view === "feed") state.view = "";     // (the whole feed again)
   switch (a) {
     case "": case "home": return go(tabPath(lastTab()), true);
     case "feed": {
@@ -179,13 +167,7 @@ function route() {
     case "comics": setView("comics"); if (b) showComicId(b, c); return;
     case "dashboard": return setView("dash");
     case "vids": return setView("vids");
-    case "personas": return showPersona("");
-    case "p": return showPersona(b);
-    case "item":
-      if (!state.single) return go("personas", true);
-      state.openSingle = true; state.persona = "";
-      if (state.view === "feed") reset(); else setView("feed");
-      return;
+    case "personas": case "p": case "item": return go("feed", true);     // (the personas are gone: their old addresses)
     case "room":
       if (!ROOM_NAME.test(b)) break;
       if (c === "watch") return showRoom(roomFor(b), nav.lists.get(b) || null);
@@ -212,7 +194,6 @@ function route() {
 }
 addEventListener("popstate", () => {
   const st = history.state || {};
-  if (!viewer.hidden && st.overlay !== "viewer") closeViewer(true);
   if (!$("pic-view").hidden && st.overlay !== "picture") closePicture(true);
   if (st.overlay || here() === nav.routed) return;
   route();

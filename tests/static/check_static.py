@@ -1,6 +1,7 @@
 """Checks that need nothing running: every Python file compiles, the page has no repeated ids
 (two once shared id="profile" and Profile opened an empty layer), every id the script asks for
-with $("...") is on the page, and the script's parts are the ones the page loads.
+with $("...") is on the page, no function is declared in two parts (one silently replaced the
+other), and the script's parts are the ones the page loads.
 
     python3 tests/static/check_static.py
 """
@@ -27,6 +28,13 @@ parts = sorted((ROOT / "web/static/js").glob("[0-9][0-9]-*.js"))
 js = "".join(p.read_text() for p in parts)
 for i in sorted(set(re.findall(r'\$\("([\w-]+)"\)', js)) - set(ids)):
     problems.append(f"web/static/js: $(\"{i}\") asks for an id that isn't on the page")
+# a function declared twice: the parts are one script, so the later silently wins
+seen = {}
+for part in parts:
+    for name in re.findall(r"^(?:async )?function (\w+)\s*\(", part.read_text(), re.M):
+        if name in seen:
+            problems.append(f"web/static/js: function {name} is declared in both {seen[name]} and {part.name} (the later wins)")
+        seen.setdefault(name, part.name)
 if parts and not parts[-1].name.startswith("99-"):
     problems.append("web/static/js: the last part should be 99-start.js (the page starts once every part is read)")
 for name in [p.name for p in (ROOT / "web/static/js").glob("*.js")]:
