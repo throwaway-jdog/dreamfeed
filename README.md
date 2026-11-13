@@ -604,7 +604,8 @@ now. OnlyFans and Fansly aren't read (paywalled); nothing is guessed from faces 
 A linked RedGifs account gives the profile a RedGifs tab: their clips, newest first, played here.
 An xvideos profile works the same way (its address in their bio, or linked by you
 as its name or address): the profile then has an xvideos tab next to Posts with their videos,
-newest first, played in xvideos' own player inside dreamfeed (nothing is downloaded). Tapping a poster's name in the Feed opens their profile too, the room's if
+newest first, played in dreamfeed's own player like everything else (each video's own stream,
+up to 1080p, read from xvideos when you open it: no xvideos page, no ads; nothing is downloaded). Tapping a poster's name in the Feed opens their profile too, the room's if
 they're linked to one.
 
 **Discover, on Live** (its own page next to Following, which has who you follow, live and not): live rooms you don't follow. For you has rooms sharing the most common

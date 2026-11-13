@@ -31,7 +31,7 @@ from .e621posts import TOP_TODAY, _e621_comments, _e621_post, e621_artist, e621_
 from .reddit import MAX_USERS, REDDIT_AGENT, REDDIT_USER, _reddit, _reddit_comments, _reddit_listing, reddit_page, reddit_ready, reddit_save, reddit_saved, reddit_user, subscriptions, user_path  # noqa: F401
 from .redgifs import redgifs_clip, redgifs_page  # noqa: F401
 from .x import X_HOME, _x, _x_comments, _x_posts, x_bookmarks, x_cookies, x_page, x_related  # noqa: F401
-from .xvideos import xvideos_page  # noqa: F401
+from .xvideos import xvideos_page, xvideos_video  # noqa: F401
 
 
 def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searches: list[str], tags: str = "") -> dict:

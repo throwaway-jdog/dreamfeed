@@ -290,24 +290,55 @@ function openClip(c) { nav.clips.set(c.id, c); go(`redgifs/${enc(c.id)}`); }
 async function showClip(id) {
   let c = nav.clips.get(id);
   $("xv-title").textContent = "RedGifs"; $("xv-open").href = `https://www.redgifs.com/watch/${enc(id)}`;
-  $("xv-frame").hidden = true; $("xv-video").hidden = false; $("xv-player").hidden = false;
+  xvStop(); $("xv-video").loop = true; $("xv-player").hidden = false;
   if (!c) {
     try { c = (await api(`api/redgifs/clip?id=${enc(id)}`)).clip; } catch (err) { toast(err.message); return leave(); }
     if (here() !== `redgifs/${enc(id)}`) return;
   }
   const v = $("xv-video"); v.poster = c.poster || ""; v.src = c.url; v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
 }
-function showXvideo(v) {
-  $("xv-frame").hidden = false; $("xv-video").hidden = true;
-  $("xv-title").textContent = v.title;
-  $("xv-open").href = `https://www.xvideos.com/video.${encodeURIComponent(v.id)}/`;
-  $("xv-frame").src = `https://www.xvideos.com/embedframe/${encodeURIComponent(v.id)}`;
+// An xvideos video in dreamfeed's own player (its stream, up to 1080p; its MP4 where HLS can't
+// play), not xvideos' page with its ads.
+const xv = { hls: null, gen: 0 };
+function xvStop() {
+  xv.gen++; if (xv.hls) { xv.hls.destroy(); xv.hls = null; }
+  const v = $("xv-video"); v.pause(); v.removeAttribute("src"); v.removeAttribute("poster"); v.load();
+  $("xv-msg").hidden = true;
+}
+async function showXvideo(it) {
+  xvStop(); const gen = xv.gen, v = $("xv-video");
+  $("xv-title").textContent = it.title || "xvideos"; v.loop = false;
+  $("xv-open").href = `https://www.xvideos.com/video.${encodeURIComponent(it.id)}/`;
   $("xv-player").hidden = false;
+  if (it.thumb) v.poster = it.thumb;
+  let f;
+  try { f = await api(`api/xvideos/video?id=${encodeURIComponent(it.id)}`); }
+  catch (err) { if (gen === xv.gen) { $("xv-msg").textContent = err.message; $("xv-msg").hidden = false; } return; }
+  if (gen !== xv.gen) return;
+  if (f.title) $("xv-title").textContent = f.title;
+  if (f.poster) v.poster = f.poster;
+  const mp4 = f.mp4 || f.mp4_low, play = () => v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+  if (f.hls && v.canPlayType("application/vnd.apple.mpegurl")) { v.src = f.hls; return play(); }
+  if (f.hls) {
+    try {
+      const Hls = await hlsLib();
+      if (gen !== xv.gen) return;
+      if (Hls.isSupported()) {
+        xv.hls = new Hls({ capLevelToPlayerSize: true }); xv.hls.loadSource(f.hls); xv.hls.attachMedia(v);
+        xv.hls.on(Hls.Events.MANIFEST_PARSED, play);
+        // (a stream that won't play: its MP4 instead; the stream's player is let go after it's done)
+        xv.hls.on(Hls.Events.ERROR, (_, e) => {
+          if (!e.fatal || gen !== xv.gen || !xv.hls) return;
+          const h = xv.hls; xv.hls = null; setTimeout(() => h.destroy(), 0);
+          if (mp4) { v.src = mp4; play(); }
+        });
+        return;
+      }
+    } catch {}
+  }
+  if (mp4) { v.src = mp4; play(); }
 }
-function closeXvideo() {
-  $("xv-frame").src = "about:blank"; $("xv-player").hidden = true;
-  const v = $("xv-video"); v.pause(); v.removeAttribute("src"); v.load();
-}
+function closeXvideo() { xvStop(); $("xv-player").hidden = true; }
 $("xv-close").onclick = leave;
 async function morePersonPosts() {
   const st = pf.posts; if (!st || st.loading) return;

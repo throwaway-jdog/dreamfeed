@@ -390,6 +390,7 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .xv-player[hidden] { display: none; }
 .xv-player iframe, .xv-player video { flex: 1; width: 100%; min-height: 0; border: 0; background: #000; }
 .xv-player [hidden] { display: none !important; }
+.xv-player .note { color: #ddd; padding: 16px; text-align: center; margin: 0; }
 .xv-player .reader-bar a.secondary { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 .pf-body { padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; }
 .pf-body .note { margin: 0; color: var(--muted); }

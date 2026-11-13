@@ -40,6 +40,7 @@ GET  /api/x/related    ?id=TWEET&handle=H&cursor=C  the videos X shows after tha
 GET  /api/redgifs      ?name=PROFILE&page=N  a RedGifs creator's clips (a room's linked one), live; /api/redgifs/clip?id=ID one
 POST /api/profile/relink {"room"}  look for the room's accounts across sites again (linking.py)
 GET  /api/xvideos      ?name=PROFILE&page=N  an xvideos profile's videos (a room's linked one), live
+GET  /api/xvideos/video ?id=ID  one of them: its stream and files, for dreamfeed's own player (no xvideos page, no ads)
 GET  /api/post         ?id=x:ID|reddit:ID|e621:ID  one post (its own page): your kept copy if you saved it, else live
 GET  /api/post/comments ?id=x:ID|reddit:ID|e621:ID  a post's comments, live from its site
 GET  /api/profile       ?room=ROOM | ?x=HANDLE | ?reddit=NAME | ?e621=ARTIST  one profile across sites
@@ -334,6 +335,13 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
             return self.send(200, {"clip": clip}) if clip else self.send(404, {"error": "that clip isn't there"})
+        if path == "/api/xvideos/video":
+            try:
+                return self.send(200, livefeeds.xvideos_video(self.query().get("id", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)})
         if path == "/api/xvideos":
             q = self.query()
             try:
