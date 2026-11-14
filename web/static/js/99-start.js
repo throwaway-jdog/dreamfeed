@@ -1,7 +1,7 @@
 /* ---------- start ----------
    Last, once every part is read: the first page loads, and the page opens what its address names. */
 new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { rootMargin: "800px" }).observe($("sentinel"));
-refreshSummary();
+refreshSummary(); setInterval(() => { if (!document.hidden) refreshSummary(); }, 60000);
 // The page opens what its address names (old #live-style links too).
 {
   const old = { dashboard: "dashboard", comics: "comics", following: "live", live: "live" }[location.hash.slice(1)];

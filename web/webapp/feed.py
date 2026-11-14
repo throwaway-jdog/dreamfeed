@@ -15,6 +15,7 @@ from pathlib import Path
 
 from dreamfeed.feed import e621, livefeeds, savedposts
 
+from . import mutes
 from .common import DATA, FEED_MODES, FEED_SOURCES, PAGE_SIZE, REDDIT_USER, X_HANDLE, _cached, db, read_json
 
 
@@ -216,13 +217,14 @@ def follow_posts(source: str, cursor: str, mode: str = "following", tags: str = 
     for site in (FEED_SOURCES if source == "all" else picked):     # (Health: each site's last answer)
         SITE_STATE[site] = {"at": time.time(), "error": d["errors"].get(site)}
     _seen(d["posts"], d["users"])
+    d = {**d, "posts": mutes.posts(d["posts"])}        # (your mute list)
     if mode == "foryou":            # something new each time: what you were shown before is passed over
         posts, reads = _unshown(d["posts"]), 1
         while len(posts) < FRESH_MIN and d["more"] and reads < FRESH_READS:
             more = livefeeds.feed(mode, source, d["cursor"], s["reddit"]["follow"], s["e621"]["searches"], tags)
             _seen(more["posts"], more["users"])
             have = {p["id"] for p in posts}
-            posts += [p for p in _unshown(more["posts"]) if p["id"] not in have]
+            posts += [p for p in _unshown(mutes.posts(more["posts"])) if p["id"] not in have]
             d = {**more, "errors": {**d["errors"], **more["errors"]}}
             reads += 1
         d = {**d, "posts": posts}
@@ -287,6 +289,8 @@ def browse(sub: str, sort: str, after: str) -> dict:
     if livefeeds.place_blocked(sub):
         raise ValueError("not a subreddit dreamfeed reads")
     posts, nxt = livefeeds.reddit_page(f"/r/{sub}{BROWSE_SORTS[sort]}", after or None, "browse")
+    r = mutes.rules()             # (your mute list: its people and words; a muted subreddit you open still shows)
+    posts = [p for p in posts if not mutes.post_muted(p, {**r, "subs": set()})]
     if not after:
         with db() as conn:
             conn.execute("DELETE FROM browses WHERE lower(sub) = lower(?) AND sort = ?", (sub, sort))
@@ -525,7 +529,8 @@ def more_videos(post_id: str, cursor: str) -> dict:
             posts, nxt = [], None
         old = _stale(p["id"] for p in posts)          # (shown to you before: passed over)
         for p in posts:
-            if p["id"] not in seen and p["id"] not in old and any(x.get("kind") in VIDEO_KINDS for x in p["media"]):
+            if (p["id"] not in seen and p["id"] not in old and any(x.get("kind") in VIDEO_KINDS for x in p["media"])
+                    and not mutes.post_muted(p)):
                 if kind == "e621":
                     p = {**p, "place": where}
                 seen.add(p["id"]); out.append(p)

@@ -44,7 +44,7 @@ def _e621_post(p: dict, place: str, top: bool = False) -> dict | None:
             "place": place, "text": d["title"], "posted_at": d["date"], "link": d["link"],
             "via": "foryou" if top else "following", "saved": False,
             "score": ((p.get("score") or {}).get("total") or 0), "comments": p.get("comment_count"),
-            "votable": bool(e621.creds()),
+            "votable": bool(e621.creds()), "tags": sorted(e621.tags_of(p)),
             "media": [{"kind": kind, "url": shown, "full": _e621_full(p, kind) or got[0],
                        "poster": prev if kind == "video" else None}]}
 

@@ -8,7 +8,13 @@ A private, phone-first page for what you follow and like, read live from the sit
 - **Comics:** read live from e621's pools and multporn, chosen from what you read and follow.
 - **Live:** the Chaturbate rooms you follow, in dreamfeed's own player (several at once), with
   your recorder (streamonitor) and your recordings.
-- **Dashboard:** Health (whether each part is working), Sign-ins, the Feed's subreddits and searches.
+- **Dashboard:** Health (whether each part is working), your mute list, Sign-ins, the Feed's
+  subreddits and searches.
+- **🔍 Search:** everything at once: posts on X, Bluesky, Reddit and e621, videos, comics, live
+  rooms, subreddits, and what's yours (Saved, rooms and comics you follow, History).
+- **🔔 Updates:** what happened, by topic: rooms you follow going live, recordings and their
+  highlights, comics you follow with new pages, a part that stopped working. Nothing is pushed.
+- **History** (⋮): what you've opened here.
 
 The page is at `https://<your domain>/dreamfeed/` (behind formlogin). Nothing here is generated:
 the personas and their generated posts, comics and trained styles were retired, with the
@@ -18,7 +24,8 @@ generation pipeline (ComfyUI, the age checks, the trainers), in November 2026.
 
 - `worker/dreamfeed/`: dreamfeed's own code, read by the web app and run by the follow service
   (`python -m dreamfeed follow`):
-  - `core/`: sign-ins (`cookies`), the database (`db`), the one rule: nothing about minors (`safety`).
+  - `core/`: sign-ins (`cookies`), the database (`db`), the one rule: nothing about minors (`safety`),
+    Updates (`notices`, written by the web app and the follow service).
   - `feed/`: the live sites, a module each (`x`, `bsky`, `reddit`, `redgifs`, `e621posts` with
     e621's API in `e621`, `xvideos`, `comics`), mixed by `livefeeds`; Saved's copies (`savedposts`).
   - `live/`: Chaturbate: the follow service (`follow`), your recordings and highlights
@@ -26,7 +33,8 @@ generation pipeline (ComfyUI, the age checks, the trainers), in November 2026.
 - `web/`: the web app. `app.py` answers the requests (and starts its background work), passing
   them to its parts in `webapp/` by area: `common` (settings, the database, the page's security
   policy), `feed` (the live Feed, Saved, More videos), `videos`, `comics`, `live` (Chaturbate:
-  Following, Discover, recordings, your recorder, profiles, linking), `signins`, `health`, and
+  Following, Discover, recordings, your recorder, profiles, linking), `recordings` (after a
+  recording: Updates, highlights), `signins`, `health`, `mutes`, `updates`, `history`, `search`, and
   `retired` (the empty answers the iOS app still asks for). The page is `index.html` with its
   style in `static/app.css` and its script in parts by what they do in `static/js/` (served
   joined, as one `static/app.js`); `dvr.py` talks to your recorder.
@@ -335,6 +343,14 @@ Under each video:
   deletes what's been there over a week. Highlights are videos of their own, so deleting one
   leaves the other.
 
+**After a recording** (a room's profile): Nothing, Cut its highlights, or Cut its highlights, then
+delete the original, with how much to keep. The web app looks at the folder every 5 minutes: a
+recording is done once it has stopped changing (the same size twice, nothing written for 15
+minutes, and the recorder not recording into it). Each is told on Updates; for a room set so, its
+highlights are then cut as above, and with "then delete" the original goes to `.trash/` once the
+highlights are checked to play (a week, then gone; if they don't check out, the original stays).
+Only recordings done after you set it are cut, and ones under 2 minutes aren't.
+
 ### One profile across sites, Discover, Watch several
 
 **Profiles.** Every room has a Profile (under its card, or tap it in Not live): when they're
@@ -384,6 +400,22 @@ of yours that's live, or from Discover (for you, or search a tag or a few words)
 + Several starts this with the room you're watching; Follow follows a room you don't yet, and the
 title under the video stays current while you watch.
 
+## Mute, Updates, History, Search
+
+- **Mute** (the Dashboard): words (whole words in text, titles, tags: `feet` leaves out `feet_focus`
+  but not `feetish`), accounts (on one site, or any: X, Bluesky, Reddit, e621 artists, xvideos
+  uploaders, Chaturbate rooms, comic artists) and subreddits. They're left out of the Feed (and
+  Browse, More videos), Videos, Comics, Discover and Search; what you open yourself (a profile, a
+  post, Saved, rooms you follow) still shows. A post's 🔇 mutes its author or subreddit.
+- **Updates** (🔔, with the unread count): Live (a followed room went live: the follow service),
+  Recordings (one done, its highlights ready or failed), Comics (new pages of one you follow,
+  looked at every 6 hours), Health (a part not working, or a sign-in running out: once a day while
+  it lasts). Opening it marks them read; each is kept 30 days.
+- **History** (⋮ History): posts opened on their own page, videos played, comics read, rooms
+  watched, your recordings played; kept 180 days. Clearing it doesn't change what For you learned.
+- **Search** (🔍): see the top. X searches as you (posts with pictures or video), Bluesky's top
+  posts, Reddit's (18+ included), e621's tags; subreddits from Reddit's own search box.
+
 ## Backup
 
 - **Backed up:** `data/feed.db` (picked up automatically as SQLite), `data/saved/`, `state/`,
@@ -399,6 +431,7 @@ you came by link:
 
 - tabs: `/feed` (`/feed/foryou`), `/saved` (`/saved/x`, `/saved/reddit` ...), `/vids`, `/live`
   (`/live/discover`), `/comics` (`/comics/ID`: a comic), `/dashboard`; `/` opens the tab you used last
+- `/search/WORDS`, `/updates`, `/history`
 - rooms: `/room/NAME` (profile), `/room/NAME/watch`, `/room/NAME/video/PATH` (one of your videos),
   `/watch/A+B+C` (Watch several)
 - people and places: `/x/HANDLE`, `/u/NAME` (Reddit), `/r/SUB` (`/r/SUB/new`, `/r/SUB/top`),

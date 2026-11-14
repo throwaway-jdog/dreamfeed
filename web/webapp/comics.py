@@ -26,6 +26,9 @@ from pathlib import Path
 from dreamfeed.feed import comics as live
 from dreamfeed.feed import e621
 
+from dreamfeed.core import notices
+
+from . import history, mutes
 from .common import GENERATED, db, read_json
 from .feed import _now_shown, _stale
 
@@ -76,7 +79,7 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         except OSError as e:
             raise LookupError(f"e621 didn't answer ({e})")
         return {"results": [{**c, "url": c["link"], "thumb": "comic-search/thumb?u=" + urllib.parse.quote(c["cover"], safe="") if c.get("cover") else None}
-                            for c in found], "more": len(found) >= live.PAGE - 6}
+                            for c in mutes.comics(found)], "more": len(found) >= live.PAGE - 6}
     if site != "multporn":
         raise ValueError("bad site")
     url = f"{MULTPORN}/search?" + urllib.parse.urlencode({"search_api_views_fulltext": q, "page": page})
@@ -98,7 +101,16 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         out.append({"id": f"mp:{link.group(1)}", "source": "multporn", "title": title, "cover": cover,
                     "thumb": "comic-search/thumb?u=" + urllib.parse.quote(cover, safe="") if cover else None,
                     "url": f"{MULTPORN}/comics/{link.group(1)}", "link": f"{MULTPORN}/comics/{link.group(1)}", "tags": []})
-    return {"results": out, "more": f"page={page + 1}" in page_html}
+    return {"results": mutes.comics(out), "more": f"page={page + 1}" in page_html}
+
+
+def cover_thumb(cover: str | None) -> str | None:
+    """A cover's address for the page: e621's through dreamfeed, multporn's fetched here."""
+    if not cover:
+        return None
+    if cover.startswith("https://static1.e621.net/data/"):
+        return "e621-media/" + cover[len("https://static1.e621.net/"):]
+    return "comic-search/thumb?u=" + urllib.parse.quote(cover, safe="")
 
 
 def comic_cover(u: str) -> bytes | None:
@@ -145,6 +157,7 @@ def read(cid: str) -> dict:
                      (c["id"], json.dumps(_card(c)), len(c["images"]), now, now))
         r = conn.execute("SELECT page FROM comic_reads WHERE id = ?", (c["id"],)).fetchone()
         f = conn.execute("SELECT seen FROM comic_follows WHERE id = ?", (c["id"],)).fetchone()
+    history.note("comic", c["id"], c.get("title") or "", "comics/" + c["id"].replace(":", "/", 1), cover_thumb(c.get("cover")), _card(c))
     return {**c, "page": r["page"] if r else 1, "followed": bool(f), "new_from": (f["seen"] + 1) if f and f["seen"] else None}
 
 
@@ -184,7 +197,7 @@ def follow(req: dict) -> dict:
 def _check_follows() -> None:
     """New pages of the comics you follow (each looked at every CHECK_EVERY)."""
     with _conn() as conn:
-        rows = conn.execute("SELECT id, pages FROM comic_follows WHERE checked_at IS NULL OR checked_at < ?",
+        rows = conn.execute("SELECT id, pages, seen, data FROM comic_follows WHERE checked_at IS NULL OR checked_at < ?",
                             (time.time() - CHECK_EVERY,)).fetchall()
     for r in rows:
         try:
@@ -194,6 +207,11 @@ def _check_follows() -> None:
         with _conn() as conn:
             if n and n > r["pages"]:
                 conn.execute("UPDATE comic_follows SET pages = ?, new_at = ?, checked_at = ? WHERE id = ?", (n, time.time(), time.time(), r["id"]))
+                c = json.loads(r["data"])
+                new = n - max(r["seen"], r["pages"])
+                notices.add(conn, "comics", f"comic:{r['id']}:{n}", f"{c.get('title') or 'A comic you follow'}: "
+                            f"{new} new page{'s' if new != 1 else ''}", f"{n} pages now", "comics/" + r["id"].replace(":", "/", 1),
+                            cover_thumb(c.get("cover")))
             else:
                 conn.execute("UPDATE comic_follows SET checked_at = ? WHERE id = ?", (time.time(), r["id"]))
         time.sleep(2)
@@ -285,9 +303,9 @@ def _rank() -> list[dict]:
     with _conn() as conn:
         skip = {r[0] for r in conn.execute("SELECT id FROM comic_follows")} | {r[0] for r in conn.execute("SELECT id FROM comic_refused")} | \
                {r[0] for r in conn.execute("SELECT id FROM comic_reads WHERE furthest * 10 >= pages * 9 AND pages > 0")}
-    best = {}
+    best, mr = {}, mutes.rules()
     for c, prior, why in _candidates(t):
-        if c["id"] in skip:
+        if c["id"] in skip or mutes.comic_muted(c, mr):
             continue
         tags = {x.replace("_", " ") for x in c.get("tags") or []}
         s = prior + 0.25 * sum(w for g, w in t["tags"].items() if g.replace("_", " ") in tags)

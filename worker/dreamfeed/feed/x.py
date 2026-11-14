@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 
 from .common import MAX_COMMENTS, _cached, _comment, text_blocked
 
@@ -279,3 +280,17 @@ def x_bookmarks() -> list[dict]:
     """Your X bookmarks with pictures or videos, newest first (all of them)."""
     posts, _, _ = _x_posts(_x("https://x.com/i/bookmarks", 1, 20000, timeout=1800), "saved")
     return posts
+
+
+# ---- search (dreamfeed's Search) ----
+def x_search(q: str, start: int) -> dict:
+    """X's latest posts with pictures or video matching q (its search, as you). {"posts", "next"}."""
+    q = " ".join(q.split())[:200]
+    if not q:
+        raise ValueError("type what to look for")
+    url = "https://x.com/search?" + urllib.parse.urlencode({"q": f"{q} filter:media", "f": "live"})
+
+    def fetch():
+        posts, _, files = _x_posts(_x(url, start, X_PAGE), "search")
+        return {"posts": posts, "next": start + X_PAGE if files >= X_PAGE else None}
+    return _cached(f"x:search:{q}:{start}", fetch)

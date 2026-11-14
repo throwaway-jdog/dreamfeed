@@ -4,13 +4,19 @@ function setView(v) {
   if (state.view === v) return;
   state.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
-  const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", vids = v === "vids", page = dash || com || fol || posts || vids;
+  const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", vids = v === "vids";
+  const upd = v === "updates", hist = v === "history", srch = v === "search", page = dash || com || fol || posts || vids || upd || hist || srch;
   $("dash").hidden = !dash; $("comics").hidden = !com; $("follow").hidden = !fol; $("posts").hidden = !posts; $("vids").hidden = !vids;
+  $("updates").hidden = !upd; $("history").hidden = !hist; $("search").hidden = !srch;
+  $("upd-btn").setAttribute("aria-pressed", String(upd)); $("search-btn").setAttribute("aria-pressed", String(srch));
   $("grid").hidden = page; $("sentinel").hidden = page && !posts;
   $("saved-bar").hidden = v !== "liked"; if (v === "liked") importStatus();
-  try { localStorage.setItem("dreamfeed-view", v); } catch {}
+  if (!upd && !hist && !srch) try { localStorage.setItem("dreamfeed-view", v); } catch {}
   if (page) { grid.replaceChildren(); $("empty").hidden = true; state.gen++; }
-  if (dash) { loadReddit(); loadSignins(); loadHealth(); }
+  if (dash) { loadReddit(); loadSignins(); loadHealth(); loadMutes(); }
+  else if (upd) loadUpdates();
+  else if (hist) loadHistory();
+  else if (srch) showSearch();
   else if (com) loadComics();
   else if (fol) refreshFollowing();
   else if (posts) loadPosts(true);
@@ -68,12 +74,13 @@ async function refreshSummary() {
   try {
     const s = await api("api/summary");
     $("live-n").textContent = s.live || "";
+    $("upd-n").hidden = !s.notices; $("upd-n").textContent = s.notices > 99 ? "99+" : String(s.notices || "");
     $("sheet-info").textContent = s.live ? `${s.live} of the rooms you follow live` : "";
   } catch {}
 }
 
 /* ---------- pages: each part has its own address ----------
-   /feed, /feed/foryou, /saved[/x], /vids, /live[/discover], /comics[/ID], /dashboard,
+   /feed, /feed/foryou, /saved[/x], /vids, /live[/discover], /comics[/ID], /dashboard, /updates, /history, /search/WORDS,
    /room/NAME[/watch | /video/PATH], /watch/A+B, /x/HANDLE, /u/NAME,
    /r/SUB[/new|top], /e621/ARTIST, /post/SITE/ID, /xvideos/ID. Opening one replaces what's shown
    (no stacking): Close and Back go to the page before, or home when the page was opened by link. */
@@ -166,6 +173,9 @@ function route() {
     case "live": showLivePage(b === "discover" ? "discover" : "following", state.view === "follow"); return setView("follow");
     case "comics": setView("comics"); if (b) showComicId(b, c); return;
     case "dashboard": return setView("dash");
+    case "updates": return setView("updates");
+    case "history": return setView("history");
+    case "search": se.q = b || ""; if (state.view === "search") showSearch(); return setView("search");
     case "vids": return setView("vids");
     case "personas": case "p": case "item": return go("feed", true);     // (the personas are gone: their old addresses)
     case "room":

@@ -45,7 +45,7 @@ async function loadPerson(gen) {
   $("pf-info").textContent = [when, usualHours(times), b.age ? `${b.age}` : "", b.location,
     b.followers ? `${Number(b.followers).toLocaleString()} followers` : "", room && !d.followed ? "not followed" : ""].filter(Boolean).join(" · ");
   $("pf-about").textContent = b.about || ""; $("pf-about").hidden = !b.about;
-  renderDvr(d, gen);
+  renderDvr(d, gen); renderAuto(d);
   renderLinks(d);
   renderXHead(d);
   const who = [...(d.e621 || []).map(h => "e621:" + h), ...d.x, ...(d.bsky || []).map(h => "bsky:" + h), ...d.reddit.map(h => "u/" + h), ...(d.redgifs || []).map(h => "rg:" + h),
@@ -58,6 +58,32 @@ async function loadPerson(gen) {
 }
 $("pf-about").onclick = () => $("pf-about").classList.toggle("open");
 // The room on your recorder: what it's doing, Record / Pause, Remove (from its list).
+// After a recording (rooms you follow, with a videos folder): nothing, its highlights, or its
+// highlights and then the original into the trash. Only recordings made from then on.
+function renderAuto(d) {
+  const a = d.auto, sec = $("pf-auto-sec");
+  sec.hidden = !(d.room && d.followed && a && a.folder);
+  if (sec.hidden) return;
+  if (!$("pf-auto-keep").options.length)
+    for (const [label, keep] of KEEP) $("pf-auto-keep").append(new Option(`Keep ${label.toLowerCase()} (${Math.round(keep * 100)}%)`, String(keep)));
+  $("pf-auto-mode").value = a.mode; $("pf-auto-keep").value = String(a.keep);
+  $("pf-auto-keep").hidden = a.mode === "off";
+  $("pf-auto-note").textContent = a.mode === "off" ? "Each new recording can have its highlights cut for you."
+    : `For recordings from ${a.since ? new Date(a.since * 1000).toLocaleDateString() : "now"} on; the ones already here stay as they are.`
+      + (a.mode === "delete" ? " The original goes to the trash once its highlights are cut and play: it's in the videos folder's .trash for a week, then gone." : "");
+}
+async function saveAuto() {
+  const d = pf.data; if (!d || !d.room) return;
+  const mode = $("pf-auto-mode").value, keep = Number($("pf-auto-keep").value || 0.25);
+  if (mode === "delete" && (d.auto || {}).mode !== "delete"
+      && !confirm(`After each new recording of ${d.room}: cut its highlights, then move the original to the trash (deleted for good after a week)?`)) {
+    $("pf-auto-mode").value = (d.auto || {}).mode || "off"; return;
+  }
+  try { d.auto = { ...(await api("api/live/auto", { name: d.room, mode, keep })), folder: true }; } catch (err) { toast(err.message); }
+  renderAuto(d);
+}
+$("pf-auto-mode").onchange = saveAuto;
+$("pf-auto-keep").onchange = saveAuto;
 function renderDvr(d, gen) {
   const rec = d.dvr || {}, sec = $("pf-dvr-sec");
   sec.hidden = !(d.room && rec.on);

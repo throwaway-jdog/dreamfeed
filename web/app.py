@@ -74,6 +74,15 @@ POST /api/saved/import  {"sites": ["x", "bsky", "reddit", "e621"]} bring what yo
                         X's and Bluesky's bookmarks, Reddit's saved posts, e621's favorites; all when not given)
 GET  /api/saved/import  how that went, and how many saved posts' files are kept
 POST /api/live/follow   {"name": ROOM, "follow": bool} follow or unfollow it on Chaturbate
+POST /api/live/auto     {"name": ROOM, "mode": "off"|"keep"|"delete", "keep": 0.1-0.5} after each recording of it: its
+                        highlights, the original kept or then moved to the trash (recordings.py)
+GET  /api/mutes         your mute list;  POST /api/mutes {"kind": "word"|"account"|"subreddit", "value", "site"?, "remove"?}
+GET  /api/notices       ?topic=live|recordings|comics|health&offset=N  Updates, newest first
+POST /api/notices/read  {"topic"?} all read;  POST /api/notices/clear {"topic"?} | {"id"}  gone
+GET  /api/history       ?kind=post|video|comic|room|recording&offset=N&q=  what you've opened, newest first
+POST /api/history       {"kind": "post"|"room"|"recording", "key", "title", "link", "thumb"?, "data"?} one opened
+POST /api/history/remove {"kind", "key"} | {"all": true, "kind"?}
+GET  /api/search        ?in=posts&q=Q&source=all|x,bsky,reddit,e621&cursor=C | ?in=subreddits&q=Q | ?in=yours&q=Q
 (POSTs are JSON only.)
 """
 import json
@@ -91,7 +100,7 @@ from dreamfeed.live import cbprofile, cbvideos, linking
 
 from webapp import comics as comicfeed
 from webapp.comics import comic_cover, comic_page, comic_search, comics, delete_comic, rename_comic
-from webapp import health, retired, videos
+from webapp import health, history, mutes, recordings, retired, search, updates, videos
 from webapp.common import CSP, DATA, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
 from webapp.feed import FRESH_READS, _mark_saved, _seen, _unshown, browse, e621_vote, follow_posts, follow_settings, import_saved, import_status, more_videos, one_post, person_posts, random_subreddit, recent_browses, save_follow_settings, save_post, saved_file, saved_view
 from webapp.live import _dvr_once_watch, _followed, _link_sweep, cb_thumb, delete_room_video, discover_cb, discover_x, dvr_action, follow_room, follow_thumb, following, live_stream, live_videos, profile, queue_highlights, relink, restore_room_video, save_link
@@ -111,7 +120,7 @@ def page_script() -> bytes:
     return _script["body"]
 # Each part of the page has its own address (the page reads it and opens that part):
 PAGES = {"home", "feed", "saved", "live", "comics", "dashboard", "personas", "p", "item", "room", "watch",
-         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos", "bsky", "vids"}
+         "x", "u", "r", "e621", "post", "xvideos", "redgifs", "videos", "bsky", "vids", "updates", "history", "search"}
 
 
 PORT = 8000
@@ -203,12 +212,15 @@ class Handler(BaseHTTPRequestHandler):
         with file.open("rb") as f:
             f.seek(start)
             remaining = end - start + 1
-            while remaining:
-                chunk = f.read(min(1 << 20, remaining))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+            try:
+                while remaining:
+                    chunk = f.read(min(1 << 20, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):     # (the player stopped asking: closed, or skipped ahead)
+                pass
 
     def query(self) -> dict:
         from urllib.parse import parse_qs, urlsplit
@@ -260,7 +272,28 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_file(file)
             return self.send(404, {"error": "page not found"})
         if path == "/api/summary":
-            return self.send(200, retired.summary())
+            return self.send(200, {**retired.summary(), "notices": updates.unread()})
+        if path in ("/api/mutes", "/api/notices", "/api/history", "/api/search"):
+            q = self.query()
+            try:
+                if path == "/api/mutes":
+                    return self.send(200, mutes.listing())
+                if path == "/api/notices":
+                    return self.send(200, updates.listing(q.get("topic", ""), int(q.get("offset", "0") or 0)))
+                if path == "/api/history":
+                    return self.send(200, history.listing(q.get("kind", ""), int(q.get("offset", "0") or 0), q.get("q", "")))
+                where = q.get("in", "")
+                if where == "posts":
+                    return self.send(200, search.posts(q.get("q", ""), q.get("source", "all"), q.get("cursor", "")))
+                if where == "subreddits":
+                    return self.send(200, search.subreddits(q.get("q", "")))
+                if where == "yours":
+                    return self.send(200, search.yours(q.get("q", "")))
+                return self.send(400, {"error": "search in posts, subreddits or yours"})
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(502, {"error": str(e)[:200]})
         if path == "/api/dashboard":
             return self.send(200, retired.dashboard())
         if path == "/api/following":
@@ -332,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
                     d = livefeeds.x_related(q.get("id", ""), q.get("handle", ""), d["cursor"])
                     _seen(d["posts"], [])
                     posts += _unshown(d["posts"]); reads += 1
-                d = {**d, "posts": posts}
+                d = {**d, "posts": mutes.posts(posts)}
                 return self.send(200, {"posts": _mark_saved(d["posts"]), "cursor": d["cursor"]})
             except ValueError as e:
                 return self.send(400, {"error": str(e)})
@@ -504,7 +537,9 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/live/restore": restore_room_video, "/api/profile/link": save_link,
                    "/api/live/follow": follow_room, "/api/following/save": save_post, "/api/saved/import": import_saved,
                    "/api/dvr": dvr_action, "/api/signins": save_signin, "/api/browser/start": browser_start, "/api/e621/vote": e621_vote,
-                   "/api/vids/watch": videos.watch, "/api/vids/vote": videos.vote, "/api/profile/relink": relink}
+                   "/api/vids/watch": videos.watch, "/api/vids/vote": videos.vote, "/api/profile/relink": relink,
+                   "/api/live/auto": recordings.set_auto, "/api/mutes": mutes.change, "/api/notices/read": updates.mark_read,
+                   "/api/notices/clear": updates.clear, "/api/history": history.add, "/api/history/remove": history.remove}
         if path not in actions:
             return self.send(404, {"error": "not found"})
         # JSON only: a plain cross-site form post can't set this content type.
@@ -536,6 +571,8 @@ if __name__ == "__main__":
     threading.Thread(target=comicfeed.watch_follows, daemon=True).start()
     threading.Thread(target=_link_sweep, daemon=True).start()
     threading.Thread(target=_dvr_once_watch, daemon=True).start()
+    threading.Thread(target=recordings.watch, daemon=True).start()
+    threading.Thread(target=updates.watch_health, daemon=True).start()
     if BROWSER_POWER_DIR and BROWSER_PROFILE and BROWSER_SCREEN:
         threading.Thread(target=_browser_keeper, daemon=True).start()
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()

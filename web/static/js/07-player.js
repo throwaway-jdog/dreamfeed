@@ -95,6 +95,7 @@ async function playRoom() {
   else return plMsg("This browser can't play live video.");
   v.onplaying = () => { if (gen === pl.gen) plMsg(""); };
   v.play().catch(() => {});
+  noteHistory("room", r.name, r.name, `room/${r.name}/watch`, r.thumb || `follow/thumb/chaturbate/${r.name}.jpg`);
   if (d.title) { r.info = { ...(r.info || {}), title: d.title }; plInfo(r, d.title, d.viewers); }
   plWatch(gen);
 }
@@ -115,6 +116,7 @@ function playFile() {
   v.onplaying = null;
   v.onerror = () => { if (gen === pl.gen) plMsg("This browser can't play this video (MP4 plays everywhere)."); };
   v.muted = false; v.src = f.url;
+  noteHistory("recording", f.path, `${pf.room.name}: ${f.title}`, `room/${pf.room.name}/video/${f.path.split("/").map(enc).join("/")}`, f.poster || null);
   v.play().catch(() => { if (gen !== pl.gen) return; v.muted = true; $("pl-sound").hidden = false; v.play().catch(() => {}); });
   $("pl-sound").hidden = true;
 }

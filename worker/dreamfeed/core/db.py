@@ -161,6 +161,12 @@ def connect(path: Path) -> sqlite3.Connection:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(follows)")}
     if "bio_at" not in cols:      # when the room's bio was last read for its links
         conn.execute("ALTER TABLE follows ADD COLUMN bio_at TEXT")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(highlights)")}
+    if "then_delete" not in cols:  # after a recording: highlights, then the original into the trash (auto)
+        conn.execute("ALTER TABLE highlights ADD COLUMN then_delete INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE highlights ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")
+    from .notices import table as notices_table
+    notices_table(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(generations)")}
     if "embedding" not in cols:   # added with the feed
         conn.execute("ALTER TABLE generations ADD COLUMN embedding BLOB")

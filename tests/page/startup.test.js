@@ -17,7 +17,8 @@ const PAGES = [   // address -> the view it shows
   ["/dreamfeed/room/someroom", null], ["/dreamfeed/room/someroom/watch", null], ["/dreamfeed/watch/a+b", null],
   ["/dreamfeed/r/pics/top", null], ["/dreamfeed/post/x/1234567", null], ["/dreamfeed/x/someone", null], ["/dreamfeed/u/someone", null],
   ["/dreamfeed/e621/someartist", null], ["/dreamfeed/bsky/someone.bsky.social", null], ["/dreamfeed/xvideos/abc123456", null],
-  ["/dreamfeed/comics/7", "comics"], ["/dreamfeed/nonsense", "posts"],
+  ["/dreamfeed/comics/7", "comics"], ["/dreamfeed/updates", "updates"], ["/dreamfeed/history", "history"],
+  ["/dreamfeed/search", "search"], ["/dreamfeed/search/wolf%20solo", "search"], ["/dreamfeed/nonsense", "posts"],
 ];
 
 run("every address opens, without errors", async () => {

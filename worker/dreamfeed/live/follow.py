@@ -32,6 +32,7 @@ import urllib.request
 from pathlib import Path
 
 from . import cbprofile, cbvideos
+from ..core import notices
 from ..core.db import connect
 
 POLL = 120                   # seconds between looks
@@ -147,6 +148,10 @@ def chaturbate(conn, thumbs: Path, everyone: bool) -> str:
             else:
                 conn.execute("INSERT INTO live_times(source, name, start_at, end_at) VALUES ('chaturbate', ?, ?, ?)",
                              (r["username"], now, now))
+                info = _info(r)      # (a new session: on Updates)
+                notices.add(conn, "live", f"live:{r['username']}:{now}", f"{r['username']} is live",
+                            " · ".join(x for x in (info["title"], f"{info['viewers']} watching" if info["viewers"] else "") if x),
+                            f"room/{r['username']}/watch", f"follow/thumb/chaturbate/{r['username']}.jpg")
     for r in verified:
         _thumb(opener, r, thumbs / "chaturbate")
     hidden = len(live) - len(verified)

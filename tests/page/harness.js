@@ -27,6 +27,12 @@ function quiet(u) {
   if (u.includes("api/saved/import")) return { running: false, files: {} };
   if (u.includes("api/vids")) return { videos: [], more: false, continue: [], taste: { tags: [], n: 0 } };
   if (u.includes("api/comics")) return { comics: [], making: [], failed: [] };
+  if (u.includes("api/notices")) return { notices: [], more: false, counts: {}, topics: [] };
+  if (u.includes("api/history")) return { items: [], more: false, kinds: [] };
+  if (u.includes("api/mutes")) return { mutes: [], kinds: [], sites: [] };
+  if (u.includes("api/search?in=posts")) return { posts: [], cursor: null, errors: {} };
+  if (u.includes("api/search?in=subreddits")) return { subreddits: [] };
+  if (u.includes("api/search?in=yours")) return { saved: [], rooms: [], comics: [], history: [] };
   return {};
 }
 

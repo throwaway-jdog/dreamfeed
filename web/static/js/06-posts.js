@@ -43,6 +43,9 @@ async function showPost(p) {
   $("pv-h").textContent = { x: "Replies", reddit: "Comments", e621: "Comments" }[p.source] || "Comments";
   $("pv-comments").replaceChildren(el("p", "note", "Reading the comments…"));
   $("post-view").hidden = false; $("post-view").scrollTop = 0;
+  const m0 = (p.media || [])[0] || {};
+  noteHistory("post", p.id, p.text || `${p.author || ""} on ${({ x: "X", bsky: "Bluesky", reddit: "Reddit", e621: "e621" })[p.source] || p.source}`,
+              postPath(p.id), m0.kind === "image" ? m0.url : m0.poster || null, p);
   let d;
   try { d = await api(`api/post/comments?id=${encodeURIComponent(p.id)}`); }
   catch (err) { if (gen === pv.gen) $("pv-comments").replaceChildren(el("p", "note", err.message)); return; }
@@ -185,6 +188,7 @@ function postCard(p, opened) {
     up.onclick = () => cast(1); down.onclick = () => cast(-1);
     mark(); vote.append(up, n, down); acts.append(vote);
   }
+  if (canOpen) acts.append(muteButton(p, a));
   body.append(acts);
   a.append(av, body);
   return a;

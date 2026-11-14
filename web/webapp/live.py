@@ -16,6 +16,7 @@ from dreamfeed.feed import e621, livefeeds, savedposts
 from dreamfeed.live import cbprofile, cbvideos, linking
 
 from .common import DATA, FOLLOW, LIVE_DAYS, LIVE_INFO, REDDIT_USER, ROOM, X_HANDLE, _cached, _unix, db, read_json
+from . import mutes, recordings
 from .feed import _xuser
 
 
@@ -325,7 +326,7 @@ def discover_cb(mode: str, q: str, gender: str, offset: int) -> dict:
                 entry[0] += counts[t]
         ranked = sorted(score.values(), key=lambda e: (-e[0], -int(e[1].get("num_users") or 0)))
         page = ranked[offset:offset + DISCOVER_PAGE]
-        return {"rooms": [_room_card(r, followed) for _, r in page], "more": len(ranked) > offset + DISCOVER_PAGE, "tags": tags}
+        return {"rooms": mutes.rooms([_room_card(r, followed) for _, r in page]), "more": len(ranked) > offset + DISCOVER_PAGE, "tags": tags}
     if mode == "top":
         params = {**base, "limit": DISCOVER_PAGE, "offset": offset}
     elif mode == "search":
@@ -339,7 +340,7 @@ def discover_cb(mode: str, q: str, gender: str, offset: int) -> dict:
     else:
         raise ValueError("bad mode")
     rooms = _cb_list(params)
-    return {"rooms": [_room_card(r, followed) for r in rooms if _room_ok(r) and r["username"] not in followed],
+    return {"rooms": mutes.rooms([_room_card(r, followed) for r in rooms if _room_ok(r) and r["username"] not in followed]),
             "more": len(rooms) >= DISCOVER_PAGE}     # (it sometimes gives one more than asked)
 
 
@@ -481,6 +482,7 @@ def profile(room: str = "", x: str = "", reddit: str = "", e621_artist: str = ""
                     "SELECT start_at, end_at FROM live_times WHERE source = 'chaturbate' AND name = ? AND end_at >= datetime('now', ?)",
                     (room, f"-{LIVE_DAYS} days"))]
                 out["videos"] = len(cbvideos.scan(_followed()).get(room, []))
+                out["auto"] = {**recordings.setting(room), "folder": cbvideos.root() is not None}
             act = conn.execute("SELECT action, status, error FROM cb_actions WHERE room = ? AND created_at >= datetime('now', '-10 minutes')"
                                " ORDER BY id DESC LIMIT 1", (room,)).fetchone()
             out["action"] = dict(act) if act else None

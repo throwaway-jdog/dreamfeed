@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from dreamfeed.feed import xvideos as xv
 
+from . import history, mutes
 from .common import db
 from .feed import _now_shown, _stale
 
@@ -62,8 +63,10 @@ def video(url: str) -> dict:
                      " opened = opened + 1, last_at = excluded.last_at", (d["id"], time.time(), time.time()))
         w = conn.execute("SELECT position, finished FROM xv_watch WHERE id = ?", (d["id"],)).fetchone()
         v = conn.execute("SELECT vote FROM xv_votes WHERE id = ?", (d["id"],)).fetchone()
+    history.note("video", d["id"], d.get("title") or "", f"xvideos/{d['id']}", d.get("thumb") or d.get("poster"),
+                 {k: d.get(k) for k in ("id", "url", "title", "duration", "thumb", "uploader", "uploader_path")} | {"url": url})
     seen = _watched_ids()
-    related = [r for r in d["related"] if r["id"] not in seen]
+    related = [r for r in mutes.videos(d["related"]) if r["id"] not in seen]
     return {**d, "related": related[:20], "resume": w["position"] if w and not w["finished"] and w["position"] > CONTINUE_FROM else 0,
             "vote": v["vote"] if v else 0}
 
@@ -210,8 +213,9 @@ def _rank(length: str) -> list[dict]:
     least = int(length or 0) * 60
     skip = _watched_ids()
     best: dict[str, tuple[float, dict, str]] = {}
+    mr = mutes.rules()
     for v, prior, why in _candidates(t, length):
-        if v["id"] in skip or (least and v["duration"] < least):
+        if v["id"] in skip or (least and v["duration"] < least) or mutes.video_muted(v, mr):
             continue
         words = set(re.findall(r"[a-z0-9]+", v["title"].lower()))
         s = prior + 0.3 * sum(w for g, w in t["tags"].items() if g in words) + 0.5 * t["uploaders"].get(v.get("uploader_path"), 0.0)
@@ -268,4 +272,4 @@ def continue_watching() -> list[dict]:
 def search(q: str, page: int, length: str, sort: str) -> dict:
     d = xv.xv_search(q, page, length, sort or "relevance")
     skip = {r for r in _watched_ids()}
-    return {"videos": [{**v, "seen": v["id"] in skip} for v in d["videos"]], "more": d["more"]}
+    return {"videos": [{**v, "seen": v["id"] in skip} for v in mutes.videos(d["videos"])], "more": d["more"]}

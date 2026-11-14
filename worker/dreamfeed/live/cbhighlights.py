@@ -11,16 +11,20 @@ three times as much as sound: chatting is loud but still), smoothed over about 5
 best-scoring share is kept (keep: 0.1 to 0.5), in stretches with a second either side; gaps
 under 3 seconds are filled and stretches under 4 seconds dropped. The stretches are then
 encoded into one MP4 (H.264 and AAC) in the room's highlights/ folder, next to the original,
-which is left as it was.
+which is left as it was; or, asked for after a recording (then_delete: a room's "highlights, then
+delete the original"), moved to the trash once the highlights are checked to play (gone after
+cbvideos.TRASH_DAYS; Undo on the profile until then). Either way, Updates says how it went.
 """
 import json
 import math
 import os
 import re
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 from . import cbvideos
+from ..core import notices
 from ..core.db import connect
 
 STEP = 0.5            # seconds between looks
@@ -155,10 +159,11 @@ def cut(src: Path, dest: Path, spans: list[tuple[float, float]], info: dict, rep
 def run(job_id: int) -> None:
     data = Path(os.environ["DATA_DIR"])
     conn = connect(data / "feed.db")
-    job = conn.execute("SELECT room, path, keep FROM highlights WHERE id = ?", (job_id,)).fetchone()
+    job = conn.execute("SELECT room, path, keep, then_delete FROM highlights WHERE id = ?", (job_id,)).fetchone()
     if not job:
         return
-    room, rel, keep = job
+    room, rel, keep, then_delete = job
+    title = Path(rel).stem.replace("_", " ")
 
     def report(phase: str, pct: float) -> None:
         with conn:
@@ -204,12 +209,32 @@ def run(job_id: int) -> None:
         finally:
             part.unlink(missing_ok=True)
         kept = sum(b - a for a, b in spans)
+        trashed = None
+        if then_delete:            # the original into the trash, once its highlights are known to play
+            made = _probe(dest)
+            if made["video"] and made["duration"] >= min(kept, 10) * 0.8:
+                trashed = cbvideos.trash(src)
+            else:
+                print(f"follow: highlights of {rel} don't look right: the original is kept", flush=True)
         with conn:
             conn.execute("UPDATE highlights SET status = 'done', progress = NULL, result = ? WHERE id = ?",
-                         (json.dumps({"path": out_rel, "kept": round(kept), "of": round(d), "parts": len(spans)}), job_id))
-        print(f"follow: highlights of {rel}: {round(kept)} s of {round(d)} s in {len(spans)} parts", flush=True)
+                         (json.dumps({"path": out_rel, "kept": round(kept), "of": round(d), "parts": len(spans),
+                                      "trashed": trashed}), job_id))
+            notices.add(conn, "recordings", f"hl:{job_id}", f"Highlights of {room}: {_length(kept)} of {_length(d)}",
+                        title + (f" · the original is in the trash (gone after {cbvideos.TRASH_DAYS} days)" if trashed
+                                 else " · the original was kept: its highlights didn't check out" if then_delete else ""),
+                        f"room/{room}/video/{urllib.parse.quote(out_rel)}", None)
+        print(f"follow: highlights of {rel}: {round(kept)} s of {round(d)} s in {len(spans)} parts"
+              + (", original in the trash" if trashed else ""), flush=True)
     except Exception as e:      # any failure is the job's, shown on the profile
         with conn:
             conn.execute("UPDATE highlights SET status = 'failed', progress = NULL, error = ? WHERE id = ?",
                          (str(e)[:300], job_id))
+            notices.add(conn, "recordings", f"hl:{job_id}", f"Highlights of {room} failed", f"{title} · {str(e)[:200]}"
+                        + (" · the original was kept" if then_delete else ""), f"room/{room}", None)
         print(f"follow: highlights of {rel} failed: {e}", flush=True)
+
+
+def _length(s: float) -> str:
+    s = int(s)
+    return f"{s // 3600} h {s % 3600 // 60} min" if s >= 3600 else f"{max(1, s // 60)} min"

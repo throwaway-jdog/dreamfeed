@@ -3,6 +3,7 @@
 // name=value). Firefox: Playwright's Chromium has no H.264, so videos never start in it.
 //   - Live: a card's Profile opens the room's profile, visibly
 //   - Videos: For you lists videos and one plays
+//   - Search: its parts' pictures load; Updates and History open, the header fits a phone
 const { firefox, devices } = require("playwright");
 const assert = require("assert");
 const base = process.env.URL.replace(/\/$/, ""), cookie = process.env.COOKIE, host = new URL(base).hostname;
@@ -55,6 +56,7 @@ async function page(browser, opts) {
     await p.evaluate(() => { try { localStorage.removeItem("feedSource"); } catch {} });
     if (!ok.length) { console.log("     (no e621 posts: skipped)"); return; }
     assert.ok(ok.some(Boolean), `none of ${ok.length} e621 pictures loaded`);
+    assert.deepStrictEqual(p.errs, []);
   });
   await step("Comics: covers and pages load from the sites", async () => {
     const p = await page(browser, { viewport: { width: 1280, height: 900 } });
@@ -74,6 +76,30 @@ async function page(browser, opts) {
       if (!ok) { await p.goto(`${base}/comics`, { waitUntil: "networkidle" }); await p.waitForSelector("#cg .comic-card"); }
     }
     assert.ok(ok, "none of the first 3 comics showed its first page");
+    assert.deepStrictEqual(p.errs, []);
+  });
+  await step("Search: posts, subreddits and videos, their pictures allowed by the page's policy", async () => {
+    const p = await page(browser, { viewport: { width: 1280, height: 900 } });
+    await p.goto(`${base}/search/femboy`, { waitUntil: "networkidle" });
+    await p.waitForSelector("#se-posts .post", { timeout: 90000 });
+    await p.locator("#se-posts .post").first().scrollIntoViewIfNeeded(); await p.waitForTimeout(4000);    // (its pictures load when near)
+    const pics = await p.evaluate(() => [...document.querySelectorAll("#se-posts .post .media img")].slice(0, 6)
+      .map(i => ({ host: new URL(i.src, location.href).hostname, ok: i.complete && i.naturalWidth > 0 })));
+    assert.ok(pics.some(x => x.ok), `none of ${pics.length} pictures loaded`);
+    assert.ok(await p.isVisible("#se-subs-sec"), "no subreddits");
+    assert.deepStrictEqual(p.errs, []);
+  });
+  await step("Updates and History open; the header's buttons fit a phone", async () => {
+    const p = await page(browser, { viewport: { width: 390, height: 844 } });
+    await p.goto(`${base}/feed`, { waitUntil: "networkidle" });
+    for (const id of ["search-btn", "upd-btn", "menu-btn"]) {
+      const box = await p.locator("#" + id).boundingBox();
+      assert.ok(box && box.x >= 0 && box.x + box.width <= 390, `#${id} is off the screen: ${JSON.stringify(box)}`);
+    }
+    await p.click("#upd-btn"); await p.waitForTimeout(1500);
+    assert.ok(await p.isVisible("#updates"), "Updates isn't visible");
+    await p.click("#menu-btn"); await p.click("#sheet-history"); await p.waitForTimeout(1500);
+    assert.ok(await p.isVisible("#history"), "History isn't visible");
     assert.deepStrictEqual(p.errs, []);
   });
   await browser.close();

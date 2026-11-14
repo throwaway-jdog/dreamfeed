@@ -181,6 +181,118 @@ class E621Files(unittest.TestCase):
             self.assertFalse(pat.fullmatch(bad), bad)
 
 
+class Mutes(unittest.TestCase):
+    """Your mute list: whole words anywhere, an account on a site or any, a subreddit."""
+    def setUp(self):
+        from webapp import mutes
+        with mutes._conn() as conn:
+            conn.execute("DELETE FROM mutes")
+        mutes._rules["value"] = None
+
+    def test_matching(self):
+        from webapp import mutes
+        for m in ({"kind": "word", "value": "feet"}, {"kind": "word", "value": "big_belly"}, {"kind": "account", "value": "@Someone", "site": "x"},
+                  {"kind": "account", "value": "anywhere_guy"}, {"kind": "subreddit", "value": "r/Pics"}):
+            mutes.change(m)
+        post = lambda **k: {"source": "x", "author": "nobody", "text": "", "place": "", **k}
+        self.assertTrue(mutes.post_muted(post(text="Feet pics")))
+        self.assertTrue(mutes.post_muted(post(source="e621", tags=["feet_focus", "male"])), "tags, _ as a space")
+        self.assertFalse(mutes.post_muted(post(text="feetish things")), "whole words only")
+        self.assertTrue(mutes.post_muted(post(text="a big belly")))
+        self.assertTrue(mutes.post_muted(post(author="someone")))
+        self.assertFalse(mutes.post_muted(post(source="bsky", author="someone")), "that account is on X only")
+        self.assertTrue(mutes.post_muted(post(source="reddit", author="anywhere_guy")))
+        self.assertTrue(mutes.post_muted(post(source="reddit", place="pics")))
+        self.assertTrue(mutes.video_muted({"title": "x", "uploader_path": "/Anywhere_Guy"}))
+        self.assertTrue(mutes.room_muted({"name": "r", "info": {"title": "", "tags": ["feet"]}}))
+        self.assertTrue(mutes.comic_muted({"title": "Feet!", "tags": []}))
+        self.assertEqual(len(mutes.posts([post(text="feet"), post(text="hands")])), 1)
+        mutes.change({"kind": "word", "value": "feet", "remove": True})
+        self.assertFalse(mutes.post_muted(post(text="Feet pics")))
+
+    def test_refused(self):
+        from webapp import mutes
+        for bad in ({"kind": "colour", "value": "x"}, {"kind": "word", "value": ""}, {"kind": "subreddit", "value": "a b"},
+                    {"kind": "account", "value": "x", "site": "myspace"}):
+            with self.assertRaises(ValueError):
+                mutes.change(bad)
+
+
+class Updates(unittest.TestCase):
+    def test_told_once(self):
+        from dreamfeed.core import notices
+        from webapp import updates
+        with updates._conn() as conn:
+            conn.execute("DELETE FROM notices")
+            self.assertTrue(notices.add(conn, "live", "live:a:1", "a is live"))
+            self.assertFalse(notices.add(conn, "live", "live:a:1", "a is live"), "the same thing again isn't told twice")
+            with self.assertRaises(ValueError):
+                notices.add(conn, "weather", "w", "rain")
+        self.assertEqual(updates.unread(), 1)
+        updates.mark_read({})
+        self.assertEqual(updates.unread(), 0)
+
+
+class Recordings(unittest.TestCase):
+    """A recording counts as done once it stops changing; then it's told, and for a room set so,
+    its highlights are asked for (then the original deleted)."""
+    def test_after_a_recording(self):
+        from dreamfeed.core.db import connect
+        from webapp import recordings, updates
+        from webapp.common import DB_PATH
+        folder = tempfile.mkdtemp()
+        os.environ["CB_VIDEOS"] = folder
+        os.makedirs(f"{folder}/someroom")
+        old = f"{folder}/someroom/someroom-old.mp4"
+        open(old, "wb").write(b"x" * 10)
+        conn = connect(DB_PATH)
+        with conn:
+            conn.execute("INSERT OR IGNORE INTO follows (source, name) VALUES ('chaturbate', 'someroom')")
+            for t in ("rec_files", "kv", "auto_highlights", "highlights", "notices"):
+                conn.execute(f"DELETE FROM {t}") if conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone() else None
+        recordings.look()                                   # the first look: what's there is known, not new
+        self.assertEqual(updates.unread(), 0)
+        recordings.set_auto({"name": "someroom", "mode": "delete", "keep": 0.25})
+        new = f"{folder}/someroom/someroom-new.mp4"
+        open(new, "wb").write(b"y" * 20)
+        t = time.time() - 2000
+        os.utime(new, (t, t))
+        with conn:
+            conn.execute("UPDATE auto_highlights SET since = ?", (t - 10,))
+        recordings.look()                                   # seen: waits to see it stop changing
+        self.assertEqual(updates.unread(), 0)
+        recordings.look()                                   # the same: done
+        self.assertEqual(updates.unread(), 1)
+        job = conn.execute("SELECT room, path, keep, then_delete, auto FROM highlights").fetchall()
+        self.assertEqual([tuple(j) for j in job], [("someroom", "someroom/someroom-new.mp4", 0.25, 1, 1)])
+        recordings.look()                                   # once only
+        self.assertEqual(conn.execute("SELECT count(*) FROM highlights").fetchone()[0], 1)
+        os.environ.pop("CB_VIDEOS")
+
+
+class History(unittest.TestCase):
+    def test_entries(self):
+        from webapp import history
+        history.remove({"all": True})
+        history.add({"kind": "post", "key": "x:1", "title": "a post", "link": "post/x/1", "thumb": "https://pbs.twimg.com/a.jpg"})
+        history.add({"kind": "room", "key": "someroom", "title": "someroom", "link": "room/someroom/watch", "thumb": "cb-thumb/someroom.jpg?t=5"})
+        history.add({"kind": "post", "key": "x:1", "title": "a post", "link": "post/x/1"})         # (again: to the top, once)
+        got = history.listing("", 0)["items"]
+        self.assertEqual([i["key"] for i in got], ["x:1", "someroom"])
+        self.assertEqual([i["key"] for i in history.listing("", 0, "some")["items"]], ["someroom"])
+        for bad in ({"kind": "post", "key": "x", "title": "", "link": "https://evil.example/"}, {"kind": "post", "key": "x", "link": "/abs"},
+                    {"kind": "post", "key": "x", "link": "../up"}, {"kind": "video", "key": "x", "link": "xvideos/x"},
+                    {"kind": "room", "key": "Bad Room", "link": "room/x"}):
+            with self.assertRaises(ValueError):
+                history.add(bad)
+
+    def test_search_refuses_minors(self):
+        from webapp import search
+        for bad in ("", "loli", "x" * 101):
+            with self.assertRaises(ValueError):
+                search.yours(bad)
+
+
 class Contract(unittest.TestCase):
     """The app-contract checker itself finds what's wrong."""
     def test_finds_problems(self):

@@ -293,3 +293,16 @@ def _bsky_comments(pid: str) -> list[dict]:
             out.append(c)
         return out[:MAX_COMMENTS]
     return walk(d.get("thread") or {})
+
+
+# ---- search (dreamfeed's Search) ----
+def bsky_search(q: str, cursor: str | None) -> tuple[list[dict], str | None]:
+    """Bluesky's posts with pictures or video matching q, top first (as you)."""
+    q = " ".join(q.split())[:200]
+    if not q:
+        raise ValueError("type what to look for")
+
+    def fetch():
+        d = _bsky("app.bsky.feed.searchPosts", {"q": q, "sort": "top", "limit": 50, "cursor": cursor})
+        return [x for x in (_bsky_post(p, "search") for p in d.get("posts") or []) if x], d.get("cursor")
+    return _cached(f"bsky:search:{q}:{cursor}", fetch)

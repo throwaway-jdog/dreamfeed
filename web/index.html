@@ -25,15 +25,22 @@
       <button type="button" data-view="follow" aria-pressed="false">Live<span class="n" id="live-n"></span></button>
       <button type="button" data-view="dash" aria-pressed="false"><span class="long">Dashboard</span><span class="short">Dash</span></button>
     </div>
+    <div class="top-acts">
+      <button class="menu" id="search-btn" type="button" aria-label="Search" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
+      <button class="menu upd-btn" id="upd-btn" type="button" aria-label="Updates" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>
+        <span class="dotn" id="upd-n" hidden></span></button>
     <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false">
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-    </button>
+    </button></div>
   </div>
 </header>
 
 <div class="sheet" id="sheet" hidden>
   <p id="sheet-info"></p>
   <button type="button" id="sheet-saved">★ Saved</button>
+  <button type="button" id="sheet-history">History</button>
   <form method="post" action="logout"><button type="submit">Sign out</button></form>
 </div>
 
@@ -43,6 +50,18 @@
       <div class="vs-head"><h2>Health</h2><button type="button" class="secondary" id="hl-again">Look again</button></div>
       <p class="note" id="hl-note"></p>
       <ul class="plist hl-list" id="hl-list"></ul>
+    </div>
+
+    <div class="panel" id="mu-panel">
+      <h2>Mute</h2>
+      <p class="note">Left out of the Feed, Videos, Comics, Live's Discover and Search. What you open yourself (a profile, Saved, rooms you follow) still shows. Words match whole words in text, titles and tags.</p>
+      <ul class="plist mu-list" id="mu-list"></ul>
+      <form class="cs-row mu-form" id="mu-form" novalidate>
+        <select class="in" id="mu-kind" aria-label="What"><option value="word">Word</option><option value="account">Account</option><option value="subreddit">Subreddit</option></select>
+        <select class="in" id="mu-site" aria-label="Where" hidden><option value="">Any site</option><option value="x">X</option><option value="bsky">Bluesky</option><option value="reddit">Reddit</option><option value="e621">e621 artist</option><option value="xvideos">xvideos uploader</option><option value="chaturbate">Chaturbate room</option><option value="comics">Comic artist</option></select>
+        <input class="in" id="mu-value" maxlength="100" placeholder="a word, e.g. feet" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button class="primary" type="submit">Mute</button></form>
+      <div class="ed-err" id="mu-err" role="alert"></div>
     </div>
 
     <div class="panel" id="si-panel">
@@ -70,15 +89,44 @@
         <button class="primary" type="submit">Add</button></form>
       <div class="ed-err" id="e6-err" role="alert"></div>
     </div>
-
-
-
-
-    <div class="panel">
-      <h2>Recent runs</h2>
-      <p class="note" id="r-window"></p>
-      <ul class="runs" id="r-list"></ul>
-    </div>
+  </section>
+  <section class="vids updates" id="updates" hidden aria-label="Updates">
+    <div class="vs-head"><h2>Updates</h2><button type="button" class="secondary" id="up-clear">Clear</button></div>
+    <div class="seg five" id="up-topic" role="group" aria-label="Show">
+      <button type="button" data-t="" aria-pressed="true">All</button><button type="button" data-t="live" aria-pressed="false">Live</button>
+      <button type="button" data-t="recordings" aria-pressed="false">Recordings</button><button type="button" data-t="comics" aria-pressed="false">Comics</button>
+      <button type="button" data-t="health" aria-pressed="false">Health</button></div>
+    <p class="note" id="up-note"></p>
+    <div id="up-list"></div>
+    <button type="button" class="secondary more" id="up-more" hidden>More</button>
+  </section>
+  <section class="vids history" id="history" hidden aria-label="History">
+    <div class="vs-head"><h2>History</h2><button type="button" class="secondary" id="hi-clear">Clear history</button></div>
+    <div class="seg six" id="hi-kind" role="group" aria-label="Show">
+      <button type="button" data-k="" aria-pressed="true">All</button><button type="button" data-k="post" aria-pressed="false">Posts</button>
+      <button type="button" data-k="video" aria-pressed="false">Videos</button><button type="button" data-k="comic" aria-pressed="false">Comics</button>
+      <button type="button" data-k="room" aria-pressed="false">Live</button><button type="button" data-k="recording" aria-pressed="false">Recordings</button></div>
+    <p class="note" id="hi-note">What you've opened here. Clearing it doesn't change what For you has learned.</p>
+    <div id="hi-list"></div>
+    <button type="button" class="secondary more" id="hi-more" hidden>More</button>
+  </section>
+  <section class="vids search" id="search" hidden aria-label="Search">
+    <form class="vs-form" id="se-form" role="search">
+      <input class="in" id="se-q" type="search" maxlength="100" placeholder="Search everything" autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="search">
+      <button type="submit" class="primary">Search</button></form>
+    <p class="note" id="se-note">Posts on X, Bluesky, Reddit and e621, videos, comics, live rooms and subreddits; and what's yours: Saved, rooms and comics you follow, your history.</p>
+    <div class="vs-section" id="se-yours-sec" hidden><h2>Yours</h2><div id="se-yours"></div></div>
+    <div class="vs-section" id="se-rooms-sec" hidden><h2>Live now</h2><div class="vrow" id="se-rooms"></div></div>
+    <div class="vs-section" id="se-vids-sec" hidden><div class="vs-head"><h2>Videos</h2><button type="button" class="secondary" id="se-vids-all">All videos</button></div><div class="vrow" id="se-vids"></div></div>
+    <div class="vs-section" id="se-comics-sec" hidden><div class="vs-head"><h2>Comics</h2><button type="button" class="secondary" id="se-comics-all">All comics</button></div><div class="vrow" id="se-comics"></div></div>
+    <div class="vs-section" id="se-subs-sec" hidden><h2>Subreddits</h2><div class="se-subs" id="se-subs"></div></div>
+    <div class="vs-section fposts" id="se-posts-sec" hidden><h2>Posts</h2>
+      <div class="seg five" id="se-source" role="group" aria-label="From">
+        <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="x" aria-pressed="false">X</button>
+        <button type="button" data-s="bsky" aria-pressed="false">Bluesky</button><button type="button" data-s="reddit" aria-pressed="false">Reddit</button>
+        <button type="button" data-s="e621" aria-pressed="false">e621</button></div>
+      <p class="note" id="se-posts-note"></p><div id="se-posts"></div>
+      <button type="button" class="secondary more" id="se-more" hidden>More</button></div>
   </section>
   <section class="vids comics" id="comics" hidden aria-label="Comics">
     <form class="vs-form" id="cs-form" role="search">
@@ -152,6 +200,11 @@
       <p class="note" id="pf-info"></p>
       <p class="pf-about" id="pf-about" hidden></p>
       <div class="pf-sec" id="pf-dvr-sec" hidden><h3>Recording</h3><div class="pf-dvr-row" id="pf-dvr"></div></div>
+      <div class="pf-sec" id="pf-auto-sec" hidden><h3>After a recording</h3>
+        <div class="pf-auto" id="pf-auto">
+          <select class="in" id="pf-auto-mode" aria-label="After each recording"><option value="off">Nothing</option><option value="keep">Cut its highlights</option><option value="delete">Cut its highlights, then delete the original</option></select>
+          <select class="in" id="pf-auto-keep" aria-label="Keep about"></select></div>
+        <small class="note" id="pf-auto-note"></small></div>
       <div class="pf-sec"><h3>Accounts</h3><div class="pf-links" id="pf-links"></div>
         <form class="pf-link-form" id="pf-link-form">
           <select class="in" id="pf-link-src" aria-label="Site"></select>
@@ -257,7 +310,7 @@
   </div>
   <div class="saved-bar" id="saved-bar" hidden>
     <div class="seg" id="saved-src" role="group" aria-label="Show">
-      <button type="button" data-s="all" aria-pressed="true">All</button><button type="button" data-s="personas" aria-pressed="false">Personas</button>
+      <button type="button" data-s="all" aria-pressed="true">All</button>
       <button type="button" data-s="x" aria-pressed="false">X</button><button type="button" data-s="bsky" aria-pressed="false">Bluesky</button>
       <button type="button" data-s="reddit" aria-pressed="false">Reddit</button><button type="button" data-s="e621" aria-pressed="false">e621</button></div>
     <button type="button" class="secondary" id="saved-import">Bring in what you saved on the sites…</button>

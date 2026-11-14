@@ -233,3 +233,34 @@ def reddit_saved() -> list[dict]:
         if not after:
             break
     return out
+
+
+# ---- search (dreamfeed's Search) ----
+def reddit_search(q: str, after: str | None) -> tuple[list[dict], str | None]:
+    """Reddit's posts with pictures or video matching q, most relevant first (NSFW included)."""
+    q = " ".join(q.split())[:200]
+    if not q:
+        raise ValueError("type what to look for")
+    return reddit_page("/search?" + urllib.parse.urlencode({"q": q, "sort": "relevance", "type": "link", "include_over_18": "on"}),
+                       after, "search")
+
+
+def subreddit_search(q: str) -> list[dict]:
+    """Subreddits matching q: {"name", "title", "subscribers", "icon", "nsfw"} (Reddit's own search box's
+    suggestions: its /subreddits/search leaves 18+ ones out when asked through the API)."""
+    q = " ".join(q.split())[:100]
+
+    def fetch():
+        d = _reddit("/api/subreddit_autocomplete_v2?" + urllib.parse.urlencode({"query": q, "include_over_18": "true",
+                                                                                 "include_profiles": "false", "limit": 10, "raw_json": 1}))
+        out = []
+        for c in (d.get("data") or {}).get("children") or []:
+            s = c.get("data") or {}
+            name = str(s.get("display_name") or "")
+            if not re.fullmatch(r"[A-Za-z0-9_]{2,21}", name) or place_blocked(name) or text_blocked(s.get("public_description")):
+                continue
+            icon = s.get("community_icon") or s.get("icon_img") or ""
+            out.append({"name": name, "title": str(s.get("title") or "")[:200], "subscribers": s.get("subscribers"),
+                        "icon": icon if icon.startswith("https://") else None, "nsfw": bool(s.get("over18"))})
+        return out
+    return _cached("reddit:subsearch:" + q, fetch)

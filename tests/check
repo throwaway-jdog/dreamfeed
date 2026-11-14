@@ -37,7 +37,7 @@ for f in tests/page/*.test.js; do
 done
 
 part "server (offline, this checkout's code in the web image)"
-docker run --rm -u "$me" --network none -e DATA_DIR=/tmp/data -e STATE_DIR=/tmp/state -e LORA_DIR=/tmp -e GENERATE_WINDOW=00:00-06:00 -e HOME=/tmp \
+docker run --rm -u "$me" --network none -e DATA_DIR=/tmp/data -e STATE_DIR=/tmp/state -e HOME=/tmp \
   -v "$PWD/web/app.py":/app/app.py:ro -v "$PWD/web/webapp":/app/webapp:ro \
   -v "$PWD/worker/dreamfeed/core":/app/dreamfeed/core:ro -v "$PWD/worker/dreamfeed/feed":/app/dreamfeed/feed:ro \
   -v "$PWD/worker/dreamfeed/live":/app/dreamfeed/live:ro -v "$PWD/tests":/tests:ro -w /tests --entrypoint sh dreamfeed-web:local \
@@ -74,6 +74,10 @@ from webapp import comics
 cc = comics._conn()
 with cc:
     cc.execute('DELETE FROM comic_reads WHERE first_at >= ?', ($started - 5,))
+from webapp import history
+hc = history._conn()
+with hc:
+    hc.execute('DELETE FROM history WHERE at >= ?', ($started - 5,))
 " || true
 fi
 

@@ -24,12 +24,12 @@ import itertools
 from concurrent.futures import ThreadPoolExecutor
 from . import e621
 
-from .bsky import BSKY_DISCOVER, BSKY_HANDLE, BSKY_VIDEOS, _bsky, _bsky_comments, _bsky_json, _bsky_my_feeds, _bsky_post, _bsky_session, _bsky_uri, bsky_foryou, bsky_page, bsky_ready, bsky_saved, bsky_user, bsky_videos  # noqa: F401
+from .bsky import BSKY_DISCOVER, BSKY_HANDLE, BSKY_VIDEOS, _bsky, _bsky_comments, _bsky_json, _bsky_my_feeds, _bsky_post, _bsky_session, _bsky_uri, bsky_foryou, bsky_page, bsky_ready, bsky_saved, bsky_search, bsky_user, bsky_videos  # noqa: F401
 from .common import CACHE_TTL, MAX_GALLERY, POST_ID, SITES, SUBS_TTL, WHO_TTL, _cached, _merge, forget, place_blocked, text_blocked  # noqa: F401
 from .e621posts import TOP_TODAY, _e621_comments, _e621_post, e621_artist, e621_favorites, e621_page, e621_taste_searches  # noqa: F401
-from .reddit import MAX_USERS, REDDIT_AGENT, REDDIT_USER, _reddit, _reddit_comments, _reddit_listing, reddit_page, reddit_ready, reddit_save, reddit_saved, reddit_user, subscriptions, user_path  # noqa: F401
+from .reddit import MAX_USERS, REDDIT_AGENT, REDDIT_USER, _reddit, _reddit_comments, _reddit_listing, reddit_page, reddit_ready, reddit_save, reddit_saved, reddit_search, reddit_user, subreddit_search, subscriptions, user_path  # noqa: F401
 from .redgifs import redgifs_clip, redgifs_page  # noqa: F401
-from .x import X_HOME, _x, _x_comments, _x_posts, x_bookmarks, x_cookies, x_page, x_related  # noqa: F401
+from .x import X_HOME, _x, _x_comments, _x_posts, x_bookmarks, x_cookies, x_page, x_related, x_search  # noqa: F401
 from .xvideos import xvideos_page, xvideos_video  # noqa: F401
 
 
