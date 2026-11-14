@@ -46,12 +46,12 @@ FEED_IMAGES = ("https://pbs.twimg.com https://i.redd.it https://preview.redd.it 
                " https://styles.redditmedia.com https://a.thumbs.redditmedia.com https://b.thumbs.redditmedia.com"
                " https://*.xvideos-cdn.com"
                " https://i.imgur.com https://static1.e621.net https://media.redgifs.com https://*.redgifs.com"
-               " https://cdn.bsky.app https://video.bsky.app https://multporn.net")
+               " https://cdn.bsky.app https://video.bsky.app https://video.cdn.bsky.app https://multporn.net")
 FEED_VIDEO = ("https://video.twimg.com https://v.redd.it https://preview.redd.it https://i.imgur.com"
               " https://static1.e621.net https://media.redgifs.com https://*.redgifs.com https://video.bsky.app"
-              " https://*.xvideos-cdn.com")       # (xvideos' files, played in dreamfeed's own player)
+              " https://video.cdn.bsky.app https://*.xvideos-cdn.com")       # (xvideos' files, played in dreamfeed's own player)
 CSP = (f"default-src 'self'; img-src 'self' data: {FEED_IMAGES}; style-src 'self' 'unsafe-inline'; "
-       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it https://video.bsky.app https://*.xvideos-cdn.com; worker-src 'self' blob:; frame-src 'none'; "
+       f"media-src 'self' blob: {LIVE_VIDEO} {FEED_VIDEO}; connect-src 'self' {LIVE_VIDEO} https://v.redd.it https://video.bsky.app https://video.cdn.bsky.app https://*.xvideos-cdn.com; worker-src 'self' blob:; frame-src 'none'; "
        "script-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 
 
