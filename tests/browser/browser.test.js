@@ -61,7 +61,8 @@ async function page(browser, opts) {
   await step("Comics: covers and pages load from the sites", async () => {
     const p = await page(browser, { viewport: { width: 1280, height: 900 } });
     await p.goto(`${base}/comics`, { waitUntil: "networkidle" });
-    await p.waitForSelector("#cg .comic-card", { timeout: 60000 }); await p.waitForTimeout(3000);
+    await p.waitForSelector("#cg .comic-card", { timeout: 60000 });
+    await p.locator("#cg .comic-card").first().scrollIntoViewIfNeeded(); await p.waitForTimeout(3000);   // (For you is below the rows: its covers load when near)
     const covers = await p.evaluate(() => [...document.querySelectorAll("#cg .comic-card img")].slice(0, 12).map(i => ({ host: new URL(i.src, location.href).hostname, ok: i.complete && i.naturalWidth > 0 })));
     for (const host of new Set(covers.map(c => c.host))) {
       const mine = covers.filter(c => c.host === host);
