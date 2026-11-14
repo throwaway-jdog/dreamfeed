@@ -137,7 +137,7 @@ def _mp_cards(s: str) -> list[dict]:
     out = []
     parts = re.split(r'views-field-title"> <strong class="field-content"><a href="/comics/', s)
     for row in parts[1:]:
-        t = re.match(r'([a-z0-9_-]+)">([^<]+)</a>', row)
+        t = re.match(r'([a-z0-9_-]+)(?:\?[^"]*)?">([^<]+)</a>', row)   # (some links carry a query: ?rule44=4)
         if not t:
             continue
         img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"[^>]*alt="([^"]*)"', row)

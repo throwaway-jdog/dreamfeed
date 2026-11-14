@@ -90,7 +90,7 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         raise LookupError(f"multporn didn't answer ({e})")
     out = []
     for row in re.split(r'<div class="masonry-item views-row', page_html)[1:]:
-        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="/comics/([a-z0-9_-]+)">(.*?)</a>', row, re.S)
+        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="/comics/([a-z0-9_-]+)(?:\?[^"]*)?">(.*?)</a>', row, re.S)
         img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"', row)
         if not link:
             continue

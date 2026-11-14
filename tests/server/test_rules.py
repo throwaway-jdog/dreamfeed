@@ -174,9 +174,10 @@ class ComicLists(unittest.TestCase):
 
     def test_cards(self):
         from dreamfeed.feed import comics
-        page = " ".join(self.ROW.format(slug=s, title=t) for s, t in (("one", "One &amp; Two"), ("two", "Loli thing"), ("one", "One &amp; Two"), ("three", "Three")))
+        page = " ".join(self.ROW.format(slug=s, title=t) for s, t in (("one", "One &amp; Two"), ("two", "Loli thing"), ("one", "One &amp; Two"),
+                                                                         ("three", "Three"), ('four?rule44=4', "Four")))
         got = comics._mp_cards(page)
-        self.assertEqual([c["id"] for c in got], ["mp:one", "mp:three"], "minors left out, each once, in order")
+        self.assertEqual([c["id"] for c in got], ["mp:one", "mp:three", "mp:four"], "minors left out, each once, in order (a link's query too)")
         self.assertEqual(got[0]["title"], "One & Two")
         self.assertEqual(got[0]["posted"], "2026-11-12 08:37:00")
         self.assertEqual(got[0]["tags"], ["overwatch", "furry"])
