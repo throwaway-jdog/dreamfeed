@@ -14,6 +14,7 @@ run("Live: profile, link an account, record, multi view", async () => {
     if (u.includes("api/following")) return { rooms: [room("someroom"), room("other")], status: {}, dvr: { on: true } };
     if (u.includes("api/profile/link")) return { ok: true };
     if (u.includes("api/profile")) return profile();
+    if (u.includes("api/live/follow")) return { ok: true };
     if (u.includes("api/dvr")) { rec = b.action === "once" ? { state: "waiting", running: true, once: true } : b.action === "record" ? { state: "waiting", running: true, once: false } : null; return { dvr: rec }; }
     if (u.includes("api/discover/cb")) return { rooms: u.includes("q=goth") ? [room("goth1")] : [room("d1"), room("d2")], more: true };
     if (u.includes("api/live/stream")) return { status: "offline", hls: null };
@@ -45,5 +46,26 @@ run("Live: profile, link an account, record, multi view", async () => {
   p.$("mv-q").value = "goth"; p.$("mv-search").dispatchEvent(new p.w.Event("submit")); await p.sleep(200);
   await p.click("#mv-list button", 200);
   p.same(p.w.eval("mv.tiles.map(t => t.r.name)"), ["someroom", "goth1"]);
+  // a tile's name and buttons: hidden until you're on it, gone again after a few still seconds
+  const tile = p.d.querySelectorAll(".mv-tile")[1], tbtn = t => [...tile.querySelectorAll(".tb button")].find(b => b.textContent === t);
+  assert.ok(!tile.classList.contains("show"), "the overlay starts hidden");
+  await p.click(tile, 50);
+  assert.ok(tile.classList.contains("show") && !tile.querySelector("video").muted, "a tap shows it (and gives it the sound)");
+  await p.sleep(3200);
+  assert.ok(!tile.classList.contains("show"), "and it goes after 3 s");
+  // Follow, for a room you don't follow; someroom (followed) has none
+  assert.ok(!tbtn("Follow"), "goth1 came back followed");
+  p.w.eval(`mv.tiles[1].r.followed = false; mvActs(mv.tiles[1])`);
+  await p.click(tbtn("Follow"), 200);
+  p.same(p.lastCall("api/live/follow").body, { name: "goth1", follow: true });
+  assert.ok(tbtn("Followed ✓"));
+  assert.ok(![...p.d.querySelectorAll(".mv-tile")[0].querySelectorAll(".tb button")].some(b => b.textContent === "Follow"));
+  // Record: this stream or all; recording, a tap stops it
+  await p.click(tbtn("Record"), 100);
+  await p.click(tbtn("This stream"), 300);
+  p.same(p.lastCall("api/dvr").body, { name: "goth1", action: "once" });
+  await p.click(tbtn("● This stream"), 300);
+  p.same(p.lastCall("api/dvr").body, { name: "goth1", action: "stop" });
+  assert.ok(tbtn("Record"));
   p.noErrors();
 });

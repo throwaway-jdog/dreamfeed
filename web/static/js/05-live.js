@@ -146,15 +146,56 @@ function mvAdd(r) {
   const big = el("button", null, "Full"), rm = el("button", null, "✕"); big.type = rm.type = "button";
   big.onclick = e => { e.stopPropagation(); openRoom(t.r, mv.tiles.map(x => x.r)); };
   rm.onclick = e => { e.stopPropagation(); mvRemove(t); };
-  tb.append(big, rm);
+  rm.setAttribute("aria-label", `Close ${r.name}`);
+  const acts = el("span", "tb-acts");
+  tb.append(acts, big, rm);
   box.append(v, lbl, msg, tb);
-  box.onclick = () => mvLoud(t);
-  Object.assign(t, { v, box, msg, title });
+  box.onclick = () => { mvLoud(t); mvShow(t); };
+  // its name and buttons only while you're on it (hover, or a tap on a phone), gone after a few still seconds
+  box.onpointermove = e => { if (e.pointerType === "mouse") mvShow(t); };
+  box.onpointerleave = e => { if (e.pointerType === "mouse") mvHide(t); };
+  Object.assign(t, { v, box, msg, title, acts, hideAt: null });
+  mvActs(t);
   mv.tiles.push(t);
   $("mv-grid").append(box);
   mvTitle(t, (r.info || {}).title, (r.info || {}).viewers);
   mvPlay(t);
   mvLayout(); mvBar(); if (!$("multi").hidden) setUrl(watchPath());
+}
+const MV_SHOW = 3000;
+function mvShow(t, ms = MV_SHOW) {
+  t.box.classList.add("show");
+  clearTimeout(t.hideAt);
+  t.hideAt = setTimeout(() => mvHide(t), ms);
+}
+function mvHide(t) { clearTimeout(t.hideAt); t.box.classList.remove("show"); }
+// Follow (rooms you don't yet) and Record (this stream or all of them; recording, a tap stops it)
+function mvActs(t) {
+  const r = t.r, out = [];
+  const btn = (label, on) => { const b = el("button", null, label); b.type = "button"; b.onclick = e => { e.stopPropagation(); on(b); }; return b; };
+  if (!(follow.names || new Set()).has(r.name) && !r.followed) out.push(btn("Follow", async b => {
+    b.disabled = true; b.textContent = "Following…";
+    try { await api("api/live/follow", { name: r.name, follow: true }); r.followed = true; b.textContent = "Followed ✓"; setTimeout(refreshFollowing, 8000); }
+    catch (err) { toast(err.message); b.disabled = false; b.textContent = "Follow"; }
+  }));
+  if ((follow.dvr || {}).on) {
+    if (r.dvr === undefined) r.dvr = ((follow.live || []).find(x => x.name === r.name) || {}).dvr || null;
+    const on = !!(r.dvr && r.dvr.running), once = on && r.dvr.once;
+    const send = async (b, action) => {
+      b.disabled = true;
+      try { r.dvr = (await api("api/dvr", { name: r.name, action })).dvr; mvActs(t); mvShow(t); refreshFollowing(); }
+      catch (err) { toast(err.message); b.disabled = false; }
+    };
+    const rb = btn(on ? (once ? "● This stream" : "● Recording") : "Record", b => {
+      if (on) return send(b, "stop");
+      mvShow(t, 8000);                          // longer, while you choose
+      b.replaceWith(btn("This stream", x => send(x, "once")), btn("All streams", x => send(x, "record")));
+    });
+    rb.title = on ? "Stop recording" : r.dvr ? r.dvr.status || "" : "Record it";
+    if (on) rb.classList.add("rec");
+    out.push(rb);
+  }
+  t.acts.replaceChildren(...out);
 }
 function mvTitle(t, title, viewers) {
   t.title.textContent = [viewers != null ? `${Number(viewers).toLocaleString()} watching` : "", title || ""].filter(Boolean).join(" · ");
@@ -184,7 +225,7 @@ async function mvPlay(t) {
   v.play().catch(() => {});
 }
 function mvRemove(t) {
-  t.gen++; if (t.hls) t.hls.destroy(); t.v.pause(); t.v.removeAttribute("src"); t.v.load(); t.box.remove();
+  t.gen++; clearTimeout(t.hideAt); if (t.hls) t.hls.destroy(); t.v.pause(); t.v.removeAttribute("src"); t.v.load(); t.box.remove();
   mv.tiles = mv.tiles.filter(x => x !== t);
   if (!mv.tiles.length) return leave();
   mvLayout(); mvBar(); setUrl(watchPath());

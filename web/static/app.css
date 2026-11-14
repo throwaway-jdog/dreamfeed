@@ -513,6 +513,11 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .mv-tile .msg:empty { display: none; }
 .mv-tile .tb { position: absolute; top: 6px; display: flex; gap: 6px; right: 6px; }
 .mv-tile .tb button { min-height: 34px; padding: 0 10px; border-radius: 999px; background: rgb(0 0 0 / .6); color: #fff; border: 0; font-size: 13px; font-weight: 600; }
+.mv-tile .tb { left: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.mv-tile .tb-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-right: auto; }
+.mv-tile .tb button.rec { color: #ff5a5a; }
+.mv-tile .lbl, .mv-tile .tb { opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s .2s; }
+.mv-tile.show .lbl, .mv-tile.show .tb, .mv-tile:focus-within .lbl, .mv-tile:focus-within .tb { opacity: 1; visibility: visible; transition: opacity .2s; }
 .post .name.who { cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
 .dx-wrap { border-bottom: 1px solid var(--rule); padding: 8px 0 12px; }
 .dx-wrap h3 { margin: 0; padding: 0 14px 6px; font-size: 14px; color: var(--muted); font-weight: 600; }
