@@ -6,7 +6,7 @@ python -m dreamfeed follow reddit-login [ADDRESS]
                               Sign Reddit in by hand (the Dashboard's Sign in with Reddit does it for you).
 
 The rest of dreamfeed's code here is read by the web app (feed/: the live sites; live/:
-Chaturbate; core/: sign-ins, the database, the word rules).
+Chaturbate; core/: sign-ins, the database, the minors rule).
 """
 import sys
 

@@ -1,4 +1,4 @@
-"""The rules dreamfeed's code applies on its own, without the sites: what's left out (youth words,
+"""The rules dreamfeed's code applies on its own, without the sites: what's left out (minors only,
 your e621 blacklist), reading cookies and xvideos' lists, post ids, what requests are refused.
 Offline and quick. Run in the web image with this checkout's code (tests/check does):
 
@@ -14,14 +14,20 @@ import unittest
 sys.path.insert(0, "/app")
 
 
-class Youth(unittest.TestCase):
-    """xvideos: words that only mean minors are left out; adult-site words aren't."""
+class Minors(unittest.TestCase):
+    """The one rule: words that only mean minors are left out, everywhere; nothing else is."""
     def test_words(self):
+        from dreamfeed.core import safety
         from dreamfeed.feed import xvideos as xv
-        for t in ("underage", "child", "16 yo", "17yo", "loli", "shota", "jailbait", "preteen"):
-            self.assertTrue(xv.youth(t), t)
-        for t in ("teen", "young wife", "18yo", "schoolgirl outfit", "barely legal", "canteen", "kidding around", "Youngblood", "petite"):
-            self.assertFalse(xv.youth(t), t)
+        from dreamfeed.feed.common import place_blocked, text_blocked
+        for t in ("underage", "child", "16 yo", "17yo", "loli", "shota", "jailbait", "preteen", "under_age"):
+            self.assertTrue(safety.minors(t) and xv.youth(t) and text_blocked(t), t)
+        for t in ("teen", "young wife", "18yo", "21 years old", "118yo", "schoolgirl outfit", "barely legal", "canteen", "kidding around", "Youngblood",
+                  "petite", "femboy", "trap", "feral", "stepsister", "virgin", "tiny", "sleeping", "forced", "gore", "flat chest"):
+            self.assertFalse(safety.minors(t) or xv.youth(t) or text_blocked(t), t)
+        for ok in ("femboy", "FemboyHentai", "feral", "petite", "stepsister", "teens"):
+            self.assertFalse(place_blocked(ok), ok)
+        self.assertTrue(place_blocked("jailbait"))
 
 
 class XvideosLists(unittest.TestCase):
@@ -133,13 +139,21 @@ class Refusals(unittest.TestCase):
 
 
 class Comics(unittest.TestCase):
-    """Drawn work: words dreamfeed never allows leave a comic out; what's asked is checked."""
+    """Drawn work: comics about minors are left out (and nothing else); what's asked is checked."""
     def test_words(self):
         from dreamfeed.feed import comics
-        for t in ("loli comic", "young", "cub", "feral", "shota"):
+        for t in ("loli comic", "young", "cub", "shota", "young_anthro"):
             self.assertTrue(comics.blocked(t), t)
-        for t in ("wolf solo", "Youngblood", "big tits", "furry"):
+        for t in ("wolf solo", "Youngblood", "big tits", "furry", "feral", "femboy", "bestiality", "rape", "incest"):
             self.assertFalse(comics.blocked(t), t)
+
+    def test_e621_searches(self):
+        from dreamfeed.feed import e621
+        for ok in ("femboy", "feral", "trap solo", "petite"):
+            self.assertEqual(e621.query(ok), ok + " " + e621.SEARCH_NOT)
+        for bad in ("young", "cub solo", "loli"):
+            with self.assertRaises(ValueError):
+                e621.query(bad)
 
     def test_refused(self):
         from webapp import comics

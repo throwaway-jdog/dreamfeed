@@ -23,7 +23,6 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from dreamfeed.core import safety
 from dreamfeed.feed import comics as live
 from dreamfeed.feed import e621
 
@@ -381,9 +380,6 @@ def rename_comic(req: dict) -> dict:
     title = " ".join(str(req.get("title") or "").split())[:COMIC_TITLE]
     if not title:
         raise ValueError("give it a title")
-    bad = safety.story_blocked(title)
-    if bad:
-        raise ValueError(f"the title can't include: {', '.join(bad)}")
     folder, meta = _finished_comic(gid)
     (folder / "comic.json").write_text(json.dumps(meta | {"title": title}, ensure_ascii=False, indent=1))
     with db() as conn:

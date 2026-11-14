@@ -11,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from ..core import safety
 from .common import _cached
 
 
@@ -90,12 +91,8 @@ XV_PATH = re.compile(r"^/video\.[a-z0-9]{6,20}/[A-Za-z0-9_-]{0,200}$")
 # Words that only mean minors: a video whose title or tags have one is left out, and none is
 # ever searched for (on top of dreamfeed's own word rules). Adult-site words like "teen" or
 # "young" aren't among them: on xvideos nearly every title has one.
-YOUTH = re.compile(r"(?<![a-z])(?:jailbait|loli|lolicon|shota|shotacon|underage|under ?age|minors?|child|children|kids?|"
-                   r"preteens?|pre ?teen|toddlers?|infants?|1[0-7] ?y(?:ears?)? ?o(?:ld)?|1[0-7]yo)(?![a-z])", re.I)
-
-
 def youth(*texts) -> bool:
-    return any(YOUTH.search(str(t or "").replace("_", " ").replace("-", " ")) for t in texts)
+    return bool(safety.minors(*texts))
 XV_UPLOADER = re.compile(r"^/[A-Za-z0-9_-]{2,80}$")
 XV_LENGTHS = {"": "", "10": "10min_more", "20": "20min_more"}     # (minutes at least: xvideos' own length filter)
 XV_SORTS = ("relevance", "uploaddate", "rating", "views")

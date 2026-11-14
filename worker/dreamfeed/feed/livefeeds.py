@@ -11,10 +11,9 @@ kept on disk). Used by the web app; standard library plus the gallery-dl command
   24 hours (For you); or, either way, only the tags you filter by. Pictures show e621's 850px
   copy; Save keeps the original.
 
-What's still left out, by the rules alone (instant, no models): e621 posts with a tag dreamfeed
-never allows (e621.NEVER: the youth tags, feral, bestiality; e621 hosts those, so they aren't
-moderated away there), subreddits whose names have those words, and posts whose text does
-(safety.request_blocked). Pictures aren't looked at.
+What's left out, by the rules alone: anything about minors. e621 posts with its tags for them
+(e621.NEVER), and subreddits, posts and comments with words that only mean minors (safety.minors).
+Pictures aren't looked at.
 
 These are real people: nothing here goes to training, styles, comics or generation.
 

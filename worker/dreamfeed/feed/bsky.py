@@ -126,7 +126,7 @@ def _bsky_post(p: dict, via: str) -> dict | None:
     m = re.fullmatch(r"at://did:plc:([a-z2-7]{24})/app\.bsky\.feed\.post/([a-z2-7]{13})", uri)
     media = _bsky_media(p.get("embed") or {})
     labels = {str(l.get("val")) for l in p.get("labels") or []}
-    if not m or not media or text_blocked(rec.get("text")) or labels & {"!hide", "!takedown", "gore"}:
+    if not m or not media or text_blocked(rec.get("text")) or labels & {"!hide", "!takedown"}:
         return None
     try:
         when = dt.datetime.fromisoformat(str(rec.get("createdAt") or p.get("indexedAt")).replace("Z", "+00:00")).astimezone(

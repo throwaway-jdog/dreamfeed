@@ -6,7 +6,6 @@ import datetime as dt
 import re
 import threading
 import time
-from . import e621
 from ..core import safety
 
 
@@ -44,15 +43,12 @@ def forget(prefix: str = "") -> None:
 
 
 def text_blocked(*texts) -> bool:
-    """Text with words dreamfeed never takes (young, feral and the like)."""
-    t = " ".join(str(x) for x in texts if x).replace("_", " ")
-    return bool(t and safety.request_blocked(t))
+    """Text about minors (safety.minors)."""
+    return bool(safety.minors(*texts))
 
 
 def place_blocked(name: str) -> bool:
-    words = name.replace("_", " ").lower()
-    return bool(safety.request_blocked(words) or safety.story_blocked(words)
-                or any(w in words for w in e621.NEVER if len(w) > 3))
+    return bool(safety.minors(name))
 
 
 def _utc(ts: float) -> str:

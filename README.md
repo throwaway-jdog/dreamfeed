@@ -18,7 +18,7 @@ generation pipeline (ComfyUI, the age checks, the trainers), in November 2026.
 
 - `worker/dreamfeed/`: dreamfeed's own code, read by the web app and run by the follow service
   (`python -m dreamfeed follow`):
-  - `core/`: sign-ins (`cookies`), the database (`db`), the word rules (`safety`).
+  - `core/`: sign-ins (`cookies`), the database (`db`), the one rule: nothing about minors (`safety`).
   - `feed/`: the live sites, a module each (`x`, `bsky`, `reddit`, `redgifs`, `e621posts` with
     e621's API in `e621`, `xvideos`, `comics`), mixed by `livefeeds`; Saved's copies (`savedposts`).
   - `live/`: Chaturbate: the follow service (`follow`), your recordings and highlights
@@ -46,13 +46,15 @@ when needed). Before a deploy `tests/check`, after it `tests/check --live`.
 
 ## What's left out
 
-By the rules alone (instant: no picture is looked at):
-- **Drawn work** (e621, comics): posts and comics with e621's youth, feral or bestiality tags, or
-  words dreamfeed never allows in their titles and tags; your own e621 blacklist too (signed in).
-- **The Feed**: subreddits and posts whose names or text have those words.
-- **Videos** (xvideos, real adults): titles and tags with words that only mean minors
-  (underage, child, loli, ages under 18 ...); adult-site words like "teen" aren't filtered.
-- Real people's posts and videos never go anywhere but your own page and Saved.
+Only content about minors, by its words and tags alone (`worker/dreamfeed/core/safety.py`; no
+picture is looked at). Everything else the sites show is shown: femboy, feral, petite, step-family,
+non-consent, gore and the rest are yours to filter (your e621 blacklist, when signed in, applies).
+- **Everywhere** (posts, comments, subreddits, rooms, videos, searches): words that only mean
+  minors (underage, child, loli, shota, ages under 18 ...). Adult-site words like "teen",
+  "young" or "schoolgirl" aren't among them.
+- **Drawn work** (e621, comics) also: e621's tags for minors (`young`, `cub` ...), in a post's
+  tags or a comic's title and tags, since a drawing has no verified age.
+- **Live:** rooms Chaturbate doesn't list as age verified, or as under 18.
 
 ## Folder layout
 
@@ -68,11 +70,6 @@ dreamfeed/
              server's browser's profile), generated/ (thumbnails; your old comics)
   state/     login.json, session.key
 ```
-Left from the generation pipeline, unused, and safe to delete: `models/` (checkpoints and LoRAs),
-the style training data (`LORA_DATA_DIR`), `data/personas.json`, `data/liked/`, the generated
-images in `data/generated/` (all but `follow/` and the `comic-*` folders), and the old images
-(`docker image rm dreamfeed-worker:local dreamfeed-comfyui:local dreamfeed-agecheck:local
-dreamfeed-trainer:local dreamfeed-video-trainer:local`).
 
 ## Comics
 
@@ -91,8 +88,8 @@ A feed like the rest, read live from e621's pools (its comics) and multporn, not
   deleted from their grid of pages. Those imported from multporn are followed there, so their new
   pages come in under Updated.
 
-Drawn work: a comic whose title, tags or categories have a word dreamfeed never allows (e621's
-youth and feral tags, the safety rules) is left out; lists judge comics by their cover, and one
+Drawn work: a comic whose title, tags or categories have anything about minors (e621's tags
+for them, minors-only words) is left out; lists judge comics by their cover, and one
 that turns out to have such a page is refused when opened and left out after. No picture is
 looked at. e621's pictures reach the page through dreamfeed (`/e621-media/`): e621 now turns away
 pictures a browser shows on another site.
@@ -108,11 +105,8 @@ you follow.
 The Feed is read live: when you open it (or tap More), the web app asks the sites for their
 newest posts and shows them; their pictures and videos load straight from the sites' own
 servers (no referrer is sent). Nothing of them is downloaded or kept, and the pictures aren't
-looked at by the checks. A page is reused for 2 minutes (switching tabs, coming back). What's
-still left out, by the rules alone: e621 posts with a tag dreamfeed never allows (e621 hosts
-those on purpose, so its own moderation doesn't remove them), subreddits whose names have words
-dreamfeed never takes (young, feral and the like) and posts whose text does. Real people's
-posts never go to training, styles, comics or generation. Open on X/Reddit goes to the post.
+looked at by the checks. A page is reused for 2 minutes (switching tabs, coming back). Left out
+(What's left out): anything about minors. Open on X/Reddit goes to the post.
 
 **Which sites:** All, or tap the ones you want (X and Reddit, say; tap one again to drop it),
 remembered in this browser; Following and For you both take it.
@@ -135,9 +129,8 @@ remembered in this browser; Following and For you both take it.
   with sound: Safari plays it itself, other browsers through hls.js) and redgifs clips (asked
   of redgifs' API). Text-only posts are left out.
 - **e621:** the Dashboard's **e621** panel's tag searches (an artist, a character,
-  `wolf solo`), newest first. A search with one of the never-allowed tags is refused, and every
-  search asks e621 to leave them out too (`e621.NEVER`: the youth tags such as `young` and
-  `cub`, `feral`, `bestiality`). `E621_USERNAME` (optional) names you in the user agent.
+  `wolf solo`), newest first. A search for minors (`young`, `cub` ...) is refused, and every
+  search asks e621 to leave them out too (`e621.NEVER`). `E621_USERNAME` (optional) names you in the user agent.
 
   **Signed in to e621** (the Dashboard's Sign-ins: your username and an API key from e621's
   Account, Manage API Access; checked before it's kept, or `E621_USERNAME` and `E621_API_KEY`):
@@ -174,7 +167,7 @@ the **Saved** tab, below):
   remembered), then adds your X bookmarks, your Bluesky bookmarks, your Reddit saved posts (the
   last 1000 Reddit keeps) and your e621 favorites (the last 1000; signed in to e621) with
   pictures or videos, kept the same
-  way; the same word rules leave some out, and ones you unsaved here stay out. Run it again any
+  way; the minors rule leaves some out, and ones you unsaved here stay out. Run it again any
   time for new ones. Reddit's saved list needs the sign-in's `history` permission (signed in
   before it was added: sign in again, below). Unsaving an imported X post doesn't remove the
   bookmark on X.

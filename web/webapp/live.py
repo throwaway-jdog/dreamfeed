@@ -274,12 +274,12 @@ def _cb_list(params: dict) -> list[dict]:
 
 def _room_ok(r: dict) -> bool:
     """Shown in Discover: age verified, 18 or over, no password, and nothing dreamfeed never
-    takes in its tags or title."""
+    takes (minors) in its tags or title."""
     age = r.get("display_age")
     words = " ".join([str(t) for t in r.get("tags") or []] + [re.sub(r"<[^>]+>", " ", str(r.get("room_subject") or r.get("subject") or ""))])
     return (bool(r.get("is_age_verified")) and not (isinstance(age, int) and age < 18) and not r.get("has_password")
             and ROOM.match(str(r.get("username", ""))) is not None
-            and not safety.request_blocked(words.replace("_", " ")) and not safety.story_blocked(words.replace("_", " ")))
+            and not safety.minors(words))
 
 
 def _room_card(r: dict, followed: set) -> dict:
@@ -311,7 +311,7 @@ def discover_cb(mode: str, q: str, gender: str, offset: int) -> dict:
         for r in follows:
             for t in (json.loads(r["info"]) if r["info"] else {}).get("tags") or []:
                 t = str(t).lower()
-                if t not in COMMON_TAGS and not safety.request_blocked(t):
+                if t not in COMMON_TAGS and not safety.minors(t):
                     counts[t] = counts.get(t, 0) + 1
         tags = sorted(counts, key=lambda t: -counts[t])[:6]
         if not tags:
@@ -332,7 +332,7 @@ def discover_cb(mode: str, q: str, gender: str, offset: int) -> dict:
         q = q.strip().lower()
         if not 1 <= len(q) <= 60 or not re.fullmatch(r"[a-z0-9_ -]+", q):
             raise ValueError("type a tag or a few words (letters and numbers)")
-        bad = safety.request_blocked(q.replace("_", " ")) + safety.story_blocked(q.replace("_", " "))
+        bad = safety.minors(q)
         if bad:
             raise ValueError(f"not something to look for: {', '.join(sorted(set(bad)))}")
         params = {**base, "keywords": q, "limit": DISCOVER_PAGE, "offset": offset}

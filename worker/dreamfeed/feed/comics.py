@@ -3,8 +3,8 @@ and multporn's comics, with their pages, covers and tags, read when you look. No
 downloaded: pages show straight from the sites (e621's own file server; multporn's, which only
 sends its pictures to pages that don't name themselves, as dreamfeed's don't).
 
-These are drawn: a comic is left out when its tags, categories or title have a word dreamfeed
-never allows (e621.NEVER: the youth tags, feral, bestiality; safety's rules), or your e621
+These are drawn: a comic is left out when its tags, categories or title are about minors
+(safety.drawn_words: e621's tags for them, young, cub ..., and minors-only words), or your e621
 blacklist hides its cover. No picture is looked at.
 
 A comic: {"id" ("e621:POOL" or "mp:SLUG"), "source", "title", "pages", "cover", "tags", "updated"
@@ -29,11 +29,8 @@ PAGE = 24
 
 
 def blocked(*texts) -> bool:
-    """Words dreamfeed never allows in drawn work (in a title, a tag or a category)."""
-    t = " ".join(str(x) for x in texts if x).replace("_", " ").lower()
-    words = set(re.findall(r"[a-z0-9]+", t))
-    return bool(safety.request_blocked(t)) or bool(words & {w for w in e621.NEVER if " " not in w and "_" not in w}) \
-        or any(w.replace("_", " ") in t for w in e621.NEVER if "_" in w or " " in w)
+    """Drawn work about minors (in a title, a tag or a category)."""
+    return bool(safety.drawn_words(*texts))
 
 
 def _iso(t: str) -> str:

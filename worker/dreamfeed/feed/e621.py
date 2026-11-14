@@ -2,8 +2,8 @@
 pools, its comics, for the Comics page's search (the web app). Standard library only, so the
 web app uses it too.
 
-A post with a tag dreamfeed never allows is left out (NEVER: the youth tags, feral,
-bestiality); searches also ask e621 to leave those out (SEARCH_NOT).
+A post with e621's tags for minors is left out (NEVER: young, cub ...; safety.DRAWN_TAGS);
+searches also ask e621 to leave those out (SEARCH_NOT).
 
 Signed in (your username and API key: the Dashboard's Sign-ins, cookies.py), it reads as you
 and can also: favorite and unfavorite (Save), vote, read your favorites (the Saved import, and
@@ -27,10 +27,8 @@ from ..core import safety
 API = "https://e621.net"
 STATIC = ("static1.e621.net",)
 GAP = 1.0                     # seconds between API requests (e621 allows about 2 a second)
-NEVER = ({t.replace(" ", "_") for t in safety.YOUTH_TAGS | safety.FERAL_TAGS}
-         | {"young", "cub", "child", "loli", "shota", "toddler", "baby", "infant", "teen", "adolescent",
-            "feral", "bestiality", "zoophilia", "underage"})
-SEARCH_NOT = "-young -feral -bestiality"
+NEVER = safety.DRAWN_TAGS
+SEARCH_NOT = "-young"
 ARTIST = re.compile(r"^[a-z0-9_()\-.'!~]{1,100}$")     # an artist's tag
 NOT_ARTISTS = ("conditional_dnp", "sound_warning", "unknown_artist", "anonymous_artist", "avoid_posting", "third-party_edit")
 MAX_TERMS = 30                # e621 takes 40 tags a search; SEARCH_NOT and the date and order take some
@@ -254,7 +252,7 @@ def query(search: str) -> str:
     terms = search.split()
     if not terms or len(terms) > MAX_TERMS or len(search) > 300 or any(not t.isprintable() for t in terms):
         raise ValueError(f"a search is 1 to {MAX_TERMS} tags")
-    bad = safety.request_blocked(search.replace("_", " ")) + [t for t in terms if t.lower().lstrip("~") in NEVER]
+    bad = safety.minors(search) + [t for t in terms if t.lower().lstrip("~") in NEVER]
     if bad:
         raise ValueError(f"not something to look for: {', '.join(sorted(set(bad)))}")
     return f"{' '.join(terms)} {SEARCH_NOT}"
@@ -300,13 +298,13 @@ def pools(q: str, page: int) -> dict:
     q = q.strip()
     if not 1 <= len(q) <= 100:
         raise ValueError("type what to look for (up to 100 characters)")
-    bad = safety.request_blocked(q)
+    bad = safety.drawn_words(q)
     if bad:
         raise ValueError(f"not something to look for: {', '.join(bad)}")
     found = get("/pools.json", {"search[name_matches]": "*" + "*".join(q.split()) + "*", "search[category]": "series",
                                 "limit": 24, "page": page + 1})
     more = len(found) == 24
-    found = [p for p in found if p.get("post_ids") and not safety.request_blocked(p.get("name", "").replace("_", " "))]
+    found = [p for p in found if p.get("post_ids") and not safety.drawn_words(p.get("name", ""))]
     covers = {}
     if found:
         posts = get("/posts.json", {"tags": "id:" + ",".join(str(p["post_ids"][0]) for p in found), "limit": 100})
