@@ -171,7 +171,7 @@ function route() {
       return setView("liked");
     }
     case "live": showLivePage(b === "discover" ? "discover" : "following", state.view === "follow"); return setView("follow");
-    case "comics": setView("comics"); if (b) showComicId(b, c); return;
+    case "comics": return showComicsAt(b, c, rest);
     case "dashboard": return setView("dash");
     case "updates": return setView("updates");
     case "history": return setView("history");

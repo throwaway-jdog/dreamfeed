@@ -5,7 +5,8 @@ A private, phone-first page for what you follow and like, read live from the sit
 - **Feed:** your X and Bluesky timelines, your Reddit subscriptions and e621 searches (Following),
   and each site's picks for you (For you), several sites at once or one; Saved keeps what you save.
 - **Videos:** long videos from xvideos in dreamfeed's own player, chosen from what you watch.
-- **Comics:** read live from e621's pools and multporn, chosen from what you read and follow.
+- **Comics:** read live from e621's pools and multporn, chosen from what you read and follow;
+  multporn's New and Updated comics; browse any tag (multporn's or e621's).
 - **Live:** the Chaturbate rooms you follow, in dreamfeed's own player (several at once), with
   your recorder (streamonitor) and your recordings.
 - **Dashboard:** Health (whether each part is working), your mute list, Sign-ins, the Feed's
@@ -91,6 +92,11 @@ A feed like the rest, read live from e621's pools (its comics) and multporn, not
 - **Updated**: comics you follow with new pages since you last read them (looked at every six
   hours; the reader says from which page they're new). **Continue reading**, **Following**.
 - **Follow** in the reader; where you are is remembered as you read.
+- **New on multporn** and **Updated on multporn**: the site's own two lists, as rows (See all:
+  the whole list, page by page; `/comics/new`, `/comics/updated`).
+- **Browse by tag**: multporn's tags (yours first, from what you read), or type one, on
+  multporn or e621: that tag's comics, newest, most viewed or top rated (`/comics/tag/anal`,
+  `/comics/tag/red_panda/e621`). A search that names a tag offers it.
 - **Search** multporn or e621's comics by title, artist or character.
 - **Your comics**: the ones kept here before (imported, or made), still readable, renamed or
   deleted from their grid of pages. Those imported from multporn are followed there, so their new
@@ -430,7 +436,7 @@ one replaces what's on screen (nothing stacks); Close and Back go to the page be
 you came by link:
 
 - tabs: `/feed` (`/feed/foryou`), `/saved` (`/saved/x`, `/saved/reddit` ...), `/vids`, `/live`
-  (`/live/discover`), `/comics` (`/comics/ID`: a comic), `/dashboard`; `/` opens the tab you used last
+  (`/live/discover`), `/comics` (`/comics/ID`: a comic; `/comics/new`, `/comics/updated`, `/comics/tag/TAG[/e621]`), `/dashboard`; `/` opens the tab you used last
 - `/search/WORDS`, `/updates`, `/history`
 - rooms: `/room/NAME` (profile), `/room/NAME/watch`, `/room/NAME/video/PATH` (one of your videos),
   `/watch/A+B+C` (Watch several)

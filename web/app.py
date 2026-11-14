@@ -54,6 +54,9 @@ GET  /api/comics/feed  ?offset=N  Comics: Updated (followed, with new pages), Co
 GET  /api/comics/read  ?id=e621:POOL|mp:SLUG  one to read: its pages (straight from the site), where you left off
 POST /api/comics/follow {"id", "follow": bool}; POST /api/comics/progress {"id", "page"}  (what For you learns from)
 GET  /api/comics/search ?q=TEXT&page=N&site=multporn|e621  comics matching TEXT (title, cover)
+GET  /api/comics/browse ?list=new|updated|tag&tag=T&sort=new|popular|top&site=multporn|e621&page=N  multporn's New and Updated
+                        comics, or a tag's comics (multporn's categories, or e621's tags)
+GET  /api/comics/tags   multporn's tags for comics
 GET  /comic-search/thumb ?u=URL  a search result's cover, fetched from multporn
 GET  /api/following/settings  the subreddits and users read for the Feed, and how many top posts a day
 POST /api/following/settings  {"reddit": {"follow": ["r/name", "u/name"], "top": N}} or
@@ -476,6 +479,17 @@ class Handler(BaseHTTPRequestHandler):
             if not file:
                 return self.send(404, {"error": "not found"})
             return self.send_file(file)
+        if path in ("/api/comics/browse", "/api/comics/tags"):
+            q = self.query()
+            try:
+                if path == "/api/comics/tags":
+                    return self.send(200, comicfeed.tags())
+                return self.send(200, comicfeed.browse(q.get("list", ""), max(0, int(q.get("page", "0") or 0)), q.get("tag", ""),
+                                                       q.get("sort", "new") or "new", q.get("site", "multporn") or "multporn"))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except (LookupError, OSError) as e:
+                return self.send(502, {"error": str(e)[:200]})
         if path == "/api/comics/search":
             q = self.query()
             try:

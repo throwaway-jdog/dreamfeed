@@ -101,7 +101,67 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         out.append({"id": f"mp:{link.group(1)}", "source": "multporn", "title": title, "cover": cover,
                     "thumb": "comic-search/thumb?u=" + urllib.parse.quote(cover, safe="") if cover else None,
                     "url": f"{MULTPORN}/comics/{link.group(1)}", "link": f"{MULTPORN}/comics/{link.group(1)}", "tags": []})
-    return {"results": mutes.comics(out), "more": f"page={page + 1}" in page_html}
+    return {"results": mutes.comics(out), "more": f"page={page + 1}" in page_html, "tags": tag_matches(q) if page == 0 else []}
+
+
+# ---- browse: multporn's New and Updated comics, a tag's comics (multporn's or e621's) ----
+LISTS = ("new", "updated", "tag")
+
+
+def _refused() -> set:
+    with _conn() as conn:
+        return {r[0] for r in conn.execute("SELECT id FROM comic_refused")}
+
+
+def browse(which: str, page: int, tag: str = "", sort: str = "new", site: str = "multporn") -> dict:
+    """{"results": comic cards, "more", "tag"?}: one page of a list (two of multporn's, as its are short)."""
+    if which not in LISTS or not 0 <= page < 200 or site not in ("multporn", "e621") or sort not in live.SORTS:
+        raise ValueError("bad list")
+    if which == "tag":
+        tag = " ".join(str(tag or "").lower().split())
+        if not tag:
+            raise ValueError("pick a tag")
+    if site == "e621":
+        if which != "tag":
+            raise ValueError("bad list")
+        got = live.e621_pools_tagged(tag, page, sort)
+        found, more = got["comics"], got["more"]
+    else:
+        slug = re.sub(r"[^a-z0-9]+", "_", tag).strip("_")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            a, b = pool.map(lambda n: live.multporn_list(which, n, slug, sort), (2 * page, 2 * page + 1))
+        seen = set()
+        found = [c for c in a["comics"] + (b["comics"] if a["more"] else []) if not (c["id"] in seen or seen.add(c["id"]))]
+        more = a["more"] and b["more"]
+        tag = slug
+    skip = _refused()
+    out = {"results": [{**c, "thumb": cover_thumb(c.get("cover"))} for c in mutes.comics(found) if c["id"] not in skip], "more": more}
+    if which == "tag":
+        names = {t["tag"]: t["name"] for t in _tags_or_none() or []} if site == "multporn" else {}
+        out["tag"] = {"tag": tag, "name": names.get(tag) or tag.replace("_", " "), "site": site}
+    return out
+
+
+def _tags_or_none() -> list[dict] | None:
+    try:
+        return live.multporn_tags()
+    except (LookupError, OSError):
+        return None
+
+
+def tags() -> dict:
+    """{"tags": [{"tag", "name"}]}: multporn's tags for comics, A to Z (to browse one)."""
+    got = _tags_or_none()
+    if got is None:
+        raise LookupError("multporn didn't answer")
+    return {"tags": got}
+
+
+def tag_matches(q: str) -> list[dict]:
+    """multporn's tags that a search names (to browse one instead)."""
+    words = " ".join(q.lower().replace("_", " ").split())
+    found = [t for t in _tags_or_none() or [] if words and (t["name"].lower() == words or t["tag"].replace("_", " ") == words)]
+    return found + [t for t in _tags_or_none() or [] if len(words) >= 3 and words in t["name"].lower() and t not in found][:5]
 
 
 def cover_thumb(cover: str | None) -> str | None:

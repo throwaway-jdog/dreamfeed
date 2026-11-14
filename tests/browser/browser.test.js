@@ -78,14 +78,32 @@ async function page(browser, opts) {
     assert.ok(ok, "none of the first 3 comics showed its first page");
     assert.deepStrictEqual(p.errs, []);
   });
+  await step("Comics: multporn's New and Updated, and a tag's comics, with their covers", async () => {
+    const p = await page(browser, { viewport: { width: 390, height: 844 } });
+    await p.goto(`${base}/comics`, { waitUntil: "networkidle" });
+    for (const row of ["#cn-row", "#cw-row"]) await p.waitForSelector(`${row} .comic-card`, { timeout: 60000 });
+    assert.ok(await p.locator("#ct-chips .chip").count() > 50, "multporn's tags aren't listed");
+    await p.goto(`${base}/comics/tag/furry`, { waitUntil: "networkidle" });
+    await p.waitForSelector("#cg .comic-card", { timeout: 60000 }); await p.waitForTimeout(3000);
+    assert.strictEqual(await p.textContent("#cg-title"), "Furry");
+    const ok = await p.evaluate(() => [...document.querySelectorAll("#cg .comic-card img")].slice(0, 4).some(i => i.complete && i.naturalWidth > 0));
+    assert.ok(ok, "no cover of a tag's comics loaded");
+    const wide = await p.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(wide <= 390, `the page is wider than a phone: ${wide}`);
+    assert.deepStrictEqual(p.errs, []);
+  });
   await step("Search: posts, subreddits and videos, their pictures allowed by the page's policy", async () => {
     const p = await page(browser, { viewport: { width: 1280, height: 900 } });
     await p.goto(`${base}/search/femboy`, { waitUntil: "networkidle" });
     await p.waitForSelector("#se-posts .post", { timeout: 90000 });
-    await p.locator("#se-posts .post").first().scrollIntoViewIfNeeded(); await p.waitForTimeout(4000);    // (its pictures load when near)
-    const pics = await p.evaluate(() => [...document.querySelectorAll("#se-posts .post .media img")].slice(0, 6)
-      .map(i => ({ host: new URL(i.src, location.href).hostname, ok: i.complete && i.naturalWidth > 0 })));
-    assert.ok(pics.some(x => x.ok), `none of ${pics.length} pictures loaded`);
+    await p.locator("#se-posts .post").first().scrollIntoViewIfNeeded();    // (its pictures load when near)
+    const look = () => p.evaluate(() => [...document.querySelectorAll("#se-posts .post .media img")].slice(0, 6)
+      .map(i => ({ host: new URL(i.src, location.href).hostname, done: i.complete, ok: i.complete && i.naturalWidth > 0 })));
+    let pics = [];
+    for (let i = 0; i < 20 && !(pics = await look()).some(x => x.ok); i++) {   // (the other parts answering above push the posts down)
+      await p.locator("#se-posts .post .media img").first().scrollIntoViewIfNeeded().catch(() => {}); await p.waitForTimeout(1000);
+    }
+    assert.ok(pics.some(x => x.ok), `none of ${pics.length} pictures loaded: ${JSON.stringify(pics)}`);
     assert.ok(await p.isVisible("#se-subs-sec"), "no subreddits");
     assert.deepStrictEqual(p.errs, []);
   });

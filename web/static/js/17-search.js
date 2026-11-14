@@ -46,12 +46,15 @@ function showSearch() {
     const v = d ? d.videos.slice(0, 12) : [];
     $("se-vids").replaceChildren(...v.map(vidCard)); $("se-vids-sec").hidden = !v.length;
   });
-  Promise.all(["multporn", "e621"].map(site => api(`api/comics/search?q=${q}&page=0&site=${site}`).then(d => d.results || [], () => [])))
+  let tags = [];
+  Promise.all(["multporn", "e621"].map(site => api(`api/comics/search?q=${q}&page=0&site=${site}`).then(d => { if (d.tags) tags = d.tags; return d.results || []; }, () => [])))
     .then(([a, b]) => {
       if (gen !== se.gen) return;
       const all = [];
       for (let i = 0; i < Math.max(a.length, b.length) && all.length < 12; i++) { if (a[i]) all.push(a[i]); if (b[i]) all.push(b[i]); }
-      $("se-comics").replaceChildren(...all.map(c => comicCard(c))); $("se-comics-sec").hidden = !all.length;
+      $("se-ctags").replaceChildren(...tags.map(t => tagChip(t, "multporn", `Browse the tag ${t.name}`))); $("se-ctags").hidden = !tags.length;
+      $("se-comics").replaceChildren(...all.map(c => comicCard(c)));
+      $("se-comics-sec").hidden = !all.length && !tags.length;
     });
   ask(`api/search?in=subreddits&q=${q}`, d => {
     const subs = d ? d.subreddits : [];

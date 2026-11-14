@@ -26,6 +26,8 @@ function quiet(u) {
                                          bsky: { site: "bsky", from: null, signed_in: false }, browser: null };
   if (u.includes("api/saved/import")) return { running: false, files: {} };
   if (u.includes("api/vids")) return { videos: [], more: false, continue: [], taste: { tags: [], n: 0 } };
+  if (u.includes("api/comics/tags")) return { tags: [] };
+  if (u.includes("api/comics/browse")) return { results: [], more: false };
   if (u.includes("api/comics")) return { comics: [], making: [], failed: [] };
   if (u.includes("api/notices")) return { notices: [], more: false, counts: {}, topics: [] };
   if (u.includes("api/history")) return { items: [], more: false, kinds: [] };

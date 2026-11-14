@@ -118,7 +118,7 @@
     <div class="vs-section" id="se-yours-sec" hidden><h2>Yours</h2><div id="se-yours"></div></div>
     <div class="vs-section" id="se-rooms-sec" hidden><h2>Live now</h2><div class="vrow" id="se-rooms"></div></div>
     <div class="vs-section" id="se-vids-sec" hidden><div class="vs-head"><h2>Videos</h2><button type="button" class="secondary" id="se-vids-all">All videos</button></div><div class="vrow" id="se-vids"></div></div>
-    <div class="vs-section" id="se-comics-sec" hidden><div class="vs-head"><h2>Comics</h2><button type="button" class="secondary" id="se-comics-all">All comics</button></div><div class="vrow" id="se-comics"></div></div>
+    <div class="vs-section" id="se-comics-sec" hidden><div class="vs-head"><h2>Comics</h2><button type="button" class="secondary" id="se-comics-all">All comics</button></div><div class="se-chips" id="se-ctags" hidden></div><div class="vrow" id="se-comics"></div></div>
     <div class="vs-section" id="se-subs-sec" hidden><h2>Subreddits</h2><div class="se-subs" id="se-subs"></div></div>
     <div class="vs-section fposts" id="se-posts-sec" hidden><h2>Posts</h2>
       <div class="seg five" id="se-source" role="group" aria-label="From">
@@ -135,7 +135,20 @@
       <button type="submit" class="primary">Search</button></form>
     <div class="vs-section" id="cu-sec" hidden><h2>Updated</h2><div class="vrow" id="cu-row"></div></div>
     <div class="vs-section" id="cc-sec" hidden><h2>Continue reading</h2><div class="vrow" id="cc-row"></div></div>
-    <div class="vs-section"><div class="vs-head"><h2 id="cg-title">For you</h2><button type="button" class="secondary" id="cg-back" hidden>Back to For you</button></div>
+    <div class="vs-section" id="cn-sec" hidden><div class="vs-head"><h2>New on multporn</h2><button type="button" class="secondary" id="cn-all">See all</button></div>
+      <div class="vrow" id="cn-row"></div></div>
+    <div class="vs-section" id="cw-sec" hidden><div class="vs-head"><h2>Updated on multporn</h2><button type="button" class="secondary" id="cw-all">See all</button></div>
+      <div class="vrow" id="cw-row"></div></div>
+    <div class="vs-section" id="ct-sec"><div class="vs-head"><h2>Browse by tag</h2><button type="button" class="secondary" id="ct-more" hidden>All tags</button></div>
+      <form class="vs-form ct-form" id="ct-form">
+        <input class="in" id="ct-q" list="ct-list" maxlength="60" placeholder="A tag: furry, anal, big tits…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
+        <datalist id="ct-list"></datalist>
+        <select class="in" id="ct-site" aria-label="Whose tags"><option value="multporn">multporn</option><option value="e621">e621</option></select>
+        <button type="submit" class="secondary">Browse</button></form>
+      <div class="se-chips ct-chips short" id="ct-chips"></div></div>
+    <div class="vs-section" id="cg-sec"><div class="vs-head"><h2 id="cg-title">For you</h2><button type="button" class="secondary" id="cg-back" hidden>Back to For you</button></div>
+      <div class="cg-bar" id="cg-bar" hidden><select class="in" id="cg-sort" aria-label="Order"><option value="new">Newest</option><option value="popular">Most viewed</option><option value="top">Top rated</option></select></div>
+      <div class="se-chips" id="cg-tags" hidden></div>
       <p class="note" id="cg-note"></p><div class="comic-list" id="cg"></div>
       <button type="button" class="secondary more" id="cg-more" hidden>More</button></div>
     <div class="vs-section" id="cf-sec" hidden><h2>Following</h2><div class="vrow" id="cf-row"></div></div>

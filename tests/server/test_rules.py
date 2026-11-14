@@ -166,6 +166,56 @@ class Comics(unittest.TestCase):
                 live.comic(bad)
 
 
+class ComicLists(unittest.TestCase):
+    """multporn's lists (New, Updated, a tag's), read from its page; what's asked is checked first."""
+    ROW = ('<td class="col-1"> <div class="views-field views-field-title"> <strong class="field-content"><a href="/comics/{slug}">{title}</a></strong> </div>'
+           ' <a href="/comics/{slug}"><img loading="lazy" src="https://multporn.net/sites/default/files/styles/x/public/{slug}.jpg" alt="{title} Porn comic'
+           ' Cartoon porn comics on Overwatch, Furry" /></a> <h5> <span>Date: </span> <span>12/11/2026 - 08:37</span> </h5> </td>')
+
+    def test_cards(self):
+        from dreamfeed.feed import comics
+        page = " ".join(self.ROW.format(slug=s, title=t) for s, t in (("one", "One &amp; Two"), ("two", "Loli thing"), ("one", "One &amp; Two"), ("three", "Three")))
+        got = comics._mp_cards(page)
+        self.assertEqual([c["id"] for c in got], ["mp:one", "mp:three"], "minors left out, each once, in order")
+        self.assertEqual(got[0]["title"], "One & Two")
+        self.assertEqual(got[0]["posted"], "2026-11-12 08:37:00")
+        self.assertEqual(got[0]["tags"], ["overwatch", "furry"])
+        self.assertTrue(got[0]["cover"].startswith("https://multporn.net/sites/default/files/"))
+
+    def test_refused(self):
+        from dreamfeed.feed import comics as live
+        from webapp import comics
+        for bad in (("x", 0, "", "new", "multporn"), ("new", 0, "", "new", "elsewhere"), ("tag", 0, "", "new", "multporn"),
+                    ("new", 0, "", "worst", "multporn"), ("updated", 0, "", "new", "e621"), ("new", -1, "", "new", "multporn")):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                comics.browse(*bad)
+        for bad in ("loli", "young", "../etc", "a/b"):
+            with self.assertRaises(ValueError, msg=bad):
+                live.multporn_list("tag", 0, bad)
+        for bad in ("cub", "shota", "a b c*"):
+            with self.assertRaises(ValueError, msg=bad):
+                live.e621_pools_tagged(bad)
+
+    def test_browse(self):
+        """Two of multporn's pages a page (each once), covers through dreamfeed, the tag's name."""
+        from unittest import mock
+        from dreamfeed.feed import comics as live
+        from webapp import comics
+        card = lambda s: {"id": f"mp:{s}", "source": "multporn", "title": s, "cover": f"https://multporn.net/sites/default/files/{s}.jpg", "tags": []}
+        pages = {2: {"comics": [card("a"), card("b")], "more": True}, 3: {"comics": [card("b"), card("c")], "more": False}}
+        asked = []
+        def fake(which, n, tag, sort):
+            asked.append((which, n, tag, sort))
+            return pages[n]
+        with mock.patch.object(live, "multporn_list", fake), mock.patch.object(comics, "_tags_or_none", lambda: [{"tag": "big_tits", "name": "Big Tits"}]):
+            d = comics.browse("tag", 1, "Big Tits", "top")
+        self.assertEqual(sorted(asked), [("tag", 2, "big_tits", "top"), ("tag", 3, "big_tits", "top")])
+        self.assertEqual([c["id"] for c in d["results"]], ["mp:a", "mp:b", "mp:c"])
+        self.assertFalse(d["more"])
+        self.assertTrue(d["results"][0]["thumb"].startswith("comic-search/thumb?u="))
+        self.assertEqual(d["tag"], {"tag": "big_tits", "name": "Big Tits", "site": "multporn"})
+
+
 class E621Files(unittest.TestCase):
     """Only e621's own file paths are passed on (the page's e621 pictures and videos)."""
     def test_paths(self):

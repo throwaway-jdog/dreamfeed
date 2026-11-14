@@ -125,27 +125,97 @@ def _mp_get(url: str) -> str:
         raise LookupError(f"multporn didn't answer ({e})") from e
 
 
-def multporn_new(page: int = 0) -> list[dict]:
-    """multporn's newest comics (new and updated), with their covers."""
-    if not 0 <= page < 50:
+MP_TAG = re.compile(r"^[a-z0-9_]{1,60}$")
+E6_TAG = re.compile(r"^[a-z0-9_()\-.'!]{1,60}$")
+# how a tag's comics are ordered: multporn's own sorts, and e621's nearest
+SORTS = {"new": (("created", "DESC"), "order:id"), "popular": (("totalcount", "DESC"), "order:score"),
+         "top": (("value", "DESC"), "order:favcount")}
+
+
+def _mp_cards(s: str) -> list[dict]:
+    """The comics on one of multporn's lists (New, Updated comics, a tag's page), in order."""
+    out = []
+    parts = re.split(r'views-field-title"> <strong class="field-content"><a href="/comics/', s)
+    for row in parts[1:]:
+        t = re.match(r'([a-z0-9_-]+)">([^<]+)</a>', row)
+        if not t:
+            continue
+        img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"[^>]*alt="([^"]*)"', row)
+        about = html.unescape(img.group(2)) if img else ""
+        title = html.unescape(t.group(2)).strip()
+        if blocked(title, about):
+            continue
+        day = re.search(r"Date: </span> <span>(\d\d)/(\d\d)/(\d{4}) - (\d\d:\d\d)", row)
+        out.append({"id": f"mp:{t.group(1)}", "source": "multporn", "title": title, "pages": None, "cover": img.group(1) if img else None,
+                    "tags": [w.strip().lower() for w in re.split(r",| on ", about.split("comics", 1)[-1]) if w.strip()][:8],
+                    "updated": None, "posted": f"{day[3]}-{day[2]}-{day[1]} {day[4]}:00" if day else None, "link": f"{MULTPORN}/comics/{t.group(1)}"})
+    seen = set()
+    return [c for c in out if not (c["id"] in seen or seen.add(c["id"]))]
+
+
+def multporn_list(which: str, page: int = 0, tag: str = "", sort: str = "new") -> dict:
+    """{"comics", "more"}: multporn's New comics, its Updated comics, or one tag's (category's) comics."""
+    if not 0 <= page < 500 or sort not in SORTS:
         raise ValueError("bad page")
+    if which == "new":
+        url, nxt = f"{MULTPORN}/new?type=1&page={page}", f"page={page + 1}&"
+    elif which == "updated":
+        url, nxt = f"{MULTPORN}/updated_comics?page={page}", f"page={page + 1}\""
+    elif which == "tag" and MP_TAG.match(tag or ""):
+        if blocked(tag.replace("_", " ")):
+            raise ValueError("not something to look for")
+        by, order = SORTS[sort][0]
+        url, nxt = f"{MULTPORN}/category/{tag}?sort_by={by}&sort_order={order}&page=0%2C{page}", f"page=0%2C{page + 1}\""
+    else:
+        raise ValueError("bad list")
     def fetch():
-        s = re.sub(r"\s+", " ", _mp_get(f"{MULTPORN}/new?type=1&page={page}"))
-        out = []
-        for row in s.split('class="masonry-item views-row')[1:]:
-            t = re.search(r'views-field-title"> <strong class="field-content"><a href="/comics/([a-z0-9_-]+)">([^<]+)</a>', row)
-            if not t:
-                continue
-            img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"[^>]*alt="([^"]*)"', row)
-            about = html.unescape(img.group(2)) if img else ""
-            title = html.unescape(t.group(2))
-            if blocked(title, about):
-                continue
-            out.append({"id": f"mp:{t.group(1)}", "source": "multporn", "title": title, "pages": None, "cover": img.group(1) if img else None,
-                        "tags": [w.strip().lower() for w in re.split(r",| on ", about.split("comics", 1)[-1]) if w.strip()][:8],
-                        "updated": None, "link": f"{MULTPORN}/comics/{t.group(1)}"})
-        return out
-    return _cached(f"comics:mp:new:{page}", fetch, 900)
+        try:
+            s = re.sub(r"\s+", " ", _mp_get(url))
+        except LookupError as e:
+            if "404" in str(e):
+                raise ValueError(f"multporn has no tag “{tag.replace('_', ' ')}”") from e
+            raise
+        return {"comics": _mp_cards(s), "more": nxt in s.replace("&amp;", "&")}
+    return _cached(f"comics:mp:list:{which}:{tag}:{sort}:{page}", fetch, 900)
+
+
+def multporn_new(page: int = 0) -> list[dict]:
+    """multporn's newest comics, with their covers (For you starts from these)."""
+    return multporn_list("new", page)["comics"]
+
+
+def multporn_tags() -> list[dict]:
+    """multporn's tags (its categories for comics): [{"tag": slug, "name"}], A to Z."""
+    def fetch():
+        found = {}
+        for n in range(12):
+            s = re.sub(r"\s+", " ", _mp_get(f"{MULTPORN}/category_comic?page={n}"))
+            got = re.findall(r'href="/category/([a-z0-9_]+)"[^>]*>([^<]+)<', s)
+            for slug, name in got:
+                name = html.unescape(name).strip()
+                if name and not blocked(name, slug.replace("_", " ")):
+                    found.setdefault(slug, name)
+            if f"page={n + 1}&" not in s.replace("&amp;", "&") and f"page={n + 1}\"" not in s:
+                break
+        return [{"tag": k, "name": v} for k, v in sorted(found.items(), key=lambda kv: kv[1].lower())]
+    return _cached("comics:mp:tags", fetch, 86400)
+
+
+def e621_pools_tagged(tag: str, page: int = 0, sort: str = "new") -> dict:
+    """{"comics", "more"}: e621's comics with posts that have this tag (one page of its posts, their pools)."""
+    tag = tag.strip().lower().replace(" ", "_")
+    if not E6_TAG.match(tag) or sort not in SORTS or not 0 <= page < 50:
+        raise ValueError("bad tag")
+    if blocked(tag.replace("_", " ")):
+        raise ValueError("not something to look for")
+    q = f"{tag} inpool:true {SORTS[sort][1]}"
+    def fetch():
+        posts = e621.get("/posts.json", {"tags": e621.query(q), "limit": 150, "page": page + 1}).get("posts") or []
+        ids = list(dict.fromkeys(i for p in posts for i in p.get("pools") or []))[:60]
+        found = e621_pools(ids=ids) if ids else []
+        at = {i: n for n, i in enumerate(ids)}
+        return {"comics": sorted(found, key=lambda c: at.get(int(c["id"].split(":")[1]), 99)), "more": len(posts) >= 150}
+    return _cached(f"comics:e621tag:{q}:{page}", fetch, 1800)
 
 
 def multporn_comic(slug: str) -> dict:
