@@ -7,7 +7,7 @@ import datetime as dt
 import re
 from . import e621
 
-from .common import MAX_COMMENTS, WHO_TTL, _cached, _comment, text_blocked
+from .common import MAX_COMMENTS, WHO_TTL, _cached, _comment, text_blocked, FEED_STALE
 
 
 E621_PAGE = 20
@@ -63,7 +63,7 @@ def e621_page(search: str, at: int | None, top: bool = False, window: str = TOP_
         if top:
             return out, (at or 1) + 1
         return out, min((int(p["id"]) for p in found if str(p.get("id", "")).isdigit()), default=None)
-    return _cached(f"e621:{top}:{window}:{search}:{at}", fetch)
+    return _cached(f"e621:{top}:{window}:{search}:{at}", fetch, stale=FEED_STALE)
 
 
 def e621_taste_searches() -> list[tuple[str, str, str]]:

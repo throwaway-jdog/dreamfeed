@@ -93,6 +93,25 @@ async function page(browser, opts) {
     assert.ok(wide <= 390, `the page is wider than a phone: ${wide}`);
     assert.deepStrictEqual(p.errs, []);
   });
+  await step("Feed: switching tabs back and forth fast, it's there each time, as you left it", async () => {
+    const p = await page(browser, { viewport: { width: 390, height: 844 } });
+    await p.goto(`${base}/feed`, { waitUntil: "domcontentloaded" });
+    await p.waitForSelector("#f-posts article.post", { timeout: 90000 });
+    await p.mouse.wheel(0, 1500); await p.waitForTimeout(800);
+    const y = await p.evaluate(() => scrollY);
+    for (let i = 0; i < 6; i++) {               // (quicker than a page could be read)
+      await p.click('[data-view="vids"]'); await p.waitForTimeout(150);
+      await p.click('[data-view="posts"]'); await p.waitForTimeout(150);
+    }
+    const t = Date.now();
+    await p.waitForSelector("#f-posts article.post", { timeout: 2000 });
+    assert.ok(Date.now() - t < 1000, "the Feed took a second to come back");
+    await p.waitForTimeout(400);
+    const back = await p.evaluate(() => scrollY);
+    assert.ok(Math.abs(back - y) < 200, `not where you left it: ${back} (was ${y})`);
+    assert.ok(await p.locator("#f-posts article.post").count() <= 40, "drawn a few at a time");
+    assert.deepStrictEqual(p.errs, []);
+  });
   await step("Search: posts, subreddits and videos, their pictures allowed by the page's policy", async () => {
     const p = await page(browser, { viewport: { width: 1280, height: 900 } });
     await p.goto(`${base}/search/femboy`, { waitUntil: "networkidle" });

@@ -12,7 +12,7 @@ import subprocess
 import sys
 import urllib.parse
 
-from .common import MAX_COMMENTS, _cached, _comment, text_blocked
+from .common import MAX_COMMENTS, _cached, _comment, text_blocked, FEED_STALE
 
 
 X_HOME = "https://x.com/home"         # your Following timeline; + "/for-you": X's For you
@@ -132,7 +132,7 @@ def x_page(kind: str, start: int) -> dict:
     def fetch():
         posts, users, files = _x_posts(_x(url, start, X_PAGE), via)
         return {"posts": posts, "users": users, "next": start + X_PAGE if files >= X_PAGE else None}
-    return _cached(f"x:{kind}:{start}", fetch)
+    return _cached(f"x:{kind}:{start}", fetch, stale=FEED_STALE)
 
 
 # ---- X's "more videos" (its full-screen player's swipe-up feed) ----

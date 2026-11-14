@@ -6,7 +6,7 @@ async function reset() {
 }
 
 async function loadMore() {
-  if (state.view === "posts") { if (fp.more) loadPosts(false); return; }
+  if (state.view === "posts") return feedNext();
   if (state.view !== "liked" || state.loading || !state.more) return;
   state.loading = true; $("loading").hidden = false;
   const gen = state.gen;

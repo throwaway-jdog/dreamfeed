@@ -101,14 +101,20 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
                     pass
             state = cursor.get("e621") or {q: None for q in qs}
             more, groups, refused = {}, [], []
-            for q in qs:
-                if not first and state.get(q) is None:
-                    continue
+            asked = [q for q in qs if first or state.get(q) is not None]
+
+            def search(q):
                 try:
-                    posts, last = e621_page(q, state.get(q), top, windows.get(q, TOP_TODAY))
+                    return e621_page(q, state.get(q), top, windows.get(q, TOP_TODAY)), None
                 except ValueError as e:         # a search dreamfeed won't run: the others still do
-                    refused.append(f"{q}: {e}")
+                    return None, f"{q}: {e}"
+            with ThreadPoolExecutor(max_workers=4) as pool:       # (e621's own pace still holds: one request every GAP)
+                answers = list(pool.map(search, asked))
+            for q, (got_q, why) in zip(asked, answers):
+                if why:
+                    refused.append(why)
                     continue
+                posts, last = got_q
                 if q in labels:
                     posts = [{**p, "place": labels[q]} for p in posts]
                 groups.append(posts)
@@ -125,7 +131,7 @@ def feed(mode: str, source: str, cursor: dict | None, follow: list[str], searche
 
     todo = [s for s in sources if first or cursor.get(s) is not None]
     lists, users, errors, nxt = [], [], {}, {}
-    with ThreadPoolExecutor(max_workers=3) as pool:      # the sites at once
+    with ThreadPoolExecutor(max_workers=max(1, len(todo))) as pool:      # the sites at once
         for s, (got, people, after, error) in zip(todo, pool.map(one, todo)):
             lists += got; users += people; nxt[s] = after
             if error:

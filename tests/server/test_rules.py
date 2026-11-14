@@ -217,6 +217,55 @@ class ComicLists(unittest.TestCase):
         self.assertEqual(d["tag"], {"tag": "big_tits", "name": "Big Tits", "site": "multporn"})
 
 
+class Cache(unittest.TestCase):
+    """The Feed's page cache: an old page is shown while it's read again; one reading at a time."""
+    def test_stale_then_fresh(self):
+        import threading
+        from dreamfeed.feed import common
+        n = {"reads": 0}
+        def fetch():
+            n["reads"] += 1
+            return n["reads"]
+        key = "test:stale"
+        common.forget(key)
+        self.assertEqual(common._cached(key, fetch, 0.05, 60), 1)
+        time.sleep(0.1)
+        self.assertEqual(common._cached(key, fetch, 0.05, 60), 1, "old, shown at once")
+        for _ in range(50):
+            if n["reads"] == 2 and not common._reading.get(key):
+                break
+            time.sleep(0.02)
+        self.assertEqual(common._cached(key, fetch, 0.05, 60), 2, "read again behind it")
+        common.forget(key)
+
+    def test_one_reading_at_a_time(self):
+        import threading
+        from dreamfeed.feed import common
+        n, go = {"reads": 0}, threading.Event()
+        def fetch():
+            n["reads"] += 1
+            go.wait(2)
+            return "page"
+        key = "test:once"
+        common.forget(key)
+        got = []
+        threads = [threading.Thread(target=lambda: got.append(common._cached(key, fetch))) for _ in range(5)]
+        for t in threads:
+            t.start()
+        time.sleep(0.2)
+        go.set()
+        for t in threads:
+            t.join(3)
+        self.assertEqual((n["reads"], got), (1, ["page"] * 5))
+        def broken():
+            raise LookupError("down")
+        common.forget(key)
+        with self.assertRaises(LookupError):
+            common._cached(key, broken)
+        self.assertEqual(common._cached(key, lambda: "back"), "back", "a failure isn't kept")
+        common.forget(key)
+
+
 class E621Files(unittest.TestCase):
     """Only e621's own file paths are passed on (the page's e621 pictures and videos)."""
     def test_paths(self):

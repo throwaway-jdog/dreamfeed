@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from .common import COMMENT_DEPTH, MAX_COMMENTS, MAX_GALLERY, SUBS_TTL, WHO_TTL, _cached, _comment, _lock, _utc, forget, place_blocked, text_blocked
+from .common import COMMENT_DEPTH, MAX_COMMENTS, MAX_GALLERY, SUBS_TTL, WHO_TTL, _cached, _comment, _lock, _utc, forget, place_blocked, text_blocked, FEED_STALE
 from .redgifs import _redgifs_clip
 
 
@@ -162,7 +162,7 @@ def reddit_page(path: str, after: str | None, via: str) -> tuple[list[dict], str
     """A Reddit listing (path like /best or /r/a+b/new), REDDIT_PAGE posts from `after`."""
     sep = "&" if "?" in path else "?"
     q = f"{path}{sep}limit={REDDIT_PAGE}&raw_json=1&sr_detail=1" + (f"&after={urllib.parse.quote(after)}" if after else "")
-    return _cached("reddit:" + q, lambda: _reddit_listing(_reddit(q), via))
+    return _cached("reddit:" + q, lambda: _reddit_listing(_reddit(q), via), stale=FEED_STALE)
 
 
 def reddit_user(name: str) -> dict:
@@ -190,7 +190,7 @@ def subscriptions() -> list[str]:
             if not after:
                 break
         return sorted(set(out), key=str.lower)
-    return _cached("subs", fetch, SUBS_TTL)
+    return _cached("subs", fetch, SUBS_TTL, stale=86400)
 
 
 def reddit_save(post_id: str, save: bool) -> None:

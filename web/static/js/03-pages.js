@@ -2,6 +2,7 @@
 for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => go(tabPath(b.dataset.view));
 function setView(v) {
   if (state.view === v) return;
+  if (state.view === "posts") fp.scrollY = scrollY;      // (coming back: where you were)
   state.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === v)));
   const dash = v === "dash", com = v === "comics", fol = v === "follow", posts = v === "posts", vids = v === "vids";
@@ -19,7 +20,7 @@ function setView(v) {
   else if (srch) showSearch();
   else if (com) loadComics();
   else if (fol) refreshFollowing();
-  else if (posts) loadPosts(true);
+  else if (posts) showFeed();
   else if (vids) loadVids();
   else reset();
 }

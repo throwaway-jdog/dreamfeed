@@ -329,7 +329,10 @@ function usualHours(times) {
   const at = h => new Date(2000, 0, 1, h % 24).toLocaleTimeString([], { hour: "numeric" });
   return `usually live ${at(best.h)}–${at(best.h + best.n)}`;
 }
-const fp = { source: "all", mode: "following", tags: "", cursor: "", more: false, loading: false, gen: 0, shown: 0 };
+const fp = { source: "all", mode: "following", tags: "", cursor: "", more: false, loading: false, gen: 0, shown: 0,
+             queue: [], key: "", at: 0, scrollY: 0 };
+const FEED_KEEP = 10 * 60 * 1000;     // coming back to the Feed within this: as you left it (no reading again)
+const FEED_DRAW = 12;                 // posts drawn at a time (the rest as you scroll near)
 document.querySelectorAll("#f-mode button[data-m]").forEach(b => b.onclick = () => {
   fp.mode = b.dataset.m; remember("feedMode", fp.mode); setUrl(tabPath("posts"));
   document.querySelectorAll("#f-mode button[data-m]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
@@ -350,7 +353,7 @@ document.querySelectorAll("#f-source button").forEach(b => b.onclick = () => {
   if (fp.source === "reddit") loadRecentBrowses();
   loadPosts(true);
 });
-$("f-more").onclick = () => loadPosts(false);
+$("f-more").onclick = () => feedNext();
 // The Feed and Saved as you left them (mode, site, Saved's filter), in this browser.
 function remember(k, v) { try { localStorage.setItem(k, v); } catch {} }
 function recalled(k, ok) { try { const v = localStorage.getItem(k); return ok.includes(v) ? v : null; } catch { return null; } }
@@ -368,9 +371,19 @@ function retryBtn() {
   b.onclick = () => loadPosts(true);
   return b;
 }
+const feedKey = () => `${fp.mode}|${fp.source}|${fp.tags}`;
+// Back on the Feed: as you left it, where you were, if it's the same Feed and recent; else read again
+function showFeed() {
+  if (fp.key === feedKey() && Date.now() - fp.at < FEED_KEEP && $("f-posts").children.length) {
+    const y = fp.scrollY; requestAnimationFrame(() => { scrollTo(0, y); feedFill(); });
+    return;
+  }
+  loadPosts(true);
+}
 async function loadPosts(reset) {
   if (reset) {
-    fp.cursor = ""; fp.shown = 0; fp.gen++; $("f-posts").replaceChildren();
+    fp.newBtn?.remove(); fp.newBtn = null; clearTimeout(fp.check);
+    fp.cursor = ""; fp.shown = 0; fp.queue = []; fp.gen++; fp.key = feedKey(); fp.at = Date.now(); $("f-posts").replaceChildren();
     if (fp.mode === "foryou" && (fp.source === "all" || fp.source.split(",").includes("x"))) { const strip = el("div", "dx-wrap"); $("f-posts").append(strip); loadPeople(strip, fp.gen); }
   }
   else if (fp.loading) return;
@@ -382,12 +395,46 @@ async function loadPosts(reset) {
     if (gen !== fp.gen) return;
     const names = { x: "X", reddit: "Reddit", e621: "e621" };
     $("f-feeds").textContent = Object.entries(d.errors || {}).map(([k, v]) => `${names[k] || k}: ${v}`).join(" · ");
-    $("f-posts").append(...d.posts.map(postCard));
-    fp.shown += d.posts.length; fp.cursor = d.cursor || ""; fp.more = d.more; $("f-more").hidden = !d.more;
+    fp.queue.push(...d.posts);
+    fp.shown += d.posts.length; fp.cursor = d.cursor || ""; fp.more = d.more;
+    fp.loading = false;
+    feedDraw();
+    if (reset && fp.mode === "following") { clearTimeout(fp.check); fp.check = setTimeout(() => checkNew(gen), FEED_CHECK); }
     if (!fp.shown && !d.more) $("f-posts").append(el("p", "note", "No posts."));
     if (Object.keys(d.errors || {}).length) $("f-feeds").append(" ", retryBtn());
   } catch (err) { if (gen === fp.gen) { $("f-feeds").textContent = err.message + " "; $("f-feeds").append(retryBtn()); } }
   finally { if (gen === fp.gen) fp.loading = false; }
+}
+// The page given may be one read a while ago (shown at once, read again behind it): a little later,
+// what's new since, offered at the top (Following only: For you is something new each time anyway)
+const FEED_CHECK = 12000;
+async function checkNew(gen) {
+  if (gen !== fp.gen) return;
+  let d;
+  try { d = await api(`api/following/posts?mode=${fp.mode}&source=${encodeURIComponent(fp.source)}&cursor=`
+      + (fp.source === "e621" && fp.tags ? `&tags=${encodeURIComponent(fp.tags)}` : "")); } catch { return; }
+  if (gen !== fp.gen) return;
+  const have = new Set([...$("f-posts").querySelectorAll("article.post")].map(a => a.dataset.id).concat(fp.queue.map(p => p.id)));
+  const fresh = d.posts.filter(p => !have.has(p.id));
+  if (!fresh.length) return;
+  const b = el("button", "new-posts", `↑ ${fresh.length} new post${fresh.length === 1 ? "" : "s"}`); b.type = "button";
+  b.onclick = () => { scrollTo(0, 0); loadPosts(true); };
+  fp.newBtn?.remove(); fp.newBtn = b; $("f-posts").before(b);
+}
+// A page of posts is drawn a few at a time: what's on screen first, the rest as you scroll near
+function feedDraw() {
+  const some = fp.queue.splice(0, FEED_DRAW);
+  if (some.length) $("f-posts").append(...some.map(postCard));
+  $("f-more").hidden = !(fp.queue.length || fp.more);
+  feedFill();
+}
+function feedNext() { if (fp.queue.length) feedDraw(); else if (fp.more) loadPosts(false); }
+function feedFill() {       // (the scroll watcher only speaks when the end comes into view: while it's still near, keep going)
+  if (state.view !== "posts" || !fp.queue.length && !fp.more) return;
+  requestAnimationFrame(() => {
+    const end = $("sentinel");
+    if (state.view === "posts" && end.offsetParent && end.getBoundingClientRect().top < innerHeight + 800) feedNext();
+  });
 }
 // For you (Feed): X accounts you don't follow, from your rooms' bios, your follows' mentions
 // and X's For you, above X's For you posts.

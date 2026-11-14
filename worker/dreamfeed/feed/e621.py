@@ -26,7 +26,7 @@ from ..core import safety
 
 API = "https://e621.net"
 STATIC = ("static1.e621.net",)
-GAP = 1.0                     # seconds between API requests (e621 allows about 2 a second)
+GAP = 0.6                     # seconds between API requests (e621 allows about 2 a second; this stays under)
 NEVER = safety.DRAWN_TAGS
 SEARCH_NOT = "-young"
 ARTIST = re.compile(r"^[a-z0-9_()\-.'!~]{1,100}$")     # an artist's tag

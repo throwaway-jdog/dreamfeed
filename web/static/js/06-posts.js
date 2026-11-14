@@ -99,7 +99,7 @@ $("br-another").onclick = e => randomBrowse(e.currentTarget, true);
 function closeBrowse() { br.gen++; $("browse").hidden = true; for (const v of $("br-posts").querySelectorAll("video")) v.pause(); }
 $("br-close").onclick = leave;
 function postCard(p, opened) {
-  const a = el("article", "post"), body = el("div"), head = el("div", "head");
+  const a = el("article", "post"), body = el("div"), head = el("div", "head"); a.dataset.id = p.id || "";
   const canOpen = !opened && /^(x|reddit|e621|bsky):/.test(String(p.id || ""));
   const av = el("span", "av sm", p.avatar ? null : (p.author || "?").slice(0, 1).toUpperCase());
   if (p.avatar) { const im = el("img"); im.alt = ""; im.loading = "lazy"; im.src = p.avatar; av.append(im); }

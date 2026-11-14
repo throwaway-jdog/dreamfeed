@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from .common import COMMENT_DEPTH, MAX_COMMENTS, MAX_GALLERY, SUBS_TTL, WHO_TTL, _cached, _comment, _merge, text_blocked
+from .common import COMMENT_DEPTH, MAX_COMMENTS, MAX_GALLERY, SUBS_TTL, WHO_TTL, _cached, _comment, _merge, text_blocked, FEED_STALE
 
 
 # ---- Bluesky ----
@@ -192,7 +192,7 @@ def bsky_foryou(cursor: dict | None) -> tuple[list[dict], dict | None]:
             d = _bsky("app.bsky.feed.getFeed", {"feed": f["uri"], "limit": BSKY_FEED_PAGE, "cursor": cursor.get(f["uri"]) or None})
             return [{**p, "place": f["name"]} for p in _bsky_list(d.get("feed") or [], "foryou")], d.get("cursor") or None
         try:
-            return _cached(f"bsky:feed:{f['uri']}:{cursor.get(f['uri'])}", fetch)
+            return _cached(f"bsky:feed:{f['uri']}:{cursor.get(f['uri'])}", fetch, stale=FEED_STALE)
         except LookupError:
             return [], None                     # (a feed that's gone or failing: the others still come)
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -212,7 +212,7 @@ def bsky_page(kind: str, cursor: str | None) -> tuple[list[dict], str | None]:
         else:
             raise ValueError("bad Bluesky feed")
         return _bsky_list(d.get("feed") or [], via), d.get("cursor") or None
-    return _cached(f"bsky:{kind}:{cursor}", fetch)
+    return _cached(f"bsky:{kind}:{cursor}", fetch, stale=FEED_STALE)
 
 
 BSKY_VIDEOS = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/thevids"     # Bluesky's own "Video" feed
