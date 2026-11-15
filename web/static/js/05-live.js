@@ -257,7 +257,7 @@ function mvBar() {
 }
 // Add a room: who you follow that's live, then Discover's rooms (those already shown left out).
 // Add a room: one of yours that's live, or one from Discover (for you, or a search).
-const mvp = { tab: "following", q: "", offset: 0, rooms: [], more: false, gen: 0 };
+const mvp = { tab: "following", q: "", offset: 0, rooms: [], more: false, gen: 0, fLoading: false, fError: "" };
 function mvRow(r) {
   const b = el("button", "mv-pick-row"); b.type = "button";
   const img = el("img"); img.alt = ""; img.loading = "lazy"; if (r.thumb) img.src = r.thumb;
@@ -273,10 +273,12 @@ function mvPickList() {
   document.querySelectorAll("#mv-tabs button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.t === mvp.tab)));
   $("mv-search").hidden = following;
   $("mv-more").hidden = following || !mvp.more;
-  const rooms = (following ? follow.live || [] : mvp.rooms)
-    .filter((r, k, all) => !shown.has(r.name) && all.findIndex(x => x.name === r.name) === k);
+  const all = following ? follow.live || [] : mvp.rooms;
+  const rooms = all.filter((r, k) => !shown.has(r.name) && all.findIndex(x => x.name === r.name) === k);
   if (rooms.length) return list.replaceChildren(...rooms.map(mvRow));
-  list.replaceChildren(el("p", "note", following ? "None of yours are live. Try Discover." : mvp.gen && !mvp.loading ? "No one here right now." : "Looking…"));
+  list.replaceChildren(el("p", "note", following
+    ? (mvp.fLoading ? "Looking…" : mvp.fError || (all.length ? "All of yours that are live are here already. Try Discover." : "None of yours are live. Try Discover."))
+    : mvp.gen && !mvp.loading ? "No one here right now." : "Looking…"));
 }
 async function mvDiscover(reset) {
   if (reset) { mvp.offset = 0; mvp.rooms = []; mvp.more = false; }
@@ -292,15 +294,26 @@ async function mvDiscover(reset) {
   for (const r of d.rooms) nav.rooms.set(r.name, r);
   mvPickList();
 }
-function mvPicker() {
-  if (!(follow.live || []).some(r => !mv.tiles.some(t => t.r.name === r.name))) mvp.tab = "discover";
-  if (mvp.tab === "discover" && !mvp.rooms.length) mvDiscover(true);
-  mvPickList();
+// who you follow that's live, read again each time (the Live tab may not have been opened yet)
+async function mvFollowing() {
+  mvp.fLoading = true; mvp.fError = ""; mvPickList();
+  try { const d = await api("api/following"); follow.live = d.rooms.filter(r => r.live); follow.names = new Set(d.rooms.map(r => r.name)); follow.dvr = d.dvr || {}; }
+  catch (err) { mvp.fError = err.message; }
+  mvp.fLoading = false;
+}
+async function mvPicker() {
   $("mv-picker").hidden = false;
+  mvPickList();
+  await mvFollowing();
+  if (!(follow.live || []).some(r => !mv.tiles.some(t => t.r.name === r.name)) && !mvp.fError) mvp.tab = "discover";
+  if (mvp.tab === "discover" && !mvp.rooms.length && !mvp.loading) mvDiscover(true);
+  mvPickList();
 }
 document.querySelectorAll("#mv-tabs button").forEach(b => b.onclick = () => {
   mvp.tab = b.dataset.t;
-  if (mvp.tab === "discover" && !mvp.rooms.length && !mvp.loading) mvDiscover(true); else mvPickList();
+  if (mvp.tab === "discover" && !mvp.rooms.length && !mvp.loading) mvDiscover(true);
+  else if (mvp.tab === "following") mvFollowing().then(mvPickList);
+  else mvPickList();
 });
 $("mv-search").onsubmit = e => { e.preventDefault(); mvp.q = $("mv-q").value.trim(); mvDiscover(true); };
 $("mv-more").onclick = () => mvDiscover(false);

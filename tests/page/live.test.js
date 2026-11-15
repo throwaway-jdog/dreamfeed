@@ -41,11 +41,20 @@ run("Live: profile, link an account, record, multi view", async () => {
   // multi view: + Add from Discover, and a search there
   p.w.eval(`follow.live = [{ name: "someroom", info: {} }]; openMulti([{ name: "someroom", info: {} }])`); await p.sleep(200);
   await p.click(p.$("mv-add"), 300);
-  assert.strictEqual(p.w.eval("mvp.tab"), "discover", "with none of yours left live, it opens on Discover");
+  assert.strictEqual(p.w.eval("mvp.tab"), "following", "who you follow is read again: other is live too");
+  p.same([...p.d.querySelectorAll("#mv-list b")].map(b => b.textContent), ["other"]);
+  await p.click('#mv-tabs [data-t="discover"]', 300);
   assert.deepStrictEqual([...p.d.querySelectorAll("#mv-list b")].map(b => b.textContent), ["d1", "d2"]);
   p.$("mv-q").value = "goth"; p.$("mv-search").dispatchEvent(new p.w.Event("submit")); await p.sleep(200);
   await p.click("#mv-list button", 200);
   p.same(p.w.eval("mv.tiles.map(t => t.r.name)"), ["someroom", "goth1"]);
+  // + Add's Following reads who's live again (not only what the Live tab last saw)
+  p.w.eval("follow.live = []"); await p.click(p.$("mv-add"), 300);
+  assert.strictEqual(p.w.eval("mvp.tab"), "discover", "it stays on the tab you were on");
+  await p.click('#mv-tabs [data-t="following"]', 300);
+  p.same([...p.d.querySelectorAll("#mv-list b")].map(b => b.textContent), ["other"], "someroom's already a tile; other is live");
+  await p.click("#mv-list button", 200);
+  p.same(p.w.eval("mv.tiles.map(t => t.r.name)"), ["someroom", "goth1", "other"]);
   // a tile's name and buttons: hidden until you're on it, gone again after a few still seconds
   const tile = p.d.querySelectorAll(".mv-tile")[1], tbtn = t => [...tile.querySelectorAll(".tb button")].find(b => b.textContent === t);
   assert.ok(!tile.classList.contains("show"), "the overlay starts hidden");
