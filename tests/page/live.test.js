@@ -55,6 +55,22 @@ run("Live: profile, link an account, record, multi view", async () => {
   p.same([...p.d.querySelectorAll("#mv-list b")].map(b => b.textContent), ["other"], "someroom's already a tile; other is live");
   await p.click("#mv-list button", 200);
   p.same(p.w.eval("mv.tiles.map(t => t.r.name)"), ["someroom", "goth1", "other"]);
+  // reorder: the arrow keys on ⠿, then a drag (tile 0 onto tile 2): the order, the tiles' places and the address follow
+  const names = () => p.w.eval("mv.tiles.map(t => t.r.name)"), tiles = () => [...p.d.querySelectorAll(".mv-tile")];
+  tiles()[0].querySelector(".mv-move").dispatchEvent(new p.w.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  p.same(names(), ["goth1", "someroom", "other"]);
+  p.same(tiles().map(b => b.style.order), ["1", "0", "2"]);
+  assert.strictEqual(p.w.location.pathname, "/dreamfeed/watch/goth1+someroom+other");
+  const from = tiles()[1], to = tiles()[2], ev = (type, x) => new p.w.MouseEvent(type, { bubbles: true, clientX: x, clientY: 10, button: 0 });
+  const fire = (target, type, x) => { const e = ev(type, x); e.pointerId = 1; e.pointerType = "mouse"; target.dispatchEvent(e); };
+  p.w.document.elementFromPoint = () => to.querySelector("video");
+  fire(from, "pointerdown", 10); fire(p.w, "pointermove", 40);
+  assert.ok(from.classList.contains("dragging") && to.classList.contains("drop"));
+  const loud = () => p.w.eval("mv.tiles.filter(t => !t.v.muted).map(t => t.r.name)"), before = loud();
+  fire(p.w, "pointerup", 40); to.click();     // (a click after a drag: lands where the pointer let go)
+  p.same(names(), ["other", "someroom", "goth1"], "goth1 and other swap");
+  assert.strictEqual(p.w.location.pathname, "/dreamfeed/watch/other+someroom+goth1");
+  p.same(loud(), before, "the click that ends a drag doesn't move the sound");
   // a tile's name and buttons: hidden until you're on it, gone again after a few still seconds
   const tile = p.d.querySelectorAll(".mv-tile")[1], tbtn = t => [...tile.querySelectorAll(".tb button")].find(b => b.textContent === t);
   assert.ok(!tile.classList.contains("show"), "the overlay starts hidden");
@@ -64,7 +80,7 @@ run("Live: profile, link an account, record, multi view", async () => {
   assert.ok(!tile.classList.contains("show"), "and it goes after 3 s");
   // Follow, for a room you don't follow; someroom (followed) has none
   assert.ok(!tbtn("Follow"), "goth1 came back followed");
-  p.w.eval(`mv.tiles[1].r.followed = false; mvActs(mv.tiles[1])`);
+  p.w.eval(`const g = mv.tiles.find(t => t.r.name === "goth1"); g.r.followed = false; mvActs(g)`);
   await p.click(tbtn("Follow"), 200);
   p.same(p.lastCall("api/live/follow").body, { name: "goth1", follow: true });
   assert.ok(tbtn("Followed ✓"));

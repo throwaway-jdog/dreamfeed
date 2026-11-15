@@ -516,6 +516,10 @@ button.off-row { width: 100%; background: none; border: 0; color: inherit; text-
 .mv-tile .tb { left: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .mv-tile .tb-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-right: auto; }
 .mv-tile .tb button.rec { color: #ff5a5a; }
+.mv-tile { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.mv-tile.dragging { opacity: .55; cursor: grabbing; }
+.mv-tile.drop { outline: 3px dashed #fff; outline-offset: -3px; }
+.mv-tile .tb button.mv-move { cursor: grab; touch-action: none; }
 .mv-tile .lbl, .mv-tile .tb { opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s .2s; }
 .mv-tile.show .lbl, .mv-tile.show .tb, .mv-tile:focus-within .lbl, .mv-tile:focus-within .tb { opacity: 1; visibility: visible; transition: opacity .2s; }
 .post .name.who { cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }

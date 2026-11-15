@@ -147,20 +147,67 @@ function mvAdd(r) {
   big.onclick = e => { e.stopPropagation(); openRoom(t.r, mv.tiles.map(x => x.r)); };
   rm.onclick = e => { e.stopPropagation(); mvRemove(t); };
   rm.setAttribute("aria-label", `Close ${r.name}`);
-  const acts = el("span", "tb-acts");
-  tb.append(acts, big, rm);
+  const acts = el("span", "tb-acts"), mvb = el("button", "mv-move", "⠿"); mvb.type = "button";
+  mvb.setAttribute("aria-label", `Move ${r.name} (arrow keys)`); mvb.title = "Drag to move it, or use the arrow keys";
+  mvb.onclick = e => e.stopPropagation();
+  mvb.onkeydown = e => {
+    const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    if (!step) return;
+    e.preventDefault(); const i = mv.tiles.indexOf(t), j = i + step;
+    if (j >= 0 && j < mv.tiles.length) { mvSwap(i, j); mvb.focus(); }
+  };
+  tb.append(mvb, acts, big, rm);
   box.append(v, lbl, msg, tb);
-  box.onclick = () => { mvLoud(t); mvShow(t); };
+  box.onclick = () => { if (mvd.moved) { mvd.moved = false; return; } mvLoud(t); mvShow(t); };
+  box.addEventListener("pointerdown", e => mvDragStart(t, e));
   // its name and buttons only while you're on it (hover, or a tap on a phone), gone after a few still seconds
-  box.onpointermove = e => { if (e.pointerType === "mouse") mvShow(t); };
-  box.onpointerleave = e => { if (e.pointerType === "mouse") mvHide(t); };
+  box.addEventListener("pointermove", e => { if (e.pointerType === "mouse") mvShow(t); });
+  box.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") mvHide(t); });
   Object.assign(t, { v, box, msg, title, acts, hideAt: null });
   mvActs(t);
   mv.tiles.push(t);
-  $("mv-grid").append(box);
+  $("mv-grid").append(box); mvOrder();
   mvTitle(t, (r.info || {}).title, (r.info || {}).viewers);
   mvPlay(t);
   mvLayout(); mvBar(); if (!$("multi").hidden) setUrl(watchPath());
+}
+// Reorder: drag a tile onto another and they swap (a mouse drags at once; a finger holds a moment
+// first, so a tap still picks the sound). Placed with CSS order, so no video is moved or restarted.
+const mvd = { t: null, over: null, x: 0, y: 0, on: false, moved: false, hold: null };
+function mvOrder() { mv.tiles.forEach((x, k) => { x.box.style.order = k; }); }
+function mvSwap(i, j) {
+  [mv.tiles[i], mv.tiles[j]] = [mv.tiles[j], mv.tiles[i]];
+  mvOrder(); setUrl(watchPath());
+}
+function mvDragStart(t, e) {
+  if (e.button > 0 || mv.tiles.length < 2 || (e.target.closest("button") && !e.target.closest(".mv-move"))) return;
+  Object.assign(mvd, { t, over: null, x: e.clientX, y: e.clientY, on: false, id: e.pointerId });
+  const begin = () => { mvd.on = true; t.box.classList.add("dragging"); try { t.box.setPointerCapture(mvd.id); } catch {} };
+  if (e.pointerType === "mouse" || e.target.closest(".mv-move")) mvd.pending = begin;
+  else mvd.hold = setTimeout(begin, 350);
+  addEventListener("pointermove", mvDragMove); addEventListener("pointerup", mvDragEnd); addEventListener("pointercancel", mvDragEnd);
+}
+function mvDragMove(e) {
+  if (!mvd.t || e.pointerId !== mvd.id) return;
+  const far = Math.hypot(e.clientX - mvd.x, e.clientY - mvd.y) > 8;
+  if (!mvd.on) {
+    if (far && mvd.pending) { mvd.pending(); mvd.pending = null; }
+    else if (far) { clearTimeout(mvd.hold); return mvDragEnd(); }       // a finger that moves before the hold: not a drag
+    if (!mvd.on) return;
+  }
+  e.preventDefault();
+  const under = document.elementFromPoint(e.clientX, e.clientY), box = under && under.closest(".mv-tile");
+  const over = box && box !== mvd.t.box ? mv.tiles.find(x => x.box === box) : null;
+  if (over !== mvd.over) { if (mvd.over) mvd.over.box.classList.remove("drop"); mvd.over = over; if (over) over.box.classList.add("drop"); }
+}
+function mvDragEnd() {
+  clearTimeout(mvd.hold);
+  removeEventListener("pointermove", mvDragMove); removeEventListener("pointerup", mvDragEnd); removeEventListener("pointercancel", mvDragEnd);
+  const { t, over, on } = mvd;
+  if (t) t.box.classList.remove("dragging");
+  if (over) { over.box.classList.remove("drop"); mvSwap(mv.tiles.indexOf(t), mv.tiles.indexOf(over)); }
+  mvd.moved = on; Object.assign(mvd, { t: null, over: null, on: false, pending: null });
+  if (on) setTimeout(() => { mvd.moved = false; }, 0);              // the click that follows a drag isn't a tap
 }
 const MV_SHOW = 3000;
 function mvShow(t, ms = MV_SHOW) {
@@ -225,8 +272,8 @@ async function mvPlay(t) {
   v.play().catch(() => {});
 }
 function mvRemove(t) {
-  t.gen++; clearTimeout(t.hideAt); if (t.hls) t.hls.destroy(); t.v.pause(); t.v.removeAttribute("src"); t.v.load(); t.box.remove();
-  mv.tiles = mv.tiles.filter(x => x !== t);
+  t.gen++; clearTimeout(t.hideAt); if (mvd.t === t) mvDragEnd(); if (t.hls) t.hls.destroy(); t.v.pause(); t.v.removeAttribute("src"); t.v.load(); t.box.remove();
+  mv.tiles = mv.tiles.filter(x => x !== t); mvOrder();
   if (!mv.tiles.length) return leave();
   mvLayout(); mvBar(); setUrl(watchPath());
 }
