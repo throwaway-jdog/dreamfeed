@@ -21,7 +21,7 @@ function setView(v) {
   else if (com) loadComics();
   else if (fol) refreshFollowing();
   else if (posts) showFeed();
-  else if (vids) loadVids();
+  else if (vids) vidsTab();
   else reset();
 }
 // Saved: bring in what you saved on the sites you pick (X's and Bluesky's bookmarks, Reddit's saved
@@ -103,9 +103,10 @@ function setUrl(rel) {
 }
 function leave() { if (((history.state || {}).n || 0) > 0) history.back(); else go("", true); }
 function tabPath(v) {
+  const recs = "vids/recordings" + (vr.room ? `/${enc(vr.room)}` : "");
   return { posts: fp.mode === "foryou" ? "feed/foryou" : "feed",
            liked: state.savedSource !== "all" ? `saved/${state.savedSource}` : "saved",
-           comics: "comics", follow: livePage.page === "discover" ? "live/discover" : "live", dash: "dashboard", vids: "vids",
+           comics: "comics", follow: livePage.page === "discover" ? "live/discover" : "live", dash: "dashboard", vids: vs.tab === "recs" ? recs : "vids", recs,
            }[v] || "feed";
 }
 function lastTab() {
@@ -177,7 +178,7 @@ function route() {
     case "updates": return setView("updates");
     case "history": return setView("history");
     case "search": se.q = b || ""; if (state.view === "search") showSearch(); return setView("search");
-    case "vids": return setView("vids");
+    case "vids": return showVidsAt(b, c);
     case "personas": case "p": case "item": return go("feed", true);     // (the personas are gone: their old addresses)
     case "room":
       if (!ROOM_NAME.test(b)) break;

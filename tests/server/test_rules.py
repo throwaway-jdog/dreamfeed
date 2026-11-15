@@ -370,6 +370,36 @@ class Recordings(unittest.TestCase):
         os.environ.pop("CB_VIDEOS")
 
 
+class AllRecordings(unittest.TestCase):
+    """The Videos tab's Recordings: every followed room's videos, newest first; by room and kind."""
+    def test_listing(self):
+        from dreamfeed.core.db import connect
+        from webapp import live
+        from webapp.common import DB_PATH
+        folder = tempfile.mkdtemp()
+        os.environ["CB_VIDEOS"] = folder
+        conn = connect(DB_PATH)
+        with conn:
+            for r in ("aroom", "broom"):
+                conn.execute("INSERT OR IGNORE INTO follows (source, name) VALUES ('chaturbate', ?)", (r,))
+        files = {"aroom/aroom-1.mp4": 100, "aroom/aroom-2.mp4": 300, "broom/broom-1.mp4": 200}
+        for rel, t in files.items():
+            os.makedirs(os.path.dirname(f"{folder}/{rel}"), exist_ok=True)
+            open(f"{folder}/{rel}", "wb").write(b"x")
+            os.utime(f"{folder}/{rel}", (time.time() - 5000 + t,) * 2)
+        d = live.all_recordings()
+        mine = [v for v in d["videos"] if v["room"] in ("aroom", "broom")]
+        self.assertEqual([v["title"] for v in mine], ["aroom-2", "broom-1", "aroom-1"], "newest first, across rooms")
+        self.assertEqual([r["name"] for r in d["rooms"] if r["name"] in ("aroom", "broom")], ["aroom", "broom"])
+        one = live.all_recordings("aroom")
+        self.assertEqual([v["path"] for v in one["videos"]], [v["path"] for v in live.live_videos("aroom")["videos"]])
+        self.assertEqual(live.all_recordings("aroom", "highlights")["total"], 0)
+        with self.assertRaises(LookupError):
+            live.all_recordings("notfollowed")
+        with self.assertRaises(ValueError):
+            live.all_recordings("", "weird")
+
+
 class History(unittest.TestCase):
     def test_entries(self):
         from webapp import history

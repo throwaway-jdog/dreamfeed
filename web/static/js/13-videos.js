@@ -47,6 +47,66 @@ async function loadVids(more) {
   vs.more = d.more; $("vg-more").hidden = !d.more;
   if (searching) vs.page++; else vs.offset += d.videos.length;
 }
+// Recordings: every room's videos from your own folder, newest first (All, or only the recordings
+// or their highlights; one room's, by its chip). A tap plays it, then that room's next; its profile
+// is where highlights are cut and videos deleted.
+const vr = { room: "", kind: "", offset: 0, gen: 0, loading: false };
+vs.tab = "foryou";
+try { const k = localStorage.getItem("recsKind"); if (["", "full", "highlights"].includes(k)) vr.kind = k; } catch {}
+function showVidsAt(b, c) {
+  const tab = b === "recordings" ? "recs" : "foryou", room = tab === "recs" ? (c && ROOM_NAME.test(c) ? c : "") : vr.room;
+  const changed = vs.tab !== tab || vr.room !== room;
+  vs.tab = tab; vr.room = room;                 // (For you keeps the room you were on, for coming back)
+  if (state.view !== "vids") return setView("vids");
+  if (changed) vidsTab();
+}
+function vidsTab() {
+  const recs = vs.tab === "recs";
+  document.querySelectorAll("#vs-tab button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.t === vs.tab)));
+  $("vx-pane").hidden = recs; $("vr-pane").hidden = !recs;
+  if (recs) loadRecs(); else loadVids();
+}
+function recCard(f) {
+  const b = el("button", "pf-vid"), shot = el("span", "shot"); b.type = "button";
+  if (f.poster) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = f.poster; shot.append(img); }
+  else shot.append(el("span", "ph"));
+  if (f.highlight) shot.append(el("span", "hl", "HIGHLIGHTS"));
+  if (f.duration) shot.append(el("span", "len", vidLength(f.duration)));
+  const about = f.highlight && f.duration && f.of ? `${vidLength(f.duration)} of ${vidLength(f.of)}` : vidDate(f);
+  b.append(shot, el("b", null, f.title), el("small", null, [vr.room ? "" : f.room, about, vidSize(f.size)].filter(Boolean).join(" · ")));
+  b.onclick = () => go(`room/${enc(f.room)}/video/${enc(f.path)}`);
+  return b;
+}
+async function loadRecs(more) {
+  const gen = more ? vr.gen : ++vr.gen;
+  if (more && vr.loading) return;
+  vr.loading = true; $("vr-more").hidden = true;
+  document.querySelectorAll("#vr-kind button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.k === vr.kind)));
+  $("vr-title").textContent = vr.room || "All rooms"; $("vr-profile").hidden = !vr.room;
+  if (!more) { vr.offset = 0; $("vr-grid").replaceChildren(); $("vr-note").textContent = "Looking…"; }
+  let d;
+  try { d = await api(`api/live/recordings?room=${enc(vr.room)}&kind=${vr.kind}&offset=${vr.offset}`); }
+  catch (err) { if (gen === vr.gen) { vr.loading = false; $("vr-note").textContent = err.message; } return; }
+  if (gen !== vr.gen) return;
+  vr.loading = false;
+  const chip = (name, label, n) => {
+    const c = el("button", "chip", label); c.type = "button"; c.append(" ", el("span", null, String(n)));
+    c.setAttribute("aria-pressed", String(vr.room === name));
+    c.onclick = () => go(name ? `vids/recordings/${enc(name)}` : "vids/recordings");
+    return c;
+  };
+  $("vr-rooms").replaceChildren(chip("", "All", d.rooms.reduce((a, r) => a + r.count, 0)), ...d.rooms.map(r => chip(r.name, r.name, r.count)));
+  $("vr-rooms").hidden = d.rooms.length < 2;
+  $("vr-grid").append(...d.videos.map(recCard));
+  vr.offset += d.videos.length; $("vr-more").hidden = !d.more;
+  $("vr-note").textContent = !d.folder ? "Your videos folder isn't set up (CB_VIDEOS)."
+    : d.total ? `${d.total} ${vr.kind === "highlights" ? "highlights" : vr.kind === "full" ? "recording" + (d.total === 1 ? "" : "s") : "video" + (d.total === 1 ? "" : "s")}`
+    : vr.kind || vr.room ? "None of these." : "No recordings yet. Record a room from Live (Record on its card) or its profile.";
+}
+document.querySelectorAll("#vs-tab button").forEach(b => b.onclick = () => go(b.dataset.t === "recs" ? tabPath("recs") : "vids"));
+document.querySelectorAll("#vr-kind button").forEach(b => b.onclick = () => { vr.kind = b.dataset.k; remember("recsKind", vr.kind); loadRecs(); });
+$("vr-more").onclick = () => loadRecs(true);
+$("vr-profile").onclick = () => openRoomProfile(roomFor(vr.room));
 $("vs-form").onsubmit = e => { e.preventDefault(); vs.q = $("vs-q").value.trim(); loadVids(); };
 $("vs-len").onchange = () => { vs.length = $("vs-len").value; remember("vidsLength", vs.length); loadVids(); };
 $("vg-more").onclick = () => loadVids(true);
@@ -180,4 +240,4 @@ async function showXvideo(it) {
   }
   if (mp4) { v.src = mp4; play(); }
 }
-function closeXvideo() { xvStop(); $("xv-player").hidden = true; if (state.view === "vids" && !vs.q) loadVids(); }
+function closeXvideo() { xvStop(); $("xv-player").hidden = true; if (state.view === "vids" && vs.tab === "foryou" && !vs.q) loadVids(); }

@@ -156,6 +156,17 @@
       <div class="comic-list" id="c-list"></div></div>
   </section>
   <section class="vids" id="vids" hidden aria-label="Videos">
+    <div class="seg two" id="vs-tab" role="group" aria-label="Videos">
+      <button type="button" data-t="foryou" aria-pressed="true">For you</button><button type="button" data-t="recs" aria-pressed="false">Recordings</button></div>
+    <div id="vr-pane" hidden>
+      <div class="seg three" id="vr-kind" role="group" aria-label="Which">
+        <button type="button" data-k="" aria-pressed="true">All</button><button type="button" data-k="full" aria-pressed="false">Recordings</button><button type="button" data-k="highlights" aria-pressed="false">Highlights</button></div>
+      <div class="chips" id="vr-rooms" role="group" aria-label="Room"></div>
+      <div class="vs-section"><div class="vs-head"><h2 id="vr-title">All rooms</h2><button type="button" class="secondary" id="vr-profile" hidden>Profile</button></div>
+        <p class="note" id="vr-note"></p><div class="pf-grid" id="vr-grid"></div>
+        <button type="button" class="secondary more" id="vr-more" hidden>More</button></div>
+    </div>
+    <div id="vx-pane">
     <form class="vs-form" id="vs-form" role="search">
       <input class="in" id="vs-q" type="search" placeholder="Search videos" maxlength="100" autocomplete="off" autocapitalize="off" spellcheck="false">
       <select class="in" id="vs-len" aria-label="Length"><option value="">Any length</option><option value="10">10+ min</option><option value="20">20+ min</option></select>
@@ -164,6 +175,7 @@
     <div class="vs-section"><div class="vs-head"><h2 id="vg-title">For you</h2><button type="button" class="secondary" id="vg-back" hidden>Back to For you</button></div>
       <p class="note" id="vg-note"></p><div class="pf-grid" id="vg"></div>
       <button type="button" class="secondary more" id="vg-more" hidden>More</button></div>
+    </div>
   </section>
   <section class="timeline fposts" id="posts" hidden aria-label="Feed">
     <div class="seg three" id="f-mode" role="group" aria-label="Feed">

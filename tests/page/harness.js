@@ -25,6 +25,7 @@ function quiet(u) {
   if (u.includes("api/signins")) return { sites: [], reddit: { site: "reddit", from: null, app: false }, e621: { site: "e621", from: null, signed_in: false },
                                          bsky: { site: "bsky", from: null, signed_in: false }, browser: null };
   if (u.includes("api/saved/import")) return { running: false, files: {} };
+  if (u.includes("api/live/recordings")) return { videos: [], more: false, total: 0, rooms: [], folder: true };
   if (u.includes("api/vids")) return { videos: [], more: false, continue: [], taste: { tags: [], n: 0 } };
   if (u.includes("api/comics/tags")) return { tags: [] };
   if (u.includes("api/comics/browse")) return { results: [], more: false };

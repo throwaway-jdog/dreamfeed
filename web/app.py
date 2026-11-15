@@ -9,6 +9,7 @@ GET  /api/following     the Chaturbate rooms you follow, live first (kept by the
 GET  /follow/thumb/chaturbate/<name>.jpg   a live room's last thumbnail
 GET  /api/live/stream    ?name=ROOM  a followed room's live video (HLS address), or why there isn't one
 GET  /api/live/videos    ?name=ROOM  your own videos of a room you follow (CB_VIDEOS), newest first
+GET  /api/live/recordings ?room=ROOM&kind=|full|highlights&offset=N  all of them (the Videos tab's Recordings), newest first
 GET  /cb-videos/<room>/<path>   one of them;  /cb-videos/poster/<key>.jpg  its poster
 GET  /api/discover/cb   ?mode=foryou|top|search&q=WORDS&gender=f|m|c|t&offset=N  live rooms you don't follow
 GET  /api/discover/x    X accounts you might like: linked from your rooms, mentioned by your follows
@@ -106,7 +107,7 @@ from webapp.comics import comic_cover, comic_page, comic_search, comics, delete_
 from webapp import health, history, mutes, recordings, retired, search, updates, videos
 from webapp.common import CSP, DATA, MAX_BODY, PAGE, PREFIX, ROOM, STATE, STATIC
 from webapp.feed import FRESH_READS, _mark_saved, _seen, _unshown, browse, e621_vote, follow_posts, follow_settings, import_saved, import_status, more_videos, one_post, person_posts, random_subreddit, recent_browses, save_follow_settings, save_post, saved_file, saved_view
-from webapp.live import _dvr_once_watch, _followed, _link_sweep, cb_thumb, delete_room_video, discover_cb, discover_x, dvr_action, follow_room, follow_thumb, following, live_stream, live_videos, profile, queue_highlights, relink, restore_room_video, save_link
+from webapp.live import _dvr_once_watch, _followed, _link_sweep, all_recordings, cb_thumb, delete_room_video, discover_cb, discover_x, dvr_action, follow_room, follow_thumb, following, live_stream, live_videos, profile, queue_highlights, relink, restore_room_video, save_link
 from webapp.signins import BROWSER_POWER_DIR, BROWSER_PROFILE, BROWSER_SCREEN, _browser_keeper, browser_start, reddit_callback, reddit_login_url, save_signin, signins
 
 
@@ -460,6 +461,14 @@ class Handler(BaseHTTPRequestHandler):
             if not data:
                 return self.send(404, {"error": "no thumbnail"})
             return self.send(200, data, "image/jpeg", cache="private, max-age=60")
+        if path == "/api/live/recordings":
+            q = self.query()
+            try:
+                return self.send(200, all_recordings(q.get("room", ""), q.get("kind", ""), int(q.get("offset") or 0)))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except LookupError as e:
+                return self.send(404, {"error": str(e)})
         if path == "/api/live/videos":
             try:
                 return self.send(200, live_videos(self.query().get("name", "")))

@@ -12,7 +12,7 @@ const answer = u => u.includes("api/post?") ? POST
 
 const PAGES = [   // address -> the view it shows
   ["/dreamfeed/", "posts"], ["/dreamfeed/feed", "posts"], ["/dreamfeed/feed/foryou", "posts"], ["/dreamfeed/saved", "liked"],
-  ["/dreamfeed/saved/x", "liked"], ["/dreamfeed/vids", "vids"], ["/dreamfeed/live", "follow"], ["/dreamfeed/live/discover", "follow"],
+  ["/dreamfeed/saved/x", "liked"], ["/dreamfeed/vids", "vids"], ["/dreamfeed/vids/recordings", "vids"], ["/dreamfeed/vids/recordings/someroom", "vids"], ["/dreamfeed/live", "follow"], ["/dreamfeed/live/discover", "follow"],
   ["/dreamfeed/comics", "comics"], ["/dreamfeed/dashboard", "dash"], ["/dreamfeed/personas", "posts"], ["/dreamfeed/p/someone", "posts"],
   ["/dreamfeed/room/someroom", null], ["/dreamfeed/room/someroom/watch", null], ["/dreamfeed/watch/a+b", null],
   ["/dreamfeed/r/pics/top", null], ["/dreamfeed/post/x/1234567", null], ["/dreamfeed/x/someone", null], ["/dreamfeed/u/someone", null],

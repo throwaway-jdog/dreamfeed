@@ -164,23 +164,19 @@ def _followed() -> list[str]:
         return [n for (n,) in conn.execute("SELECT name FROM follows WHERE source = 'chaturbate'")]
 
 
-def live_videos(name: str) -> dict:
-    """A followed room's videos from your own folder, newest first, each with its poster and
-    length (made by the follow service; until then none). Highlights come just before the video
-    they're cut from, and each video has its latest highlights request (job)."""
-    if not ROOM.match(name):
-        raise ValueError("bad room")
-    rooms = _followed()
-    if name not in rooms:
-        raise LookupError("you don't follow that room")
-    index = read_json(cbvideos.posters(DATA) / "index.json") or {}
-    with db() as conn:
-        jobs = {}
-        for r in conn.execute("SELECT path, status, progress, error FROM highlights WHERE room = ? ORDER BY id", (name,)):
-            jobs[r["path"]] = {"status": r["status"], "error": r["error"],
-                               **(json.loads(r["progress"]) if r["progress"] else {})}
+def _jobs(conn, room: str | None = None) -> dict:
+    """{(room, path): its latest highlights request}."""
+    jobs = {}
+    q = "SELECT room, path, status, progress, error FROM highlights" + (" WHERE room = ?" if room else "") + " ORDER BY id"
+    for r in conn.execute(q, (room,) if room else ()):
+        jobs[(r["room"], r["path"])] = {"status": r["status"], "error": r["error"], **(json.loads(r["progress"]) if r["progress"] else {})}
+    return jobs
+
+
+def _room_items(name: str, vids: list[dict], index: dict, jobs: dict) -> list[dict]:
+    """One room's videos, newest first, highlights just before the video they're cut from."""
     items = {}
-    for v in cbvideos.scan(rooms).get(name, []):
+    for v in vids:
         made = index.get(cbvideos.key(v)) or {}
         high = cbvideos.is_highlight(v["path"])
         title = Path(v["path"]).stem
@@ -202,11 +198,58 @@ def live_videos(name: str) -> dict:
             group.insert(0, h)
             paired.add(h["path"])
         v["has_highlight"] = bool(h)
-        v["job"] = jobs.get(v["path"])
+        v["job"] = jobs.get((name, v["path"]))
         groups.append((v["mtime"], group))
     groups += [(v["mtime"], [v]) for v in items.values() if v["highlight"] and v["path"] not in paired]
     groups.sort(key=lambda g: -g[0])
-    return {"videos": [v for _, g in groups for v in g], "folder": cbvideos.root() is not None}
+    return [v for _, g in groups for v in g]
+
+
+def live_videos(name: str) -> dict:
+    """A followed room's videos from your own folder, newest first, each with its poster and
+    length (made by the follow service; until then none). Highlights come just before the video
+    they're cut from, and each video has its latest highlights request (job)."""
+    if not ROOM.match(name):
+        raise ValueError("bad room")
+    rooms = _followed()
+    if name not in rooms:
+        raise LookupError("you don't follow that room")
+    index = read_json(cbvideos.posters(DATA) / "index.json") or {}
+    with db() as conn:
+        jobs = _jobs(conn, name)
+    return {"videos": _room_items(name, cbvideos.scan(rooms).get(name, []), index, jobs), "folder": cbvideos.root() is not None}
+
+
+REC_PAGE = 48
+REC_KINDS = ("", "full", "highlights")
+
+
+def all_recordings(room: str = "", kind: str = "", offset: int = 0) -> dict:
+    """Every room's videos (the Videos tab's Recordings), newest first, REC_PAGE at a time; room:
+    only theirs; kind: full (the recordings) or highlights. With the rooms that have any, the
+    most recently recorded first, and how many each has."""
+    if room and not ROOM.match(room) or kind not in REC_KINDS or not 0 <= offset < 100000:
+        raise ValueError("bad request")
+    rooms = _followed()
+    if room and room not in rooms:
+        raise LookupError("you don't follow that room")
+    index = read_json(cbvideos.posters(DATA) / "index.json") or {}
+    with db() as conn:
+        jobs = _jobs(conn)
+    scanned = cbvideos.scan(rooms)
+    per = {}
+    for name, vids in scanned.items():
+        if vids:
+            per[name] = [{**v, "room": name} for v in _room_items(name, vids, index, jobs)]
+    listed = sorted(({"name": n, "count": len(vs), "latest": max(v["mtime"] for v in vs)} for n, vs in per.items()),
+                    key=lambda r: -r["latest"])
+    picked = per.get(room, []) if room else [v for vs in per.values() for v in vs]
+    if kind:
+        picked = [v for v in picked if v["highlight"] == (kind == "highlights")]
+    if not room:
+        picked.sort(key=lambda v: -v["mtime"])
+    return {"videos": picked[offset:offset + REC_PAGE], "more": len(picked) > offset + REC_PAGE, "total": len(picked),
+            "rooms": listed, "folder": cbvideos.root() is not None}
 
 
 def _room_video(req: dict) -> tuple[str, str, Path]:
