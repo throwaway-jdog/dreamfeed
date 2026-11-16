@@ -341,7 +341,7 @@ def person_posts(source: str, handle: str, cursor: str) -> dict:
 
 def save_post(req: dict) -> dict:
     """{"post": {...}, "save": bool}: keep a post in Saved (as it was shown); a Reddit post is
-    saved on Reddit too, an X one bookmarked, an e621 one favorited (signed in)."""
+    saved on Reddit too, an X or Bluesky one bookmarked, an e621 one favorited (signed in)."""
     p, save = req.get("post") or {}, bool(req.get("save"))
     pid = str(p.get("id") or "")
     m = livefeeds.POST_ID.fullmatch(pid)
@@ -357,6 +357,12 @@ def save_post(req: dict) -> dict:
     elif m.group(1) == "x" and livefeeds.x_cookies():
         try:
             livefeeds.x_bookmark(m.group(2), save)
+            sync = {"status": "done"}
+        except (LookupError, ValueError) as e:
+            sync = {"status": "failed", "error": str(e)[:200]}
+    elif m.group(1) == "bsky" and livefeeds.bsky_ready():
+        try:
+            livefeeds.bsky_bookmark(m.group(2), save)
             sync = {"status": "done"}
         except (LookupError, ValueError) as e:
             sync = {"status": "failed", "error": str(e)[:200]}

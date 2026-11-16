@@ -424,6 +424,28 @@ class XBookmark(unittest.TestCase):
                 x.x_bookmark("12; rm", True)
 
 
+class BskyBookmark(unittest.TestCase):
+    """Saving a Bluesky post bookmarks it there (with its cid), unsaving takes it away; nothing sent here."""
+    def test_calls(self):
+        from unittest import mock
+        from dreamfeed.feed import bsky
+        pid = "a" * 24 + "_" + "b" * 13
+        calls = []
+        def fake(method, params=None, data=None):
+            calls.append((method, params, data))
+            return {"posts": [{"cid": "bafyx"}]} if method == "app.bsky.feed.getPosts" else {}
+        with mock.patch.object(bsky, "_bsky", side_effect=fake):
+            bsky.bsky_bookmark(pid, True)
+            bsky.bsky_bookmark(pid, False)
+        uri = f"at://did:plc:{'a' * 24}/app.bsky.feed.post/{'b' * 13}"
+        self.assertEqual(calls[1], ("app.bsky.bookmark.createBookmark", None, {"uri": uri, "cid": "bafyx"}))
+        self.assertEqual(calls[2], ("app.bsky.bookmark.deleteBookmark", None, {"uri": uri}))
+        with mock.patch.object(bsky, "_bsky", return_value={"posts": []}), self.assertRaises(LookupError):
+            bsky.bsky_bookmark(pid, True)                   # gone from Bluesky
+        with self.assertRaises(ValueError):
+            bsky.bsky_bookmark("nope", True)
+
+
 class History(unittest.TestCase):
     def test_entries(self):
         from webapp import history

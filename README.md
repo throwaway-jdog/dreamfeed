@@ -176,7 +176,8 @@ the **Saved** tab, below):
   they're in (the post says "keeping a full-quality copy…" until then), so a post deleted on
   the site stays. Unsaving deletes them. A Reddit post is saved on Reddit too, as you, at once;
   an X post is bookmarked on X (the same request x.com's bookmark button makes, with your X
-  sign-in, as all of dreamfeed's X reading is), and unsaving takes the bookmark away; an e621
+  sign-in, as all of dreamfeed's X reading is) and a Bluesky one bookmarked on Bluesky (its own
+  bookmarks), and unsaving takes the bookmark away; an e621
   post is favorited (signed in). The post says whether the site took it.
   **Bring in what you saved on the sites** (at the top of Saved) asks which (the last pick is
   remembered), then adds your X bookmarks, your Bluesky bookmarks, your Reddit saved posts (the

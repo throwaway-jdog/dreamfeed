@@ -87,14 +87,14 @@ def _bsky_session(fresh: bool = False) -> dict:
         return sess
 
 
-def _bsky(method: str, params: dict | None = None):
-    """An app.bsky call as you (through your own server, as Bluesky's apps do)."""
+def _bsky(method: str, params: dict | None = None, data: dict | None = None):
+    """An app.bsky call as you (through your own server, as Bluesky's apps do); data: sent (POST)."""
     q = "?" + urllib.parse.urlencode([(k, x) for k, v in (params or {}).items() for x in (v if isinstance(v, list) else [v])
                                       if x is not None]) if params else ""
     for attempt in (0, 1):
         sess = _bsky_session(fresh=attempt == 1)
         try:
-            return _bsky_json(f"{_bsky_pds(sess)}/xrpc/{method}{q}", token=sess["accessJwt"])
+            return _bsky_json(f"{_bsky_pds(sess)}/xrpc/{method}{q}", data, token=sess["accessJwt"])
         except urllib.error.HTTPError as e:
             if e.code in (400, 401) and attempt == 0:
                 try:
@@ -255,6 +255,19 @@ def bsky_saved(limit: int = 2000) -> list[dict]:
         if not cursor or not d.get("bookmarks"):
             break
     return out[:limit]
+
+
+def bsky_bookmark(pid: str, save: bool) -> None:
+    """Bookmarks the post on Bluesky (save) or takes the bookmark away (Saved: saving one)."""
+    uri = _bsky_uri(pid)
+    if not save:
+        _bsky("app.bsky.bookmark.deleteBookmark", data={"uri": uri})
+        return
+    posts = _bsky("app.bsky.feed.getPosts", {"uris": uri}).get("posts") or []
+    cid = (posts[0] if posts else {}).get("cid")
+    if not cid:
+        raise LookupError("it's gone from Bluesky")
+    _bsky("app.bsky.bookmark.createBookmark", data={"uri": uri, "cid": cid})
 
 
 def bsky_user(handle: str) -> dict:
