@@ -282,6 +282,53 @@ def x_bookmarks() -> list[dict]:
     return posts
 
 
+# Saving an X post in Saved bookmarks it on X too (and unsaving takes the bookmark away), as you: the
+# same request x.com makes for its bookmark button. X changes these ids now and then: the
+# X_CREATE_BOOKMARK_QUERY and X_DELETE_BOOKMARK_QUERY settings override them.
+X_BOOKMARK_QUERY = {True: os.environ.get("X_CREATE_BOOKMARK_QUERY", "").strip() or "aoDbu3RHznuiSkQ9aNM67Q",
+                    False: os.environ.get("X_DELETE_BOOKMARK_QUERY", "").strip() or "Wlmlj2-xzyS1GN3a6cj-mQ"}
+X_BOOKMARK_RUNNER = """
+import json, sys
+from gallery_dl import config, extractor
+cookies, query, op, tid = sys.argv[1:5]
+config.set(("extractor",), "cookies", cookies)
+config.set(("extractor",), "cookies-update", False)
+ex = extractor.find("https://x.com/i/bookmarks")
+ex.initialize()
+api = ex.api
+url = f"{api.root}/graphql/{query}/{op}"
+api._transaction_id(url, "POST")
+r = ex.request(url, method="POST", json={"variables": {"tweet_id": tid}, "queryId": query}, headers=api.headers, fatal=None)
+print(json.dumps({"status": r.status_code, "body": r.text[:2000]}))
+"""
+
+
+def x_bookmark(tid: str, save: bool) -> None:
+    """Bookmarks the post on X (save) or takes the bookmark away; already so counts as done."""
+    if not re.fullmatch(r"\d{5,25}", tid or ""):
+        raise ValueError("bad post")
+    if not x_cookies():
+        raise LookupError("X isn't signed in")
+    op = "CreateBookmark" if save else "DeleteBookmark"
+    try:
+        out = subprocess.run([sys.executable, "-c", X_BOOKMARK_RUNNER, x_cookies(), X_BOOKMARK_QUERY[save], op, tid],
+                             capture_output=True, text=True, timeout=45)
+    except subprocess.TimeoutExpired as e:
+        raise LookupError("X took too long") from e
+    try:
+        r = json.loads(out.stdout)
+        d = json.loads(r["body"]) if r["body"].lstrip().startswith("{") else {}
+    except (ValueError, KeyError) as e:
+        err = (out.stderr or "").strip().splitlines()
+        raise LookupError(f"X didn't answer ({err[-1][:160] if err else 'nothing came back'})") from e
+    if (d.get("data") or {}).get("tweet_bookmark_put" if save else "tweet_bookmark_delete") == "Done":
+        return
+    msgs = " ".join(str(e.get("message", "")) for e in d.get("errors") or [])
+    if re.search(r"already|not (been )?bookmarked|not found in bookmarks", msgs, re.I) or (not save and re.search(r"record for tweetId.*not found", msgs)):
+        return                                  # (unsaving one that's gone from X: nothing to take away)
+    raise LookupError(f"X didn't {'bookmark' if save else 'unbookmark'} it ({msgs[:160] or 'status ' + str(r['status'])})")
+
+
 # ---- search (dreamfeed's Search) ----
 def x_search(q: str, start: int) -> dict:
     """X's latest posts with pictures or video matching q (its search, as you). {"posts", "next"}."""

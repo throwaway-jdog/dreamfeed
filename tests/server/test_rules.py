@@ -400,6 +400,30 @@ class AllRecordings(unittest.TestCase):
             live.all_recordings("", "weird")
 
 
+class XBookmark(unittest.TestCase):
+    """Saving an X post bookmarks it on X: X's answers read (done, already so, gone, failed); nothing sent here."""
+    def test_answers(self):
+        from unittest import mock
+        from dreamfeed.feed import x
+        def answer(body, status=200):
+            out = mock.Mock(stdout=json.dumps({"status": status, "body": json.dumps(body)}), stderr="")
+            return mock.patch.object(x.subprocess, "run", return_value=out)
+        with mock.patch.object(x, "x_cookies", return_value="/cookies.txt"):
+            with answer({"data": {"tweet_bookmark_put": "Done"}}) as run:
+                x.x_bookmark("1234567890", True)
+                self.assertIn("CreateBookmark", run.call_args[0][0])
+            with answer({"errors": [{"message": "You have already bookmarked this Tweet."}]}):
+                x.x_bookmark("1234567890", True)
+            with answer({"errors": [{"message": "_Missing: Tweet record for tweetId: '1234567890' not found"}]}):
+                x.x_bookmark("1234567890", False)
+                with self.assertRaises(LookupError):
+                    x.x_bookmark("1234567890", True)
+            with answer({"errors": [{"message": "Could not authenticate you"}]}, 401), self.assertRaises(LookupError):
+                x.x_bookmark("1234567890", False)
+            with self.assertRaises(ValueError):
+                x.x_bookmark("12; rm", True)
+
+
 class History(unittest.TestCase):
     def test_entries(self):
         from webapp import history

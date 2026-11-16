@@ -163,8 +163,10 @@ function postCard(p, opened) {
       const y = p.sync || {}, k = p.keep || {};
       const kept = !p.saved ? "" : k.status === "done" ? "kept in full quality" : k.status === "failed" ? `not kept: ${k.error || "?"}`
         : k.status ? "keeping a full-quality copy…" : "";
-      const site = p.source === "e621" ? "e621" : "Reddit";
-      note.textContent = [y.status === "failed" ? y.error || `${site} didn't take it` : y.status === "done" ? (p.saved ? (p.source === "e621" ? "favorited on e621 too" : "saved on Reddit too") : p.source === "e621" ? "unfavorited on e621" : "") : "",
+      const site = { e621: "e621", x: "X" }[p.source] || "Reddit";
+      const done = p.saved ? { e621: "favorited on e621 too", x: "bookmarked on X too" }[p.source] || "saved on Reddit too"
+        : { e621: "unfavorited on e621", x: "bookmark taken off X" }[p.source] || "";
+      note.textContent = [y.status === "failed" ? y.error || `${site} didn't take it` : y.status === "done" ? done : "",
                           kept].filter(Boolean).join(" · ");
     };
     sv.onclick = async () => {

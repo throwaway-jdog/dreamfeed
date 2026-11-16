@@ -98,6 +98,8 @@ services:
       BROWSER_POWER_DIR: /data/browser-power     # where it asks for the browser to start or stop (browserpower/)
       BROWSER_SCREEN: dreamfeed-browser:5800     # the browser's page, to tell when it's up
       X_RELATED_QUERY: ${X_RELATED_QUERY:-}      # X's "more videos" call id, when X changes it (empty: the known one)
+      X_CREATE_BOOKMARK_QUERY: ${X_CREATE_BOOKMARK_QUERY:-}   # X's bookmark calls' ids (Save on an X post), when X changes them
+      X_DELETE_BOOKMARK_QUERY: ${X_DELETE_BOOKMARK_QUERY:-}
       RANDOM_SUBREDDITS_URL: ${RANDOM_SUBREDDITS_URL:-}   # Browse's 🎲: a list of subreddit names, one a line (empty: off)
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID-}
       REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET-}
