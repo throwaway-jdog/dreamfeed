@@ -217,6 +217,93 @@ class ComicLists(unittest.TestCase):
         self.assertEqual(d["tag"], {"tag": "big_tits", "name": "Big Tits", "site": "multporn"})
 
 
+class ComicDetails(unittest.TestCase):
+    """A multporn comic's details (each a link to its list), its comments (threaded; minors left
+    out), gay comics apart, and the lists they open: what's asked is checked first."""
+    PAGE = ('<h1 class="title" id="page-title"> A &amp; B </h1>'
+            '<div class="field field-name-field-author field-type-taxonomy-term-reference field-label-inline clearfix"><h3 class="field-label">Author: </h3>'
+            '<ul class="links inline"><li><a href="/authors_comics/some-one">Some One</a></li></ul></div>'
+            '<div class="field field-name-field-com-group field-type-taxonomy-term-reference field-label-inline clearfix"><h3>Section: </h3>'
+            '<ul class="links inline"><li><a href="/comics/pokemon">Pokemon</a></li></ul></div>'
+            '<div class="field field-name-field-com-pages field-type-image"></div>'
+            '<div class="field field-name-field-characters field-type-taxonomy-term-reference clearfix"><ul class="links inline"><li><a href="/characters/nicole">Nicole</a></li></ul></div>'
+            '<div class="field field-name-field-category field-type-taxonomy-term-reference clearfix"><ul class="links inline"><li><a href="/category/cum_swallow">Cum Swallow</a></li></ul></div>'
+            '<div class="field field-name-field-user-tags field-type-taxonomy-term-reference clearfix"><ul class="links inline"><li><a href="/user_tags/mind_break_tag">Mind Break</a></li></ul></div>'
+            "<div class='usr-dis-item'> <div class='usr-dis-text'> <h3>Line one<br/>line two</h3></div></div>"
+            '<div class="clearfix fivestar-average-text"> Average: <span>4.7</span> ( <span>7572</span> votes) </div>'
+            '<li class="statistics_counter first last"><span>8315233 views</span></li>'
+            '{comments}<form id="comment-form"></form>')
+    C = ('<a id="comment-{n}"></a> <div id="post-{n}" class="forum-post"> <div class="forum-posted-on onn"> Tue, 17/11/2026 - 16:05 </div>'
+         '<a href="/users/u" class="username">{who}</a> <div class="field field-name-comment-body"><div class="field-items"><div class="field-item even"><p>{text}</p> </div></div></div>'
+         '<div class="rate-number-up-down-rating positive">4.1</div> </div>')
+
+    def _page(self):
+        c = self.C
+        return self.PAGE.format(comments=c.format(n=1, who="Ann", text="Good &amp; long<br>really") + '<div class="indented">'
+                                + c.format(n=2, who="Bo", text="a reply") + c.format(n=3, who="Cy", text="loli please") + "</div>"
+                                + c.format(n=4, who="Di", text="top again") + '<ul class="pager"><li class="pager-next"><a href="?page=0%2C0%2C0%2C1">next</a></li></ul>')
+
+    def test_details_and_comments(self):
+        from dreamfeed.feed import comics
+        s = self._page()
+        a = comics._mp_about(s)
+        self.assertEqual(a["author"], [{"list": "author", "slug": "some-one", "name": "Some One"}])
+        self.assertEqual(a["section"], [{"list": "section", "slug": "pokemon", "name": "Pokemon"}])
+        self.assertEqual([x["list"] for k in ("characters", "tags", "usertags") for x in a[k]], ["character", "tag", "usertag"])
+        cm = comics._mp_comments(s)
+        self.assertEqual([(x["id"], x["depth"]) for x in cm["comments"]], [("1", 0), ("2", 1), ("4", 0)], "threaded; one about minors left out")
+        self.assertEqual(cm["comments"][0]["text"], "Good & long\nreally")
+        self.assertEqual(cm["comments"][0]["at"], "2026-11-17 16:05:00")
+        self.assertEqual(cm["comments"][0]["score"], 4.1)
+        self.assertTrue(cm["more"])
+        from unittest import mock
+        with mock.patch.object(comics, "_mp_html", lambda kind, slug, q="": s), mock.patch.object(comics, "_cached", lambda k, f, t: f()):
+            c = comics.multporn_comic("a_b", "gay_porn_comics")
+        self.assertEqual((c["id"], c["title"], c["artists"], c["views"]), ("mpg:a_b", "A & B", ["Some One"], 8315233))
+        self.assertEqual(c["rating"], {"average": 4.7, "votes": 7572})
+        self.assertEqual(c["description"], "Line one\nline two")
+        self.assertIn("cum swallow", c["tags"])
+        bad = s.replace("Pokemon", "Shota stuff")
+        with mock.patch.object(comics, "_mp_html", lambda kind, slug, q="": bad), mock.patch.object(comics, "_cached", lambda k, f, t: f()):
+            with self.assertRaises(LookupError):
+                comics.multporn_comic("a_b")
+
+    def test_cards_both_kinds(self):
+        from dreamfeed.feed import comics
+        row = ('<div class="views-field views-field-title"> <strong class="field-content"><a href="/{kind}/{slug}">{slug}</a></strong> </div>'
+               ' <div class="views-field views-field-field-author"> <h5 class="field-content">Meesh</h5> </div>')
+        page = row.format(kind="comics", slug="one") + row.format(kind="gay_porn_comics", slug="two") + "<h2>More comics:</h2>" + row.format(kind="comics", slug="random")
+        got = comics._mp_cards(page)
+        self.assertEqual([(c["id"], c["artists"], c["link"]) for c in got],
+                         [("mp:one", ["Meesh"], "https://multporn.net/comics/one"), ("mpg:two", ["Meesh"], "https://multporn.net/gay_porn_comics/two")],
+                         "both kinds; not the random ones a page ends with")
+
+    def test_lists(self):
+        from unittest import mock
+        from dreamfeed.feed import comics as live
+        from webapp import comics
+        asked = []
+        def get(url):
+            asked.append(url)
+            return '<h1 class="title"> Some One </h1> page=0%2C1"'
+        with mock.patch.object(live, "_mp_get", get), mock.patch.object(live, "_cached", lambda k, f, t: f()):
+            d = comics.browse("author", 0, "some-one", "popular")
+            self.assertEqual(d["tag"], {"tag": "some-one", "name": "Some One", "site": "multporn", "list": "author"})
+            self.assertTrue(asked[0].startswith("https://multporn.net/authors_comics/some-one?sort_by=totalcount&sort_order=DESC&page=0%2C0"))
+            for which, path in (("section", "comics"), ("gsection", "gay_porn_comics"), ("character", "characters"), ("usertag", "user_tags"), ("gtag", "category_gay")):
+                live.multporn_list(which, 0, "x_y", "new")
+                self.assertTrue(asked[-1].startswith(f"https://multporn.net/{path}/x_y?"), which)
+        for bad in (("author", "../x"), ("section", "a/b"), ("character", "loli"), ("usertag", "cub_tag"), ("nope", "x")):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                live.multporn_list(bad[0], 0, bad[1])
+        for bad in (("author", 0, "x", "new", "e621"), ("section", 0, "", "new", "multporn")):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                comics.browse(*bad)
+        for bad in ("e621:1", "mp:../x", "mpx:a"):
+            with self.assertRaises(ValueError, msg=bad):
+                comics.comments(bad, 1)
+
+
 class Cache(unittest.TestCase):
     """The Feed's page cache: an old page is shown while it's read again; one reading at a time."""
     def test_stale_then_fresh(self):

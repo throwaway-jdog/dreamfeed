@@ -7,8 +7,11 @@ These are drawn: a comic is left out when its tags, categories or title are abou
 (safety.drawn_words: e621's tags for them, young, cub ..., and minors-only words), or your e621
 blacklist hides its cover. No picture is looked at.
 
-A comic: {"id" ("e621:POOL" or "mp:SLUG"), "source", "title", "pages", "cover", "tags", "updated"
-(when it last changed, as the site says), "link"}.
+A comic: {"id" ("e621:POOL", "mp:SLUG", or "mpg:SLUG" for one of multporn's gay comics, which it
+keeps apart), "source", "title", "pages", "cover", "tags", "artists", "updated" (when it last
+changed, as the site says), "link"}. Read, a multporn comic also has its details as links to their
+lists ("about": author, section, characters, tags, user tags), its rating, views, description,
+translations, and its first page of comments.
 """
 import datetime as dt
 import html
@@ -132,11 +135,21 @@ SORTS = {"new": (("created", "DESC"), "order:id"), "popular": (("totalcount", "D
          "top": (("value", "DESC"), "order:favcount")}
 
 
+# multporn's two kinds of comic (its gay comics are kept apart, with their own sections and tags)
+MP_KINDS = {"mp": "comics", "mpg": "gay_porn_comics"}
+MP_PREFIX = {v: k for k, v in MP_KINDS.items()}
+# multporn's lists, beyond New and Updated: what a comic's details link to (its own address there)
+MP_LISTS = {"tag": "category", "gtag": "category_gay", "author": "authors_comics", "section": "comics",
+            "gsection": "gay_porn_comics", "character": "characters", "usertag": "user_tags"}
+MP_LINK = {v: k for k, v in MP_LISTS.items() if k not in ("section", "gsection")}
+
+
 def _mp_cards(s: str) -> list[dict]:
     """The comics on one of multporn's lists (New, Updated comics, a tag's page), in order."""
     out = []
-    parts = re.split(r'views-field-title"> <strong class="field-content"><a href="/comics/', s)
-    for row in parts[1:]:
+    s = s.split("More comics:", 1)[0]          # (not the random ones a page ends with)
+    parts = re.split(r'views-field-title"> <strong class="field-content"><a href="/(comics|gay_porn_comics)/', s)
+    for kind, row in zip(parts[1::2], parts[2::2]):
         t = re.match(r'([a-z0-9_-]+)(?:\?[^"]*)?">([^<]+)</a>', row)   # (some links carry a query: ?rule44=4)
         if not t:
             continue
@@ -146,36 +159,49 @@ def _mp_cards(s: str) -> list[dict]:
         if blocked(title, about):
             continue
         day = re.search(r"Date: </span> <span>(\d\d)/(\d\d)/(\d{4}) - (\d\d:\d\d)", row)
-        out.append({"id": f"mp:{t.group(1)}", "source": "multporn", "title": title, "pages": None, "cover": img.group(1) if img else None,
+        by = re.search(r'views-field-field-author"> <h5 class="field-content">([^<]+)</h5>', row)
+        out.append({"id": f"{MP_PREFIX[kind]}:{t.group(1)}", "source": "multporn", "title": title, "pages": None, "cover": img.group(1) if img else None,
+                    "artists": [html.unescape(by.group(1)).strip()] if by else [],
                     "tags": [w.strip().lower() for w in re.split(r",| on ", about.split("comics", 1)[-1]) if w.strip()][:8],
-                    "updated": None, "posted": f"{day[3]}-{day[2]}-{day[1]} {day[4]}:00" if day else None, "link": f"{MULTPORN}/comics/{t.group(1)}"})
+                    "updated": None, "posted": f"{day[3]}-{day[2]}-{day[1]} {day[4]}:00" if day else None, "link": f"{MULTPORN}/{kind}/{t.group(1)}"})
     seen = set()
     return [c for c in out if not (c["id"] in seen or seen.add(c["id"]))]
 
 
 def multporn_list(which: str, page: int = 0, tag: str = "", sort: str = "new") -> dict:
-    """{"comics", "more"}: multporn's New comics, its Updated comics, or one tag's (category's) comics."""
+    """{"comics", "more", "name"?}: multporn's New comics, its Updated comics, or one of its lists
+    (MP_LISTS: a tag's comics, an author's, a section's, a character's, a user tag's; with its name)."""
     if not 0 <= page < 500 or sort not in SORTS:
         raise ValueError("bad page")
     if which == "new":
         url, nxt = f"{MULTPORN}/new?type=1&page={page}", f"page={page + 1}&"
     elif which == "updated":
         url, nxt = f"{MULTPORN}/updated_comics?page={page}", f"page={page + 1}\""
-    elif which == "tag" and MP_TAG.match(tag or ""):
-        if blocked(tag.replace("_", " ")):
+    elif which in MP_LISTS and (MP_TAG if which == "tag" else MP_SLUG).match(tag or ""):
+        if blocked(tag.replace("_", " ").replace("-", " ")):
             raise ValueError("not something to look for")
         by, order = SORTS[sort][0]
-        url, nxt = f"{MULTPORN}/category/{tag}?sort_by={by}&sort_order={order}&page=0%2C{page}", f"page=0%2C{page + 1}\""
+        url, nxt = f"{MULTPORN}/{MP_LISTS[which]}/{tag}?sort_by={by}&sort_order={order}&page=0%2C{page}", f"page=0%2C{page + 1}\""
     else:
         raise ValueError("bad list")
+    what = {"tag": "tag", "gtag": "tag", "author": "author", "character": "character", "usertag": "user tag"}.get(which, "section")
     def fetch():
         try:
             s = re.sub(r"\s+", " ", _mp_get(url))
         except LookupError as e:
             if "404" in str(e):
-                raise ValueError(f"multporn has no tag “{tag.replace('_', ' ')}”") from e
+                raise ValueError(f"multporn has no {what} “{tag.replace('_', ' ')}”") from e
             raise
-        return {"comics": _mp_cards(s), "more": nxt in s.replace("&amp;", "&")}
+        out = {"comics": _mp_cards(s), "more": nxt in s.replace("&amp;", "&")}
+        if which in MP_LISTS:
+            h1 = re.search(r"<h1[^>]*>([^<]+)</h1>", s)
+            name = html.unescape(h1.group(1)).strip() if h1 else ""
+            if which in ("section", "gsection") and 'field-name-field-com-pages' in s:
+                raise ValueError(f"multporn has no section “{tag.replace('_', ' ')}”")   # (a comic's address, not a section's)
+            if blocked(name):
+                raise ValueError("not something to look for")
+            out["name"] = name
+        return out
     return _cached(f"comics:mp:list:{which}:{tag}:{sort}:{page}", fetch, 900)
 
 
@@ -218,16 +244,80 @@ def e621_pools_tagged(tag: str, page: int = 0, sort: str = "new") -> dict:
     return _cached(f"comics:e621tag:{q}:{page}", fetch, 1800)
 
 
-def multporn_comic(slug: str) -> dict:
+def _mp_html(kind: str, slug: str, query: str = "") -> str:
+    """A multporn comic's own page (one of its comment pages, with a query), its spaces made single."""
+    if kind not in MP_PREFIX or not MP_SLUG.match(slug or ""):
+        raise ValueError("bad comic")
+    return _cached(f"comics:mp:html:{kind}:{slug}:{query}", lambda: re.sub(r"\s+", " ", _mp_get(f"{MULTPORN}/{kind}/{slug}{query}")), 600)
+
+
+def _text(h: str) -> str:
+    """Some of multporn's HTML as plain text (its lines kept)."""
+    h = re.sub(r"(?i)<br\s*/?>|</p>\s*<p[^>]*>", "\n", h)
+    return "\n".join(" ".join(x.split()) for x in html.unescape(re.sub(r"<[^>]+>", " ", h)).split("\n")).strip()
+
+
+def _mp_about(s: str) -> dict:
+    """A comic's details, each a link to its list here: {"author", "section", "characters", "tags", "usertags": [{"list", "slug", "name"}]}."""
+    out = {"author": [], "section": [], "characters": [], "tags": [], "usertags": []}
+    field = {"author": "author", "com-group": "section", "gay-com-group": "section", "characters": "characters",
+             "category": "tags", "gay-tags": "tags", "user-tags": "usertags"}
+    for m in re.finditer(r'<div class="field field-name-field-([a-z-]+) [^"]*field-type-taxonomy-term-reference[^"]*">(.*?)</ul>', s):
+        key = field.get(m.group(1))
+        if not key:
+            continue
+        for path, slug, name in re.findall(r'<a href="/([a-z_]+)/([a-z0-9_-]+)"[^>]*>([^<]+)</a>', m.group(2)):
+            lst = {"comics": "section", "gay_porn_comics": "gsection"}.get(path) or MP_LINK.get(path)
+            if lst and MP_SLUG.match(slug):
+                out[key].append({"list": lst, "slug": slug, "name": html.unescape(name).strip()})
+    return out
+
+
+def _mp_comments(s: str) -> dict:
+    """{"comments": [{"id", "user", "at", "text", "score", "depth"}], "more"}: one page of a comic's
+    comments, in multporn's order (a reply under the one it answers, a step in); one about minors left out."""
+    out = []
+    start = s.find('<a id="comment-')
+    if start >= 0:
+        end = s.find('id="comment-form"', start)
+        body = s[start:end if end > 0 else len(s)]
+        stack, depth_at = [], {}
+        for m in re.finditer(r'<div( class="indented")?[^>]*>|</div>|<a id="comment-(\d+)"></a>', body):
+            if m.group(2):
+                depth_at[m.group(2)] = sum(stack)
+            elif m.group(0) == "</div>":
+                if stack:
+                    stack.pop()
+            else:
+                stack.append(1 if m.group(1) else 0)
+        for m in re.finditer(r'<a id="comment-(\d+)"></a>(.*?)(?=<a id="comment-\d+"></a>|$)', body):
+            row = m.group(2)
+            text = re.search(r'field-name-comment-body.*?<div class="field-item even">(.*?)</div></div></div>', row)
+            text = _text(text.group(1)) if text else ""
+            if not text or blocked(text):
+                continue
+            who = re.search(r'class="username">([^<]+)<', row)
+            at = re.search(r'forum-posted-on[^>]*> (?:\w+, )?(\d\d)/(\d\d)/(\d{4}) - (\d\d:\d\d)', row)
+            score = re.search(r'rate-number-up-down-rating[^>]*>\s*(-?[\d.]+)', row)
+            out.append({"id": m.group(1), "user": html.unescape(who.group(1)).strip() if who else "Anonymous",
+                        "at": f"{at[3]}-{at[2]}-{at[1]} {at[4]}:00" if at else None, "text": text[:4000],
+                        "score": float(score.group(1)) if score else None, "depth": min(depth_at.get(m.group(1), 0), 6)})
+    return {"comments": out, "more": 'class="pager-next' in s}
+
+
+def multporn_comic(slug: str, kind: str = "comics") -> dict:
     """One multporn comic to read: its details (its categories as tags) and pages, in order."""
-    if not MP_SLUG.match(slug or ""):
+    if not MP_SLUG.match(slug or "") or kind not in MP_PREFIX:
         raise ValueError("bad comic")
     def fetch():
-        url = f"{MULTPORN}/comics/{slug}"
-        s = _mp_get(url)
+        url = f"{MULTPORN}/{kind}/{slug}"
+        s = _mp_html(kind, slug)
         title = html.unescape((re.search(r"<h1[^>]*>([^<]+)</h1>", s) or [0, slug])[1]).strip()
-        tags = [t.replace("_", " ") for t in dict.fromkeys(re.findall(r'href="/(?:category|tags|characters|section)/([a-z0-9_-]+)"', s))]
-        if blocked(title, *tags):
+        about = _mp_about(s)
+        if 'field-name-field-com-pages' not in s:
+            raise LookupError("multporn has no such comic")
+        tags = [x["name"].lower() for x in about["tags"] + about["characters"]]
+        if blocked(title, *tags, *(x["name"] for k in ("section", "usertags", "author") for x in about[k])):
             raise LookupError("dreamfeed leaves that comic out")
         cover = re.search(r'<meta property="og:image" content="([^"]+)"', s)
         cfg = re.search(r'configUrl":"([^"]+)"', s)
@@ -238,10 +328,35 @@ def multporn_comic(slug: str) -> dict:
                 full = re.sub(r"/styles/[^/]+/public/", "/", prev.split("?")[0])
                 if full.startswith(MULTPORN + "/"):
                     images.append({"url": prev if prev.startswith(MULTPORN + "/") else full, "full": full})
-        return {"id": f"mp:{slug}", "source": "multporn", "title": title, "pages": len(images), "images": images,
+        votes = re.search(r"Average:\s*([\d.]+)\s*\(\s*(\d+)\s*votes?", " ".join(re.sub(r"<[^>]+>", " ", s).split()))
+        views = re.search(r'statistics_counter[^>]*><span>(\d+) views', s)
+        said = [_text(d) for d in re.findall(r"<div class='usr-dis-text'> <h3>(.*?)</h3>", s)]
+        trans = [{"id": f"{MP_PREFIX[k]}:{t}", "lang": html.unescape(n).strip()}
+                 for k, t, n in re.findall(r'href=" ?https://multporn\.net/(comics|gay_porn_comics)/([a-z0-9_-]+)" ?>([^<]+)</a>',
+                                           (re.search(r'field-translate.*?</div>', s) or [""])[0])]
+        return {"id": f"{MP_PREFIX[kind]}:{slug}", "source": "multporn", "title": title, "pages": len(images), "images": images,
                 "cover": cover.group(1) if cover and cover.group(1).startswith(MULTPORN + "/") else (images[0]["url"] if images else None),
-                "tags": tags[:40], "updated": None, "link": url}
-    return _cached(f"comics:mp:{slug}", fetch, 600)
+                "tags": tags[:40], "artists": [x["name"] for x in about["author"]], "updated": None, "link": url,
+                "about": about, "rating": {"average": float(votes.group(1)), "votes": int(votes.group(2))} if votes else None,
+                "views": int(views.group(1)) if views else None,
+                "description": next((d for d in said if d and not blocked(d)), "")[:2000],
+                "translations": trans, "comments": _mp_comments(s)}
+    return _cached(f"comics:mp:{kind}:{slug}", fetch, 600)
+
+
+def multporn_comments(cid: str, page: int) -> dict:
+    """{"comments", "more"}: a page of a multporn comic's comments (multporn's pager: page=0,0,0,N)."""
+    src, _, slug = str(cid or "").partition(":")
+    if src not in MP_KINDS or not MP_SLUG.match(slug) or not 0 <= int(page) < 500:
+        raise ValueError("bad comic")
+    multporn_comic(slug, MP_KINDS[src])          # (one dreamfeed leaves out has no comments here either)
+    first = _mp_html(MP_KINDS[src], slug)
+    if page == 0:
+        return _mp_comments(first)
+    pager = re.search(rf'href="/{MP_KINDS[src]}/{slug}\?page=((?:\d+%2C)*)\d+"', first)
+    if not pager:
+        return {"comments": [], "more": False}
+    return _mp_comments(_mp_html(MP_KINDS[src], slug, f"?page={pager.group(1)}{page}"))
 
 
 def comic(cid: str) -> dict:
@@ -249,8 +364,8 @@ def comic(cid: str) -> dict:
     src, _, key = str(cid or "").partition(":")
     if src == "e621":
         return e621_comic(key)
-    if src == "mp":
-        return multporn_comic(key)
+    if src in MP_KINDS:
+        return multporn_comic(key, MP_KINDS[src])
     raise ValueError("bad comic")
 
 
@@ -261,4 +376,6 @@ def page_count(cid: str) -> int:
         if not POOL_ID.match(key):
             raise ValueError("bad comic")
         return int((e621.get(f"/pools/{key}.json", {}) or {}).get("post_count") or 0)
-    return int(multporn_comic(key)["pages"] or 0)
+    if src not in MP_KINDS:
+        raise ValueError("bad comic")
+    return int(multporn_comic(key, MP_KINDS[src])["pages"] or 0)

@@ -97,14 +97,22 @@ A feed like the rest, read live from e621's pools (its comics) and multporn, not
 - **Browse by tag**: multporn's tags (yours first, from what you read), or type one, on
   multporn or e621: that tag's comics, newest, most viewed or top rated (`/comics/tag/anal`,
   `/comics/tag/red_panda/e621`). A search that names a tag offers it.
+- **Info** in the reader, for a multporn comic: its author, section, characters, tags and user
+  tags, each opening its list here (an author's comics, a section's, a character's, a user
+  tag's; newest, most viewed or top rated: `/comics/author/harkart`, `/comics/section/pokemon`,
+  `/comics/character/…`, `/comics/usertag/…`), its rating, views, description, translations,
+  and its comments (replies under what they answer; More comments, page by page). multporn's gay
+  comics, which it keeps apart, read the same (`/comics/mpg/SLUG`, `/comics/gsection/…`,
+  `/comics/gtag/…`), and come up in its lists and search.
 - **Search** multporn or e621's comics by title, artist or character.
 - **Your comics**: the ones kept here before (imported, or made), still readable, renamed or
   deleted from their grid of pages. Those imported from multporn are followed there, so their new
   pages come in under Updated.
 
-Drawn work: a comic whose title, tags or categories have anything about minors (e621's tags
-for them, minors-only words) is left out; lists judge comics by their cover, and one
-that turns out to have such a page is refused when opened and left out after. No picture is
+Drawn work: a comic whose title, tags, categories, section, author or user tags have anything
+about minors (e621's tags for them, minors-only words) is left out, as are such lists and
+comments; lists judge comics by their cover, and one that turns out to have such a page is
+refused when opened and left out after. No picture is
 looked at. e621's pictures reach the page through dreamfeed (`/e621-media/`): e621 now turns away
 pictures a browser shows on another site.
 

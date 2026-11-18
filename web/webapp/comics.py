@@ -90,22 +90,24 @@ def comic_search(q: str, page: int, site: str = "multporn") -> dict:
         raise LookupError(f"multporn didn't answer ({e})")
     out = []
     for row in re.split(r'<div class="masonry-item views-row', page_html)[1:]:
-        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="/comics/([a-z0-9_-]+)(?:\?[^"]*)?">(.*?)</a>', row, re.S)
+        link = re.search(r'views-field-title">\s*<span class="field-content"><a href="/(comics|gay_porn_comics)/([a-z0-9_-]+)(?:\?[^"]*)?">(.*?)</a>', row, re.S)
         img = re.search(r'<img[^>]+src="(https://multporn\.net/sites/default/files/[^"]+)"', row)
         if not link:
             continue
-        title = html.unescape(re.sub(r"<[^>]+>", "", link.group(2))).strip()
+        kind, slug = link.group(1), link.group(2)
+        title = html.unescape(re.sub(r"<[^>]+>", "", link.group(3))).strip()
         if live.blocked(title):
             continue
         cover = html.unescape(img.group(1)) if img else None
-        out.append({"id": f"mp:{link.group(1)}", "source": "multporn", "title": title, "cover": cover,
+        out.append({"id": f"{live.MP_PREFIX[kind]}:{slug}", "source": "multporn", "title": title, "cover": cover,
                     "thumb": "comic-search/thumb?u=" + urllib.parse.quote(cover, safe="") if cover else None,
-                    "url": f"{MULTPORN}/comics/{link.group(1)}", "link": f"{MULTPORN}/comics/{link.group(1)}", "tags": []})
+                    "url": f"{MULTPORN}/{kind}/{slug}", "link": f"{MULTPORN}/{kind}/{slug}", "tags": []})
     return {"results": mutes.comics(out), "more": f"page={page + 1}" in page_html, "tags": tag_matches(q) if page == 0 else []}
 
 
-# ---- browse: multporn's New and Updated comics, a tag's comics (multporn's or e621's) ----
-LISTS = ("new", "updated", "tag")
+# ---- browse: multporn's New and Updated comics, a tag's comics (multporn's or e621's), and
+# multporn's other lists (an author's, a section's, a character's, a user tag's; its gay comics' tags and sections) ----
+LISTS = ("new", "updated", *live.MP_LISTS)
 
 
 def _refused() -> set:
@@ -117,29 +119,38 @@ def browse(which: str, page: int, tag: str = "", sort: str = "new", site: str = 
     """{"results": comic cards, "more", "tag"?}: one page of a list (two of multporn's, as its are short)."""
     if which not in LISTS or not 0 <= page < 200 or site not in ("multporn", "e621") or sort not in live.SORTS:
         raise ValueError("bad list")
-    if which == "tag":
+    if which in live.MP_LISTS:
         tag = " ".join(str(tag or "").lower().split())
         if not tag:
-            raise ValueError("pick a tag")
+            raise ValueError("pick a tag" if which == "tag" else "bad list")
     if site == "e621":
         if which != "tag":
             raise ValueError("bad list")
         got = live.e621_pools_tagged(tag, page, sort)
         found, more = got["comics"], got["more"]
     else:
-        slug = re.sub(r"[^a-z0-9]+", "_", tag).strip("_")
+        slug = re.sub(r"[^a-z0-9]+", "_", tag).strip("_") if which == "tag" else tag
         with ThreadPoolExecutor(max_workers=2) as pool:
             a, b = pool.map(lambda n: live.multporn_list(which, n, slug, sort), (2 * page, 2 * page + 1))
         seen = set()
         found = [c for c in a["comics"] + (b["comics"] if a["more"] else []) if not (c["id"] in seen or seen.add(c["id"]))]
         more = a["more"] and b["more"]
-        tag = slug
+        tag, name = slug, a.get("name")
     skip = _refused()
     out = {"results": [{**c, "thumb": cover_thumb(c.get("cover"))} for c in mutes.comics(found) if c["id"] not in skip], "more": more}
     if which == "tag":
         names = {t["tag"]: t["name"] for t in _tags_or_none() or []} if site == "multporn" else {}
         out["tag"] = {"tag": tag, "name": names.get(tag) or tag.replace("_", " "), "site": site}
+    elif which in live.MP_LISTS:
+        out["tag"] = {"tag": tag, "name": name or tag.replace("_", " "), "site": site, "list": which}
     return out
+
+
+def comments(cid: str, page: int) -> dict:
+    """{"comments", "more"}: a page of a multporn comic's comments (the first comes with the comic)."""
+    if not re.fullmatch(r"mpg?:[a-z0-9_-]{1,120}", str(cid or "")) or not 0 <= page < 500:
+        raise ValueError("bad comic")
+    return live.multporn_comments(cid, page)
 
 
 def _tags_or_none() -> list[dict] | None:
@@ -228,7 +239,7 @@ def progress(req: dict) -> dict:
         page = int(req.get("page"))
     except (TypeError, ValueError):
         raise ValueError("bad page")
-    if not re.fullmatch(r"(?:e621:\d{1,9}|mp:[a-z0-9_-]{1,120})", cid) or not 1 <= page <= 1000:
+    if not re.fullmatch(r"(?:e621:\d{1,9}|mpg?:[a-z0-9_-]{1,120})", cid) or not 1 <= page <= 1000:
         raise ValueError("bad page")
     with _conn() as conn:
         conn.execute("UPDATE comic_reads SET page = ?, furthest = max(furthest, ?), last_at = ? WHERE id = ?", (page, page, time.time(), cid))
@@ -239,7 +250,7 @@ def progress(req: dict) -> dict:
 def follow(req: dict) -> dict:
     """{"id", "follow": bool}: its new pages come in Updated."""
     cid = str(req.get("id", ""))
-    if not re.fullmatch(r"(?:e621:\d{1,9}|mp:[a-z0-9_-]{1,120})", cid):
+    if not re.fullmatch(r"(?:e621:\d{1,9}|mpg?:[a-z0-9_-]{1,120})", cid):
         raise ValueError("bad comic")
     with _conn() as conn:
         if req.get("follow"):

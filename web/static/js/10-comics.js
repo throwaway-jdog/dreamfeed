@@ -3,7 +3,11 @@
    multporn's New and Updated comics, Browse by tag (multporn's or e621's), For you (from what you read and follow here, and your e621 taste: each says why), Following,
    search (multporn, e621), and Your comics (kept here before). Read in the reader: live ones
    straight from the site, page by page; where you are is remembered, and Follow brings their new
-   pages back here. Addresses: comics, comics/new, comics/updated, comics/tag/TAG[/e621], comics/e621/POOL, comics/mp/SLUG, comics/N (yours). */
+   pages back here. A multporn comic's Info: its author, section, characters, tags and user tags
+   (each opens its list here), rating, views, description, translations, comments.
+   Addresses: comics, comics/new, comics/updated, comics/tag/TAG[/e621], comics/LIST/SLUG (multporn's
+   lists: author, section, character, usertag, and gtag, gsection for its gay comics),
+   comics/e621/POOL, comics/mp/SLUG, comics/mpg/SLUG (a gay one), comics/N (yours). */
 const cf = { offset: 0, more: false, q: "", page: 0, site: "multporn", loading: false, gen: 0 };
 try { const s = localStorage.getItem("comicSite"); if (["multporn", "e621"].includes(s)) cf.site = s; } catch {}
 $("cs-site").value = cf.site;
@@ -13,7 +17,8 @@ function comicCard(c, extra) {
   const img = el("img"); img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
   if (c.thumb || c.cover) img.src = viaUs(c.thumb || c.cover); else if (typeof c.id === "number") img.src = `comic/${c.id}/1/thumb`;
   b.append(img, el("b", null, c.title || "Untitled"));
-  const about = [c.source === "e621" ? "e621" : c.source === "multporn" ? "multporn" : "", c.pages && `${c.pages} pages`, extra].filter(Boolean).join(" · ");
+  const by = (c.artists || [])[0];
+  const about = [c.source === "e621" ? "e621" : c.source === "multporn" ? "multporn" : "", by && `by ${by}`, c.pages && `${c.pages} pages`, extra].filter(Boolean).join(" · ");
   if (about) b.append(el("small", null, about));
   if (c.why) b.append(el("small", "why", c.why));
   b.onclick = () => openComic(c);
@@ -22,6 +27,11 @@ function comicCard(c, extra) {
 function openComic(c) { nav.comics = nav.comics || new Map(); nav.comics.set(String(c.id), c); go(comicPath(c)); }
 // What the grid shows: For you, a search, or a list (multporn's New or Updated, a tag's comics).
 const C_LIST = { new: "New on multporn", updated: "Updated on multporn" };
+// multporn's other lists, each a comic's detail (and its own address: comics/LIST/SLUG)
+const MP_LISTS = { author: "Comics by", section: "Section", gsection: "Gay section", character: "Character", usertag: "User tag", gtag: "Gay tag" };
+const listPath = (list, slug) => `comics/${list}/${encodeURIComponent(slug)}`;
+const listTitle = l => l.list === "tag" ? `${l.name || l.tag.replace(/_/g, " ")}${l.site === "e621" ? " on e621" : ""}`
+  : MP_LISTS[l.list] ? `${MP_LISTS[l.list]}${l.list === "author" ? " " : ": "}${l.name || l.tag.replace(/_/g, " ")}` : C_LIST[l.list];
 const C_SORT = { multporn: ["Newest", "Most viewed", "Top rated"], e621: ["Newest", "Top score", "Most favorited"] };
 const gridMode = () => cf.list ? "list" : cf.q ? "search" : "foryou";
 async function loadComics(more) {
@@ -29,11 +39,10 @@ async function loadComics(more) {
   if (cf.loading && more) return;
   cf.loading = true; $("cg-more").hidden = true;
   const mode = gridMode(), l = cf.list, home = mode === "foryou";
-  $("cg-title").textContent = mode === "search" ? `“${cf.q}” on ${cf.site}` : !l ? "For you"
-    : l.list === "tag" ? `${l.name || l.tag.replace(/_/g, " ")}${l.site === "e621" ? " on e621" : ""}` : C_LIST[l.list];
+  $("cg-title").textContent = mode === "search" ? `“${cf.q}” on ${cf.site}` : !l ? "For you" : listTitle(l);
   $("cg-back").hidden = home; $("cg-back").textContent = mode === "search" ? "Back to For you" : "Back to comics";
-  $("cg-bar").hidden = !(l && l.list === "tag");
-  if (l && l.list === "tag") { $("cg-sort").value = l.sort; [...$("cg-sort").options].forEach((o, i) => o.textContent = C_SORT[l.site][i]); }
+  $("cg-bar").hidden = !(l && !C_LIST[l.list]);
+  if (l && !C_LIST[l.list]) { $("cg-sort").value = l.sort; [...$("cg-sort").options].forEach((o, i) => o.textContent = C_SORT[l.site][i]); }
   for (const s of ["cu-sec", "cc-sec", "cf-sec", "cl-sec", "cn-sec", "cw-sec"]) if (!home) $(s).hidden = true;
   $("ct-sec").hidden = !home;
   if (!more) {
@@ -62,7 +71,7 @@ async function loadComics(more) {
   if (!more && mode === "search" && (d.tags || []).length) {   // the search names a tag: browse it
     $("cg-tags").replaceChildren(...d.tags.map(t => tagChip(t, "multporn", `Browse the tag ${t.name}`))); $("cg-tags").hidden = false;
   }
-  if (!more && mode === "list" && d.tag && d.tag.name) { l.name = d.tag.name; $("cg-title").textContent = `${d.tag.name}${l.site === "e621" ? " on e621" : ""}`; }
+  if (!more && mode === "list" && d.tag && d.tag.name) { l.name = d.tag.name; $("cg-title").textContent = listTitle(l); }
   $("cg").append(...list.map(c => comicCard(c, c.posted && l && l.list === "new" ? ago(c.posted) : "")));
   const t = d.taste || {};
   $("cg-note").textContent = mode !== "foryou" ? (!$("cg").children.length ? "Nothing found." : "")
@@ -115,7 +124,8 @@ $("ct-form").onsubmit = e => {
 // comics, comics/new, comics/updated, comics/tag/TAG[/e621]; or one comic (comics/e621/POOL, comics/mp/SLUG, comics/N)
 function showComicsAt(b, c, rest) {
   const list = b === "new" || b === "updated" ? { list: b, tag: "", site: "multporn" }
-    : b === "tag" && c ? { list: "tag", tag: c, site: rest[0] === "e621" ? "e621" : "multporn" } : null;
+    : b === "tag" && c ? { list: "tag", tag: c, site: rest[0] === "e621" ? "e621" : "multporn" }
+    : MP_LISTS[b] && c ? { list: b, tag: c, site: "multporn" } : null;
   if (b && !list) { setView("comics"); return showComicId(b, c); }
   const key = l => l ? `${l.list}:${l.tag}:${l.site}` : "";
   const same = key(list) === key(cf.list);
@@ -142,10 +152,12 @@ $("cg-more").onclick = () => loadComics(true);
 $("cg-back").onclick = () => { if (cf.list) return go("comics"); cf.q = ""; $("cs-q").value = ""; loadComics(); };
 
 // The reader: one page a screen (swipe, arrows), or a grid of every page.
-const rd = { c: null, page: 1, grid: false, wraps: [], timer: null };
+const rd = { c: null, page: 1, grid: false, info: false, wraps: [], timer: null, cm: null };
 const pageSrc = (c, n, thumb) => c.images ? viaUs((c.images[n - 1] || {}).url) : `comic/${c.id}/${n}${thumb ? "/thumb" : ""}`;
 function showComic(c) {
-  Object.assign(rd, { c, page: Math.max(1, Math.min(c.page || 1, c.images ? c.images.length : c.pages)), grid: false });
+  Object.assign(rd, { c, page: Math.max(1, Math.min(c.page || 1, c.images ? c.images.length : c.pages)), grid: false, info: false,
+                      cm: c.comments ? { list: c.comments.comments || [], more: !!c.comments.more, page: 0, loading: false } : null });
+  $("reader-info").hidden = !c.about;
   $("reader-title").textContent = c.title || "Untitled";
   const live = !!c.images;
   $("reader-follow").hidden = !live; $("reader-open").hidden = !live || !c.link;
@@ -165,7 +177,7 @@ $("reader-follow").onclick = async () => {
 };
 function closeComic() {
   if (rd.c && rd.c.images) sendProgress();
-  clearTimeout(rd.timer); $("reader").hidden = true; rd.c = null; $("rd-track").replaceChildren(); $("rd-grid").replaceChildren();
+  clearTimeout(rd.timer); $("reader").hidden = true; rd.c = null; rd.cm = null; $("rd-track").replaceChildren(); $("rd-grid").replaceChildren(); $("rd-about").replaceChildren(); $("rd-cmts").replaceChildren();
   if (state.view === "comics" && gridMode() === "foryou") loadComics();
 }
 const pageCount = () => rd.c.images ? rd.c.images.length : rd.c.pages;
@@ -215,11 +227,57 @@ $("rd-track").addEventListener("scroll", () => {   // a swipe moved the page: ke
 $("rd-prev").onclick = () => goTo(rd.page - 1);
 $("rd-next").onclick = () => goTo(rd.page + 1);
 function showView() {
-  const g = rd.grid;
-  $("rd-track").hidden = g; $("rd-grid").hidden = !g; $("rd-foot").hidden = g;
+  const i = rd.info, g = rd.grid && !i;
+  $("rd-track").hidden = g || i; $("rd-grid").hidden = !g; $("rd-info").hidden = !i; $("rd-foot").hidden = g || i;
   $("reader-view").textContent = g ? "Pages" : "Grid"; $("reader-view").setAttribute("aria-pressed", String(g));
+  $("reader-info").textContent = i ? "Pages" : "Info"; $("reader-info").setAttribute("aria-pressed", String(i));
   if (g) buildGrid();
+  if (i) buildInfo();
 }
+// A multporn comic's Info: what it's filed under (each opens its list), how it's rated, its comments
+function buildInfo() {
+  const c = rd.c, a = c.about || {}, box = $("rd-about"); box.replaceChildren();
+  box.append(el("h2", null, c.title || "Untitled"));
+  const n = x => x.toLocaleString("en");
+  const facts = [c.rating && `★ ${c.rating.average.toFixed(1)} (${n(c.rating.votes)} vote${c.rating.votes === 1 ? "" : "s"})`,
+    c.views != null && `${n(c.views)} views`, `${pageCount()} pages`].filter(Boolean);
+  box.append(el("p", "note", facts.join(" · ")));
+  if (c.description) box.append(el("p", "rd-desc", c.description));
+  const row = (label, items) => {
+    if (!items.length) return;
+    const chips = el("div", "chips");
+    chips.append(...items.map(([name, open, title]) => { const b = el("button", "chip", name); b.type = "button"; if (title) b.title = title; b.onclick = open; return b; }));
+    box.append(el("h3", null, label), chips);
+  };
+  for (const [key, label] of [["author", "Author"], ["section", "Section"], ["characters", "Characters"], ["tags", "Tags"], ["usertags", "User tags"]])
+    row(label, (a[key] || []).map(x => [x.name, () => go(listPath(x.list, x.slug)), key === "author" ? `All of ${x.name}'s comics` : `All comics in ${x.name}`]));
+  row("Translations", (c.translations || []).map(t => [t.lang, () => openComic({ id: t.id, title: c.title })]));
+  showComments();
+}
+function showComments() {
+  const cm = rd.cm, list = $("rd-cmts");
+  list.replaceChildren(...(cm ? cm.list : []).map(x => {
+    const d = el("article", "rd-cmt"); d.style.setProperty("--d", String(x.depth || 0));
+    const head = el("header"); head.append(el("b", null, x.user || "Anonymous"));
+    if (x.at) head.append(el("small", null, ago(x.at) || x.at.slice(0, 10)));
+    if (x.score) head.append(el("small", null, `${x.score > 0 ? "+" : ""}${x.score}`));
+    d.append(head, el("p", null, x.text)); return d;
+  }));
+  if (!list.children.length) list.append(el("p", "note", "No comments yet."));
+  $("rd-cmt-more").hidden = !(cm && cm.more); $("rd-cmt-more").disabled = !!(cm && cm.loading);
+}
+async function moreComments() {
+  const c = rd.c, cm = rd.cm; if (!c || !cm || cm.loading) return;
+  cm.loading = true; showComments();
+  try {
+    const d = await api(`api/comics/comments?id=${encodeURIComponent(c.id)}&page=${cm.page + 1}`);
+    if (rd.cm !== cm) return;
+    cm.page++; cm.list.push(...(d.comments || []).filter(x => !cm.list.some(y => y.id === x.id))); cm.more = !!d.more;
+  } catch (err) { toast(err.message); }
+  cm.loading = false; if (rd.cm === cm) showComments();
+}
+$("rd-cmt-more").onclick = moreComments;
+$("reader-info").onclick = () => { rd.info = !rd.info; showView(); if (!rd.info && !rd.grid) goTo(rd.page, true); };
 function buildGrid() {
   const c = rd.c, grid = $("rd-grid"); grid.replaceChildren();
   for (let n = 1; n <= pageCount(); n++) {
@@ -245,10 +303,10 @@ function buildGrid() {
   }
   grid.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "center" });
 }
-$("reader-view").onclick = () => { rd.grid = !rd.grid; showView(); if (!rd.grid) goTo(rd.page, true); };
+$("reader-view").onclick = () => { rd.grid = rd.info ? true : !rd.grid; rd.info = false; showView(); if (!rd.grid) goTo(rd.page, true); };
 $("reader-close").onclick = leave;
 document.addEventListener("keydown", e => {
-  if ($("reader").hidden || rd.grid) return;
+  if ($("reader").hidden || rd.grid || rd.info) return;
   if (e.key === "ArrowLeft") goTo(rd.page - 1); else if (e.key === "ArrowRight") goTo(rd.page + 1); else if (e.key === "Escape") leave();
 });
 // a comic by its address: one of yours (comics/N), or live (comics/e621/POOL, comics/mp/SLUG)
@@ -262,7 +320,7 @@ async function showComicId(a, b) {
       if (here() === want) showComic(c);
       return;
     }
-    if (!["e621", "mp"].includes(a) || !b) return go("comics", true);
+    if (!["e621", "mp", "mpg"].includes(a) || !b) return go("comics", true);
     const known = (nav.comics || new Map()).get(`${a}:${b}`);
     if (known) { $("reader-title").textContent = known.title || ""; }
     const c = await api(`api/comics/read?id=${encodeURIComponent(`${a}:${b}`)}`);
